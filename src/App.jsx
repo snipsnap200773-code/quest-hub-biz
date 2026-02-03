@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
-import { WifiOff } from 'lucide-react'; // オフラインアイコン用
+import { WifiOff } from 'lucide-react';
 
-// 既存のインポート
+// 既存のインポート（省略なし）
 import Home from './pages/Home';
 import ReservationForm from './pages/ReservationForm';
 import AdminDashboard from './pages/AdminDashboard';
@@ -16,21 +16,26 @@ import ShopList from './pages/ShopList';
 import AdminManagement from './pages/AdminManagement';
 import ShopDetail from './pages/ShopDetail';
 
-// 🆕 QUEST HUB 用の個別設定ページ
+// 🆕 QUEST HUB 個別設定ページ
 import BasicSettings from './pages/admin/settings/BasicSettings';
-import MenuSettings from './pages/admin/settings/MenuSettings'; // 次に作るページ
+import MenuSettings from './pages/admin/settings/MenuSettings';
+import ScheduleSettings from './pages/admin/settings/ScheduleSettings';
+import LineSettings from './pages/admin/settings/LineSettings';
+import GeneralSettings from './pages/admin/settings/GeneralSettings';
+
+// ✨ 案内人（ガイド）三銃士
+import BasicSettingsGuide from './pages/admin/settings/BasicSettingsGuide';
+import MenuSettingsGuide from './pages/admin/settings/MenuSettingsGuide';
+import ScheduleSettingsGuide from './pages/admin/settings/ScheduleSettingsGuide'; // ✅ 忘れずに追加！
 
 function App() {
-  // 🛰️ ネットワーク状態の監視ステート
   const [isOnline, setIsOnline] = useState(navigator.onLine);
 
   useEffect(() => {
     const handleOnline = () => setIsOnline(true);
     const handleOffline = () => setIsOnline(false);
-
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
-
     return () => {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
@@ -39,35 +44,35 @@ function App() {
 
   return (
     <Router>
-      {/* 📡 オフラインバナー：ネットが切れた時に上部に表示 */}
       {!isOnline && (
-        <div style={{
-          position: 'fixed', top: 0, left: 0, right: 0, zIndex: 9999,
-          background: '#ef4444', color: 'white', textAlign: 'center',
-          padding: '8px', fontSize: '14px', fontWeight: 'bold',
-          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px'
-        }}>
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, zIndex: 9999, background: '#ef4444', color: 'white', textAlign: 'center', padding: '8px', fontSize: '14px', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
           <WifiOff size={16} /> ネットワークが不安定です。一部の機能が制限される可能性があります。
         </div>
       )}
 
       <Routes>
-        {/* ==========================================
-            🚀 ワイド表示・管理エリア
-            ========================================== */}
+        {/* --- 🚀 管理エリア --- */}
         <Route path="/admin/:shopId/management" element={<AdminManagement />} />
         <Route path="/super-admin-216-midote-snipsnap-dmaaaahkmm" element={<SuperAdmin />} />
+        
         <Route path="/admin/:shopId" element={<AdminDashboard />} />
         <Route path="/admin/:shopId/dashboard" element={<AdminDashboard />} />
         <Route path="/admin/:shopId/reservations" element={<AdminReservations />} />
 
-        {/* 🆕 QUEST HUB 個別設定ルート */}
+        {/* --- 🆕 QUEST HUB ルート（整理済み） --- */}
+        {/* 通常設定 */}
         <Route path="/admin/:shopId/settings/basic" element={<BasicSettings />} />
         <Route path="/admin/:shopId/settings/menu" element={<MenuSettings />} />
+        <Route path="/admin/:shopId/settings/schedule" element={<ScheduleSettings />} />
+        <Route path="/admin/:shopId/settings/line" element={<LineSettings />} />
+        <Route path="/admin/:shopId/settings/general" element={<GeneralSettings />} />
 
-        {/* ==========================================
-            📱 ユーザーエリア（スマホサイズ制限コンテナ）
-            ========================================== */}
+        {/* 召喚された案内人（ガイド）用 ✅ 整理 */}
+        <Route path="/admin/:shopId/settings/basic-guide" element={<BasicSettingsGuide />} />
+        <Route path="/admin/:shopId/settings/menu-guide" element={<MenuSettingsGuide />} />
+        <Route path="/admin/:shopId/settings/schedule-guide" element={<ScheduleSettingsGuide />} />
+
+        {/* --- 📱 ユーザーエリア --- */}
         <Route path="*" element={
           <div className="mobile-container" style={{ margin: '0 auto', maxWidth: '480px', minHeight: '100vh', position: 'relative' }}>
             <Routes>

@@ -1,132 +1,196 @@
-import React, { useState, useEffect } from 'react';
-import { useParams } from 'react-router-dom'; // URLからshopIdを取得するため
-import { supabase } from '../../../supabaseClient'; // 👈 パスとファイル名を修正
-import { Save, UserCircle } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { useParams } from 'react-router-dom';
+import { supabase } from "../../../supabaseClient";
 
 const BasicSettings = () => {
   const { shopId } = useParams();
-  const [loading, setLoading] = useState(true);
-  const [profile, setProfile] = useState({
-    business_name: '',
-    business_type: '',
-    business_style: 'solo',
-    description: '',
-    address: '',
-    phone: '',
-    industry_id: 'warrior' 
-  });
+
+  // --- 1. State 管理 (本家から完全移植) ---
+  const [message, setMessage] = useState('');
+  const [businessName, setBusinessName] = useState('');
+  const [businessNameKana, setBusinessNameKana] = useState('');
+  const [ownerName, setOwnerName] = useState('');
+  const [ownerNameKana, setOwnerNameKana] = useState('');
+  const [businessType, setBusinessType] = useState('');
+  const [phone, setPhone] = useState('');
+  const [emailContact, setEmailContact] = useState('');
+  const [address, setAddress] = useState('');
+  const [description, setDescription] = useState('');
+  const [introText, setIntroText] = useState('');
+  const [notes, setNotes] = useState('');
+  const [imageUrl, setImageUrl] = useState('');
+  const [officialUrl, setOfficialUrl] = useState('');
+  const [themeColor, setThemeColor] = useState('#2563eb');
 
   useEffect(() => {
-    if (shopId) {
-      getProfile();
-    }
+    if (shopId) fetchInitialShopData();
   }, [shopId]);
 
-  const getProfile = async () => {
-    try {
-      let { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', shopId)
-        .single();
-
-      if (data) setProfile(data);
-    } catch (error) {
-      console.error('Error loading profile:', error);
-    } finally {
-      setLoading(false);
+  const fetchInitialShopData = async () => {
+    const { data } = await supabase.from('profiles').select('*').eq('id', shopId).single();
+    if (data) {
+      setBusinessName(data.business_name || '');
+      setBusinessNameKana(data.business_name_kana || '');
+      setOwnerName(data.owner_name || '');
+      setOwnerNameKana(data.owner_name_kana || '');
+      setBusinessType(data.business_type || '');
+      setPhone(data.phone || '');
+      setEmailContact(data.email_contact || '');
+      setAddress(data.address || '');
+      setDescription(data.description || '');
+      setIntroText(data.intro_text || '');
+      setNotes(data.notes || '');
+      setImageUrl(data.image_url || '');
+      setOfficialUrl(data.official_url || '');
+      setThemeColor(data.theme_color || '#2563eb');
     }
   };
 
-  const handleSave = async () => {
-    setLoading(true);
-    const { error } = await supabase
+  const showMsg = (txt) => { setMessage(txt); setTimeout(() => setMessage(''), 3000); };
+
+// --- 画像アップロード処理 ---
+  const handleFileUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const fileExt = file.name.split('.').pop();
+    const fileName = `${shopId}-main.${fileExt}`;
+    
+    showMsg('画像を更新中...');
+
+    // 1. Storageへのアップロード (ここは成功しています)
+    const { error: uploadError } = await supabase.storage
+      .from('shop-images')
+      .upload(fileName, file, { upsert: true });
+
+    if (uploadError) {
+      alert('アップロード失敗: ' + uploadError.message);
+      return;
+    }
+
+    // 2. 公開URLを取得 (ここが重要！)
+    const { data: urlData } = supabase.storage
+      .from('shop-images')
+      .getPublicUrl(fileName);
+    
+    const publicUrl = urlData.publicUrl;
+
+    // 3. データベースの image_url 列を即座に更新する
+    // 保存ボタンを押す前に、まずURLを確定させてDBに入れます
+    const { error: dbError } = await supabase
       .from('profiles')
-      .upsert({ 
-        id: shopId, 
-        ...profile, 
-        updated_at: new Date() 
-      });
+      .update({ image_url: publicUrl })
+      .eq('id', shopId);
 
-    if (error) {
-      alert('保存に失敗しました: ' + error.message);
-    } else {
-      alert('ギルド（店舗）情報を更新しました！');
+    if (dbError) {
+      alert('DBのURL更新に失敗しました: ' + dbError.message);
+      return;
     }
-    setLoading(false);
+
+    // 4. ステートを更新して画面に反映
+    setImageUrl(`${publicUrl}?t=${Date.now()}`);
+    showMsg('画像を拠点の看板として掲げました！');
+  };
+  
+  // --- 保存処理 (そのまま維持) ---
+  const handleSave = async () => {
+    const { error } = await supabase.from('profiles').update({
+      business_name: businessName, business_name_kana: businessNameKana,
+      owner_name: ownerName, owner_name_kana: ownerNameKana,
+      business_type: businessType, phone, email_contact: emailContact, address,
+      description, intro_text: introText, notes, image_url: imageUrl, official_url: officialUrl
+    }).eq('id', shopId);
+
+    if (!error) showMsg('店舗プロフィールを保存しました！');
+    else alert('保存に失敗しました。');
   };
 
-  if (loading) return <div className="p-8 text-center text-gray-500">ギルド情報を確認中...</div>;
+  // スタイル定義 (そのまま維持)
+  const cardStyle = { marginBottom: '20px', background: '#fff', padding: '20px', borderRadius: '12px', border: '1px solid #ddd', boxSizing: 'border-box', width: '100%' };
+  const inputStyle = { width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid #ccc', boxSizing: 'border-box', fontSize: '1rem', background: '#fff' };
 
   return (
-    <div className="max-w-4xl mx-auto p-4 md:p-8">
-      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 md:p-10">
-        <h2 className="text-2xl font-bold text-gray-800 mb-8 flex items-center gap-2">
-          <UserCircle className="text-indigo-600" /> 基本情報設定
-        </h2>
+    <div style={{ fontFamily: 'sans-serif', maxWidth: '700px', margin: '0 auto', padding: '20px', paddingBottom: '120px' }}>
+      {message && <div style={{ position: 'fixed', top: 20, left: '50%', transform: 'translateX(-50%)', width: '90%', padding: '15px', background: '#dcfce7', color: '#166534', borderRadius: '8px', zIndex: 1001, textAlign: 'center', boxShadow: '0 4px 10px rgba(0,0,0,0.1)' }}>{message}</div>}
 
-        <div className="grid grid-cols-1 gap-y-6">
-          <div>
-            <label className="block text-sm font-semibold text-gray-700 mb-2">酒場（店）の名前</label>
-            <input 
-              type="text" 
-              className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none transition"
-              value={profile.business_name || ''}
-              onChange={(e) => setProfile({...profile, business_name: e.target.value})}
-              placeholder="例：ソロ・サロン QUEST"
-            />
+      <section style={cardStyle}>
+        <h3 style={{ marginTop: 0, marginBottom: '20px' }}>🏪 店舗プロフィール</h3>
+        
+        {/* 店舗画像 */}
+        <label style={{ fontSize: '0.8rem', fontWeight: 'bold', display: 'block', marginBottom: '8px' }}>店舗画像（推奨 1:1）</label>
+        <div style={{ marginBottom: '20px', padding: '15px', background: '#f8fafc', borderRadius: '16px', border: '1px dashed #cbd5e1', textAlign: 'center' }}>
+          {imageUrl ? (
+            <img src={imageUrl} alt="preview" style={{ width: '120px', height: '120px', objectFit: 'cover', borderRadius: '12px', marginBottom: '12px', boxShadow: '0 4px 10px rgba(0,0,0,0.1)' }} />
+          ) : (
+            <div style={{ width: '120px', height: '120px', background: '#e2e8f0', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b', fontSize: '0.7rem', margin: '0 auto 12px' }}>NO IMAGE</div>
+          )}
+          <div style={{ position: 'relative', display: 'inline-block', width: '100%' }}>
+            <input type="file" accept="image/*" capture="environment" onChange={handleFileUpload} style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', opacity: 0, cursor: 'pointer', zIndex: 2 }} />
+            <button type="button" style={{ width: '100%', padding: '12px', background: '#fff', border: `1px solid ${themeColor}`, color: themeColor, borderRadius: '10px', fontWeight: 'bold', fontSize: '0.9rem' }}>📸 写真を撮る / 変更する</button>
           </div>
-
-          <div>
-            <label className="block text-sm font-semibold text-gray-700 mb-2">職業カテゴリ（業種）</label>
-            <select 
-              className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none"
-              value={profile.business_type || ''}
-              onChange={(e) => setProfile({...profile, business_type: e.target.value})}
-            >
-              <option value="">選択してください</option>
-              <option value="beauty">美容・サロン（戦士の身だしなみ）</option>
-              <option value="health">整体・リラク（僧侶の癒やし）</option>
-              <option value="food">飲食・カフェ（冒険者の飯屋）</option>
-              <option value="visit">出張・訪問（旅の商人）</option>
-            </select>
-          </div>
-
-          <div>
-            <label className="block text-sm font-semibold text-gray-700 mb-2">案内人マスコットの職業</label>
-            <div className="grid grid-cols-4 gap-4">
-              {['warrior', 'mage', 'priest', 'thief'].map((job) => (
-                <button
-                  key={job}
-                  onClick={() => setProfile({...profile, industry_id: job})}
-                  className={`p-4 rounded-xl border-2 transition text-center ${
-                    profile.industry_id === job 
-                    ? 'border-indigo-600 bg-indigo-50 text-indigo-600' 
-                    : 'border-gray-100 grayscale hover:grayscale-0 bg-gray-50'
-                  }`}
-                >
-                  <div className="text-2xl mb-1">
-                    {job === 'warrior' && '⚔️'}
-                    {job === 'mage' && '🧙'}
-                    {job === 'priest' && '⛪'}
-                    {job === 'thief' && '🗝️'}
-                  </div>
-                  <span className="text-xs font-bold uppercase">{job}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <button 
-            onClick={handleSave}
-            disabled={loading}
-            className="mt-6 w-full bg-indigo-600 text-white py-4 rounded-xl font-bold hover:bg-indigo-700 shadow-lg shadow-indigo-200 transition flex items-center justify-center gap-2"
-          >
-            <Save size={20} />
-            ギルド情報を保存する
-          </button>
         </div>
-      </div>
+
+        {/* 店舗名・代表者名 */}
+        <label style={{ fontSize: '0.8rem', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>店舗名 / かな</label>
+        <div style={{ display: 'flex', gap: '10px', marginBottom: '15px' }}>
+          <input value={businessName} onChange={(e) => setBusinessName(e.target.value)} style={inputStyle} placeholder="店舗名" />
+          <input value={businessNameKana} onChange={(e) => setBusinessNameKana(e.target.value)} style={inputStyle} placeholder="かな" />
+        </div>
+
+        <label style={{ fontSize: '0.8rem', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>代表者名 / かな</label>
+        <div style={{ display: 'flex', gap: '10px', marginBottom: '15px' }}>
+          <input value={ownerName} onChange={(e) => setOwnerName(e.target.value)} style={inputStyle} placeholder="代表者名" />
+          <input value={ownerNameKana} onChange={(e) => setOwnerNameKana(e.target.value)} style={inputStyle} placeholder="かな" />
+        </div>
+
+        {/* 業種・URL */}
+        <label style={{ fontSize: '0.8rem', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>業種</label>
+        <select value={businessType} onChange={(e) => setBusinessType(e.target.value)} style={{ ...inputStyle, marginBottom: '15px' }}>
+          <option value="美容室・理容室">美容室・理容室</option>
+          <option value="ネイル・アイラッシュ">ネイル・アイラッシュ</option>
+          <option value="エステ・リラク">エステ・リラク</option>
+          <option value="整体・接骨院・針灸">整体・接骨院・針灸</option>
+          <option value="飲食店・カフェ">飲食店・カフェ</option>
+          <option value="その他・ライフ">その他・ライフ</option>
+        </select>
+        
+        <label style={{ fontSize: '0.8rem', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>🌐 公式サイトURL</label>
+        <input value={officialUrl} onChange={(e) => setOfficialUrl(e.target.value)} style={{ ...inputStyle, marginBottom: '15px' }} placeholder="https://..." />
+        
+        {/* 基本連絡先 */}
+        <label style={{ fontSize: '0.8rem', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>住所</label>
+        <input value={address} onChange={(e) => setAddress(e.target.value)} style={{ ...inputStyle, marginBottom: '15px' }} />
+        
+        <label style={{ fontSize: '0.8rem', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>電話番号</label>
+        <input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} style={{ ...inputStyle, marginBottom: '15px' }} />
+        
+        <label style={{ fontSize: '0.8rem', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>メール</label>
+        <input type="email" value={emailContact} onChange={(e) => setEmailContact(e.target.value)} style={{ ...inputStyle, marginBottom: '15px' }} />
+        
+        {/* サブタイトル (プレビュー付き) */}
+        <label style={{ fontSize: '0.8rem', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>サブタイトル</label>
+        <input value={description} onChange={(e) => setDescription(e.target.value)} style={{ ...inputStyle, marginBottom: '8px' }} placeholder="スラッシュ(/)で改行できます" />
+        <div style={{ marginBottom: '20px', padding: '12px', background: '#f8fafc', borderRadius: '10px', border: '1px solid #e2e8f0' }}>
+          <div style={{ fontSize: '0.85rem', fontWeight: 'bold', color: themeColor, lineHeight: '1.5' }}>
+            {description ? description.split('/').map((line, idx) => (
+              <React.Fragment key={idx}>{line}{idx < description.split('/').length - 1 && <br />}</React.Fragment>
+            )) : 'プレビューが表示されます'}
+          </div>
+        </div>
+
+        {/* 紹介・詳細 */}
+        <label style={{ fontSize: '0.8rem', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>店舗紹介・詳細アピール文</label>
+        <textarea value={introText} onChange={(e) => setIntroText(e.target.value)} style={{ ...inputStyle, minHeight: '150px', marginBottom: '15px' }} />
+        
+        <label style={{ fontSize: '0.8rem', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>注意事項</label>
+        <textarea value={notes} onChange={(e) => setNotes(e.target.value)} style={{ ...inputStyle, border: '2px solid #ef4444', minHeight: '80px' }} />
+
+        <button 
+          onClick={handleSave} 
+          style={{ width: '100%', padding: '16px', background: themeColor, color: '#fff', border: 'none', borderRadius: '12px', fontWeight: 'bold', fontSize: '1rem', marginTop: '20px', boxShadow: '0 4px 12px rgba(0,0,0,0.1)', cursor: 'pointer' }}
+        >
+          店舗プロフィールを保存する 💾
+        </button>
+      </section>
     </div>
   );
 };
