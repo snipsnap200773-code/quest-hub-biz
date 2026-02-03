@@ -77,7 +77,6 @@ const BasicSettingsGuide = () => {
     width: '100%', display: 'flex', flexDirection: 'column' 
   };
   
-  // cardStyleからpaddingのshorthandを排除し、左右を20pxで完全固定
   const cardStyle = { 
     width: '100%', maxWidth: '480px', margin: '0 auto', textAlign: 'center', 
     paddingLeft: '20px', paddingRight: '20px', boxSizing: 'border-box', 
@@ -136,8 +135,8 @@ const BasicSettingsGuide = () => {
       case 1: return (
         <div style={cardStyle}>
           <h2 style={{fontSize: '1.8rem', marginBottom: '40px'}}>拠点の名前（屋号）は？</h2>
-          <input placeholder="店舗名" style={inputStyle} value={formData.business_name} onChange={e => updateFieldAndSave('business_name', e.target.value)} />
-          <input placeholder="かな" style={inputStyle} value={formData.business_name_kana} onChange={e => updateFieldAndSave('business_name_kana', e.target.value)} />
+          <input placeholder="店舗名" style={inputStyle} value={formData.business_name || ''} onChange={e => updateFieldAndSave('business_name', e.target.value)} />
+          <input placeholder="かな" style={inputStyle} value={formData.business_name_kana || ''} onChange={e => updateFieldAndSave('business_name_kana', e.target.value)} />
           <button style={{...btnPrimary, marginTop: '20px'}} onClick={handleNext} disabled={!formData.business_name}>次へ <ChevronRight size={20} /></button>
         </div>
       );
@@ -145,8 +144,8 @@ const BasicSettingsGuide = () => {
         <div style={cardStyle}>
           <User size={60} color="#3b82f6" style={{marginBottom:'32px', alignSelf: 'center'}} />
           <h2 style={{fontSize: '1.8rem', marginBottom: '40px'}}>主人の名前を教えてください。</h2>
-          <input placeholder="氏名" style={inputStyle} value={formData.owner_name} onChange={e => updateFieldAndSave('owner_name', e.target.value)} />
-          <input placeholder="かな" style={inputStyle} value={formData.owner_name_kana} onChange={e => updateFieldAndSave('owner_name_kana', e.target.value)} />
+          <input placeholder="氏名" style={inputStyle} value={formData.owner_name || ''} onChange={e => updateFieldAndSave('owner_name', e.target.value)} />
+          <input placeholder="かな" style={inputStyle} value={formData.owner_name_kana || ''} onChange={e => updateFieldAndSave('owner_name_kana', e.target.value)} />
           <button style={{...btnPrimary, marginTop: '20px'}} onClick={handleNext}>次へ <ChevronRight size={20} /></button>
           <SkipButton />
         </div>
@@ -155,7 +154,7 @@ const BasicSettingsGuide = () => {
         <div style={cardStyle}>
           <Globe size={60} color="#3b82f6" style={{marginBottom:'32px', alignSelf: 'center'}} />
           <h2 style={{fontSize: '1.8rem', marginBottom: '40px'}}>公式サイトはありますか？</h2>
-          <input placeholder="https://..." style={inputStyle} value={formData.official_url} onChange={e => updateFieldAndSave('official_url', e.target.value)} />
+          <input placeholder="https://..." style={inputStyle} value={formData.official_url || ''} onChange={e => updateFieldAndSave('official_url', e.target.value)} />
           <button style={{...btnPrimary, marginTop: '20px'}} onClick={handleNext}>次へ <ChevronRight size={20} /></button>
           <SkipButton />
         </div>
@@ -164,7 +163,7 @@ const BasicSettingsGuide = () => {
         <div style={cardStyle}>
           <Phone size={60} color="#3b82f6" style={{marginBottom:'32px', alignSelf: 'center'}} />
           <h2 style={{fontSize: '1.8rem', marginBottom: '40px'}}>電話番号を教えてください。</h2>
-          <input type="tel" placeholder="090-0000-0000" style={inputStyle} value={formData.phone} onChange={e => updateFieldAndSave('phone', e.target.value)} />
+          <input type="tel" placeholder="090-0000-0000" style={inputStyle} value={formData.phone || ''} onChange={e => updateFieldAndSave('phone', e.target.value)} />
           <button style={{...btnPrimary, marginTop: '20px'}} onClick={handleNext}>次へ <ChevronRight size={20} /></button>
           <SkipButton />
         </div>
@@ -173,7 +172,7 @@ const BasicSettingsGuide = () => {
         <div style={cardStyle}>
           <Mail size={60} color="#3b82f6" style={{marginBottom:'32px', alignSelf: 'center'}} />
           <h2 style={{fontSize: '1.8rem', marginBottom: '40px'}}>メールアドレスは？</h2>
-          <input type="email" placeholder="example@mail.com" style={inputStyle} value={formData.email_contact} onChange={e => updateFieldAndSave('email_contact', e.target.value)} />
+          <input type="email" placeholder="example@mail.com" style={inputStyle} value={formData.email_contact || ''} onChange={e => updateFieldAndSave('email_contact', e.target.value)} />
           <button style={{...btnPrimary, marginTop: '20px'}} onClick={handleNext}>次へ <ChevronRight size={20} /></button>
           <SkipButton />
         </div>
@@ -182,7 +181,7 @@ const BasicSettingsGuide = () => {
         <div style={cardStyle}>
           <MapPin size={60} color="#3b82f6" style={{marginBottom:'32px', alignSelf: 'center'}} />
           <h2 style={{fontSize: '1.8rem', marginBottom: '40px'}}>拠点の住所はどこですか？</h2>
-          <input placeholder="住所を入力" style={inputStyle} value={formData.address} onChange={e => updateFieldAndSave('address', e.target.value)} />
+          <input placeholder="住所を入力" style={inputStyle} value={formData.address || ''} onChange={e => updateFieldAndSave('address', e.target.value)} />
           <button style={{...btnPrimary, marginTop: '20px'}} onClick={handleNext}>次へ <ChevronRight size={20} /></button>
           <SkipButton />
         </div>
@@ -191,7 +190,7 @@ const BasicSettingsGuide = () => {
         <div style={cardStyle}>
           <MessageSquare size={60} color="#3b82f6" style={{marginBottom:'32px', alignSelf: 'center'}} />
           <h2 style={{fontSize: '1.8rem', marginBottom: '40px'}}>サブタイトルを決めましょう。</h2>
-          <input placeholder="例：魔王を倒す！" style={inputStyle} value={formData.description} onChange={e => updateFieldAndSave('description', e.target.value)} />
+          <input placeholder="例：魔王を倒す！" style={inputStyle} value={formData.description || ''} onChange={e => updateFieldAndSave('description', e.target.value)} />
           <button style={{...btnPrimary, marginTop: '20px'}} onClick={handleNext}>次へ <ChevronRight size={20} /></button>
           <SkipButton />
         </div>
@@ -203,7 +202,7 @@ const BasicSettingsGuide = () => {
           <textarea 
             placeholder="冒険者に向けた詳細な説明..." 
             style={{ ...inputStyle, minHeight: '150px', resize: 'none' }} 
-            value={formData.intro_text} 
+            value={formData.intro_text || ''} 
             onChange={e => updateFieldAndSave('intro_text', e.target.value)} 
           />
           <button style={{...btnPrimary, marginTop: '20px'}} onClick={handleNext}>次へ <ChevronRight size={20} /></button>
@@ -274,12 +273,10 @@ const BasicSettingsGuide = () => {
 
   return (
     <div style={containerStyle}>
-      {/* 進行度バー： fixedにして常にトップに表示 */}
       <div style={{ width: '100%', height: '6px', background: '#334155', position: 'fixed', top: 0, left: 0, zIndex: 100 }}>
         <div style={{ width: `${(step / 11) * 100}%`, height: '100%', background: '#3b82f6', transition: '0.4s' }} />
       </div>
 
-      {/* 一つ前に戻るボタン： fixedにして常に左上に表示 */}
       {step > 0 && step < 11 && (
         <div style={{ position: 'fixed', top: '24px', left: '24px', zIndex: 110 }}>
           <button style={backBtnStyle} onClick={handleBack} title="一つ前に戻る">

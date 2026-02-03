@@ -48,7 +48,7 @@ const BasicSettings = () => {
 
   const showMsg = (txt) => { setMessage(txt); setTimeout(() => setMessage(''), 3000); };
 
-// --- 画像アップロード処理 ---
+  // --- 画像アップロード処理 (修正済みの確実なロジック) ---
   const handleFileUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -57,25 +57,29 @@ const BasicSettings = () => {
     
     showMsg('画像を更新中...');
 
-    // 1. Storageへのアップロード (ここは成功しています)
-    const { error: uploadError } = await supabase.storage
-      .from('shop-images')
-      .upload(fileName, file, { upsert: true });
+    // --- BasicSettings.jsx の 63行目付近 ---
+const { data, error: uploadError } = await supabase.storage
+  .from('shop-images')
+  .upload(fileName, file, { 
+    contentType: 'image/jpeg', // 明示的に指定してみる
+    upsert: true 
+  });
 
-    if (uploadError) {
-      alert('アップロード失敗: ' + uploadError.message);
-      return;
-    }
+if (uploadError) {
+  // ここで詳細なエラーメッセージを確認
+  console.error("Storage詳細エラー:", uploadError); 
+  alert('アップロード失敗: ' + uploadError.message);
+  return;
+}
 
-    // 2. 公開URLを取得 (ここが重要！)
+    // 2. 公開URLを取得
     const { data: urlData } = supabase.storage
       .from('shop-images')
       .getPublicUrl(fileName);
     
     const publicUrl = urlData.publicUrl;
 
-    // 3. データベースの image_url 列を即座に更新する
-    // 保存ボタンを押す前に、まずURLを確定させてDBに入れます
+    // 3. データベースの image_url 列を即座に更新 (EMPTY回避)
     const { error: dbError } = await supabase
       .from('profiles')
       .update({ image_url: publicUrl })
@@ -86,12 +90,12 @@ const BasicSettings = () => {
       return;
     }
 
-    // 4. ステートを更新して画面に反映
+    // 4. ステートを更新 (キャッシュ対策のタイムスタンプ付与)
     setImageUrl(`${publicUrl}?t=${Date.now()}`);
     showMsg('画像を拠点の看板として掲げました！');
   };
   
-  // --- 保存処理 (そのまま維持) ---
+  // --- 保存処理 ---
   const handleSave = async () => {
     const { error } = await supabase.from('profiles').update({
       business_name: businessName, business_name_kana: businessNameKana,
@@ -104,7 +108,7 @@ const BasicSettings = () => {
     else alert('保存に失敗しました。');
   };
 
-  // スタイル定義 (そのまま維持)
+  // スタイル定義
   const cardStyle = { marginBottom: '20px', background: '#fff', padding: '20px', borderRadius: '12px', border: '1px solid #ddd', boxSizing: 'border-box', width: '100%' };
   const inputStyle = { width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid #ccc', boxSizing: 'border-box', fontSize: '1rem', background: '#fff' };
 
@@ -115,17 +119,34 @@ const BasicSettings = () => {
       <section style={cardStyle}>
         <h3 style={{ marginTop: 0, marginBottom: '20px' }}>🏪 店舗プロフィール</h3>
         
-        {/* 店舗画像 */}
+        {/* --- 🖼️ 店舗画像セクション (本家を忠実に再現) --- */}
         <label style={{ fontSize: '0.8rem', fontWeight: 'bold', display: 'block', marginBottom: '8px' }}>店舗画像（推奨 1:1）</label>
         <div style={{ marginBottom: '20px', padding: '15px', background: '#f8fafc', borderRadius: '16px', border: '1px dashed #cbd5e1', textAlign: 'center' }}>
           {imageUrl ? (
-            <img src={imageUrl} alt="preview" style={{ width: '120px', height: '120px', objectFit: 'cover', borderRadius: '12px', marginBottom: '12px', boxShadow: '0 4px 10px rgba(0,0,0,0.1)' }} />
+            <img 
+              src={imageUrl} 
+              alt="preview" 
+              style={{ width: '120px', height: '120px', objectFit: 'cover', borderRadius: '12px', marginBottom: '12px', boxShadow: '0 4px 10px rgba(0,0,0,0.05)' }} 
+            />
           ) : (
-            <div style={{ width: '120px', height: '120px', background: '#e2e8f0', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b', fontSize: '0.7rem', margin: '0 auto 12px' }}>NO IMAGE</div>
+            <div style={{ width: '120px', height: '120px', background: '#e2e8f0', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b', fontSize: '0.7rem', margin: '0 auto 12px' }}>
+              NO IMAGE
+            </div>
           )}
           <div style={{ position: 'relative', display: 'inline-block', width: '100%' }}>
-            <input type="file" accept="image/*" capture="environment" onChange={handleFileUpload} style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', opacity: 0, cursor: 'pointer', zIndex: 2 }} />
-            <button type="button" style={{ width: '100%', padding: '12px', background: '#fff', border: `1px solid ${themeColor}`, color: themeColor, borderRadius: '10px', fontWeight: 'bold', fontSize: '0.9rem' }}>📸 写真を撮る / 変更する</button>
+            <input 
+              type="file" 
+              accept="image/*" 
+              capture="environment" 
+              onChange={handleFileUpload} 
+              style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', opacity: 0, cursor: 'pointer', zIndex: 2 }} 
+            />
+            <button 
+              type="button" 
+              style={{ width: '100%', padding: '12px', background: '#fff', border: `1px solid ${themeColor}`, color: themeColor, borderRadius: '10px', fontWeight: 'bold', fontSize: '0.9rem' }}
+            >
+              📸 写真を撮る / 変更する
+            </button>
           </div>
         </div>
 
