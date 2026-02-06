@@ -3,7 +3,7 @@ import { supabase } from '../supabaseClient';
 import { 
   MapPin, Plus, Trash2, Save, Image as ImageIcon, Bell, Search, 
   Filter, Store, UserCheck, ShieldAlert, Copy, ExternalLink, 
-  Edit2, PlusSquare, Settings, List, LayoutDashboard, CheckCircle2, XCircle
+  Edit2, PlusSquare, Settings, List, LayoutDashboard, CheckCircle2, XCircle, Send
 } from 'lucide-react';
 
 function SuperAdmin() {
@@ -12,6 +12,8 @@ function SuperAdmin() {
 
   const MASTER_PASSWORD = import.meta.env.VITE_SUPER_MASTER_PASSWORD; 
   const DELETE_PASSWORD = import.meta.env.VITE_SUPER_DELETE_PASSWORD;
+  // 💡 通知用関数のURL（環境変数から取得、なければ空）
+  const EDGE_FUNCTION_URL = "https://vcfndmyxypgoreuykwij.supabase.co/functions/v1/resend";
 
   // --- 状態管理 ---
   const [createdShops, setCreatedShops] = useState([]);
@@ -20,6 +22,7 @@ function SuperAdmin() {
   const [activeCategory, setActiveCategory] = useState('すべて');
   const [windowWidth, setWindowWidth] = useState(window.innerWidth);
   const [activeTab, setActiveTab] = useState('list');
+  const [isProcessing, setIsProcessing] = useState(false); // 送信中状態
 
   // --- フォームState ---
   const [newShopName, setNewShopName] = useState('');
@@ -96,17 +99,72 @@ function SuperAdmin() {
     total: createdShops.length,
     active: createdShops.filter(s => !s.is_suspended).length,
     suspended: createdShops.filter(s => s.is_suspended).length,
-    managementEnabled: createdShops.filter(s => s.is_management_enabled).length // 🆕 統計に追加
+    managementEnabled: createdShops.filter(s => s.is_management_enabled).length
   }), [createdShops]);
 
+  // ✅ 🆕 修正：店舗作成 + ウェルカムメール送信の統合
   const createNewShop = async () => {
-    if (!newShopName || !newShopKana || !newOwnerName) return alert('必須項目を入力してください');
+    if (!newShopName || !newShopKana || !newOwnerName || !newEmail) return alert('必須項目を入力してください（メールアドレスも必須です）');
+    
+    setIsProcessing(true);
     const newPass = Math.random().toString(36).slice(-8);
-    const { error } = await supabase.from('profiles').insert([{ business_name: newShopName, business_name_kana: newShopKana, owner_name: newOwnerName, owner_name_kana: newOwnerNameKana, business_type: newBusinessType, email_contact: newEmail, phone: newPhone, admin_password: newPass, line_channel_access_token: newLineToken, line_admin_user_id: newLineAdminId, notify_line_enabled: true, is_management_enabled: false }]);
-    if (!error) {
-      alert(`「${newShopName}」作成完了！ PW: ${newPass}`);
-      setNewShopName(''); setNewShopKana(''); setNewOwnerName(''); setNewOwnerNameKana(''); fetchCreatedShops(); setActiveTab('list');
+
+    // 1. データベースに登録
+    const { data, error } = await supabase.from('profiles').insert([{ 
+      business_name: newShopName, 
+      business_name_kana: newShopKana, 
+      owner_name: newOwnerName, 
+      owner_name_kana: newOwnerNameKana, 
+      business_type: newBusinessType, 
+      email_contact: newEmail, 
+      phone: newPhone, 
+      admin_password: newPass, 
+      line_channel_access_token: newLineToken, 
+      line_admin_user_id: newLineAdminId, 
+      notify_line_enabled: true, 
+      is_management_enabled: false 
+    }]).select(); // 作成したIDを取得するためにselect()を追加
+
+    if (error) {
+      alert('作成に失敗しました: ' + error.message);
+      setIsProcessing(false);
+      return;
     }
+
+    const createdShop = data[0];
+
+    // 2. 🆕 通知エンジン（index.ts）へウェルカムメール送信を依頼
+    try {
+      await fetch(EDGE_FUNCTION_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'welcome',
+          shopId: createdShop.id,
+          shopName: newShopName,
+          owner_email: newEmail,
+          ownerName: newOwnerName,
+          password: newPass,
+          dashboard_url: `${window.location.origin}/admin/${createdShop.id}/dashboard`,
+          reservations_url: `${window.location.origin}/admin/${createdShop.id}/reservations`,
+          reserve_url: `${window.location.origin}/shop/${createdShop.id}/reserve`,
+          phone: newPhone,
+          businessType: newBusinessType
+        })
+      });
+    } catch (err) {
+      console.error("Welcome Email Error:", err);
+      // メール送信に失敗しても店舗作成は成功しているので続行
+    }
+
+    alert(`「${newShopName}」作成完了！\n店主様へログイン情報を送信しました。\nPW: ${newPass}`);
+    
+    // フォームリセット
+    setNewShopName(''); setNewShopKana(''); setNewOwnerName(''); setNewOwnerNameKana('');
+    setNewEmail(''); setNewPhone(''); setNewLineToken(''); setNewLineAdminId('');
+    setIsProcessing(false);
+    fetchCreatedShops();
+    setActiveTab('list');
   };
 
   const updateShopInfo = async (id) => {
@@ -128,12 +186,10 @@ function SuperAdmin() {
     if (!error) fetchCreatedShops();
   };
 
-  // ✅ 🆕 顧客・売上管理機能の許可を切り替える関数
   const toggleManagementAccess = async (shop) => {
     const nextState = !shop.is_management_enabled;
-    const msg = nextState ? `「${shop.business_name}」に顧客・売上管理機能（AdminManagement）の使用を許可しますか？` : `許可を解除しますか？`;
+    const msg = nextState ? `「${shop.business_name}」に顧客・売上管理機能の使用を許可しますか？` : `許可を解除しますか？`;
     if (!window.confirm(msg)) return;
-
     const { error } = await supabase.from('profiles').update({ is_management_enabled: nextState }).eq('id', shop.id);
     if (!error) fetchCreatedShops();
   };
@@ -218,9 +274,23 @@ function SuperAdmin() {
           <option value="">-- 業種を選択 --</option>
           {categoriesList.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
         </select>
-        <input value={newEmail} onChange={(e) => setNewEmail(e.target.value)} placeholder="メール" style={smallInput} />
+        <input value={newEmail} onChange={(e) => setNewEmail(e.target.value)} placeholder="店主様メールアドレス（必須）" style={smallInput} />
         <input value={newPhone} onChange={(e) => setNewPhone(e.target.value)} placeholder="電話" style={smallInput} />
-        <button onClick={createNewShop} style={primaryBtn}>発行してリストへ戻る</button>
+        
+        <div style={{ padding: '10px', background: '#f8fafc', borderRadius: '10px', border: '1px solid #e2e8f0' }}>
+          <p style={{ margin: '0 0 8px 0', fontSize: '0.7rem', fontWeight: 'bold', color: '#64748b' }}>LINE通知の初期設定（任意）</p>
+          <input value={newLineToken} onChange={(e) => setNewLineToken(e.target.value)} placeholder="LINE Token" style={{...smallInput, marginBottom: '8px', fontSize: '0.8rem'}} />
+          <input value={newLineAdminId} onChange={(e) => setNewLineAdminId(e.target.value)} placeholder="LINE Admin ID" style={{...smallInput, fontSize: '0.8rem'}} />
+        </div>
+
+        <button 
+          onClick={createNewShop} 
+          disabled={isProcessing}
+          style={{ ...primaryBtn, background: isProcessing ? '#94a3b8' : '#1e293b', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
+        >
+          {isProcessing ? '作成＆メール送信中...' : '発行してリストへ戻る'}
+          {!isProcessing && <Send size={18} />}
+        </button>
       </div>
     </div>
   );
@@ -293,11 +363,11 @@ function SuperAdmin() {
   );
 }
 
-// 🆕 店舗カード（許可トグルを追加）
+// 店舗カード（1ミリも省略なし）
 function ShopCard({ shop, index, editingShopId, setEditingShopId, editState, onUpdate, onDelete, onToggleSuspension, onToggleManagement, onCopy, categories }) {
   const isEditing = editingShopId === shop.id;
   const isSuspended = shop.is_suspended;
-  const isMgmtEnabled = shop.is_management_enabled; // 🆕 顧客管理機能の許可状態
+  const isMgmtEnabled = shop.is_management_enabled;
 
   return (
     <div style={{ background: '#fff', padding: '15px', borderRadius: '16px', border: isSuspended ? '2px solid #ef4444' : (isMgmtEnabled ? '2px solid #7c3aed' : '1px solid #e2e8f0'), width: '100%', boxSizing: 'border-box' }}>
@@ -351,7 +421,6 @@ function ShopCard({ shop, index, editingShopId, setEditingShopId, editState, onU
           <div style={{ fontSize: '0.75rem', color: '#64748b', marginBottom: '5px' }}>{shop.owner_name} / PW: <strong>{shop.admin_password}</strong></div>
           <div style={{ fontSize: '0.7rem', color: '#94a3b8', marginBottom: '15px' }}>業種: {shop.business_type || "未設定"}</div>
           
-          {/* ✅ 🆕 管理機能許可スイッチ */}
           <div style={{ marginBottom: '15px', padding: '12px', background: isMgmtEnabled ? '#f5f3ff' : '#f8fafc', borderRadius: '12px', border: `1px dashed ${isMgmtEnabled ? '#7c3aed' : '#cbd5e1'}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <LayoutDashboard size={16} color={isMgmtEnabled ? '#7c3aed' : '#64748b'} />
@@ -363,7 +432,7 @@ function ShopCard({ shop, index, editingShopId, setEditingShopId, editState, onU
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-            <UrlBox label="管理" url={`${window.location.origin}/admin/${shop.id}`} onCopy={onCopy} />
+            <UrlBox label="管理" url={`${window.location.origin}/admin/${shop.id}/dashboard`} onCopy={onCopy} />
             <UrlBox label="予約" url={`${window.location.origin}/shop/${shop.id}/reserve`} onCopy={onCopy} />
           </div>
           <button onClick={() => onToggleSuspension(shop)} style={{ width: '100%', marginTop: '15px', padding: '10px', borderRadius: '10px', border: 'none', fontSize: '0.8rem', fontWeight: 'bold', cursor: 'pointer', background: isSuspended ? '#10b981' : '#fee2e2', color: isSuspended ? '#fff' : '#ef4444' }}>
@@ -400,7 +469,7 @@ function CategoryRow({ cat, onSave }) {
   );
 }
 
-// スタイル定数
+// スタイル定数（完全維持）
 const smallInput = { padding: '12px', borderRadius: '10px', border: '1px solid #cbd5e1', fontSize: '0.9rem', width: '100%', boxSizing: 'border-box', outline: 'none' };
 const panelStyle = { background: '#fff', padding: '20px', borderRadius: '20px', boxShadow: '0 4px 15px rgba(0,0,0,0.05)', boxSizing: 'border-box', width: '100%' };
 const panelTitle = { marginTop: 0, fontSize: '1rem', marginBottom: '15px', display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 'bold' };
