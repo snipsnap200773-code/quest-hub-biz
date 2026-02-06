@@ -1,9 +1,14 @@
 import React, { useEffect, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useNavigate, Link } from 'react-router-dom';
 import { supabase } from "../../../supabaseClient";
+import { 
+  ArrowLeft, Sparkles, Save, Camera, MapPin, 
+  User, Phone, Mail, Globe, Info, AlertCircle 
+} from 'lucide-react';
 
 const BasicSettings = () => {
   const { shopId } = useParams();
+  const navigate = useNavigate();
 
   // --- 1. State 管理 (本家から完全移植) ---
   const [message, setMessage] = useState('');
@@ -48,7 +53,7 @@ const BasicSettings = () => {
 
   const showMsg = (txt) => { setMessage(txt); setTimeout(() => setMessage(''), 3000); };
 
-  // --- 画像アップロード処理 (修正済みの確実なロジック) ---
+  // --- 画像アップロード処理 (修正済みの確実なロジックを完全維持) ---
   const handleFileUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -57,29 +62,25 @@ const BasicSettings = () => {
     
     showMsg('画像を更新中...');
 
-    // --- BasicSettings.jsx の 63行目付近 ---
-const { data, error: uploadError } = await supabase.storage
-  .from('shop-images')
-  .upload(fileName, file, { 
-    contentType: 'image/jpeg', // 明示的に指定してみる
-    upsert: true 
-  });
+    const { data, error: uploadError } = await supabase.storage
+      .from('shop-images')
+      .upload(fileName, file, { 
+        contentType: 'image/jpeg', 
+        upsert: true 
+      });
 
-if (uploadError) {
-  // ここで詳細なエラーメッセージを確認
-  console.error("Storage詳細エラー:", uploadError); 
-  alert('アップロード失敗: ' + uploadError.message);
-  return;
-}
+    if (uploadError) {
+      console.error("Storage詳細エラー:", uploadError); 
+      alert('アップロード失敗: ' + uploadError.message);
+      return;
+    }
 
-    // 2. 公開URLを取得
     const { data: urlData } = supabase.storage
       .from('shop-images')
       .getPublicUrl(fileName);
     
     const publicUrl = urlData.publicUrl;
 
-    // 3. データベースの image_url 列を即座に更新 (EMPTY回避)
     const { error: dbError } = await supabase
       .from('profiles')
       .update({ image_url: publicUrl })
@@ -90,7 +91,6 @@ if (uploadError) {
       return;
     }
 
-    // 4. ステートを更新 (キャッシュ対策のタイムスタンプ付与)
     setImageUrl(`${publicUrl}?t=${Date.now()}`);
     showMsg('画像を拠点の看板として掲げました！');
   };
@@ -108,32 +108,62 @@ if (uploadError) {
     else alert('保存に失敗しました。');
   };
 
-  // スタイル定義
-  const cardStyle = { marginBottom: '20px', background: '#fff', padding: '20px', borderRadius: '12px', border: '1px solid #ddd', boxSizing: 'border-box', width: '100%' };
-  const inputStyle = { width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid #ccc', boxSizing: 'border-box', fontSize: '1rem', background: '#fff' };
+  // --- スタイル定義 ---
+  const containerStyle = { fontFamily: 'sans-serif', maxWidth: '700px', margin: '0 auto', padding: '20px', paddingBottom: '120px', position: 'relative' };
+  const cardStyle = { marginBottom: '20px', background: '#fff', padding: '24px', borderRadius: '20px', border: '1px solid #e2e8f0', boxSizing: 'border-box', width: '100%', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)' };
+  const inputStyle = { width: '100%', padding: '12px', borderRadius: '10px', border: '1px solid #cbd5e1', boxSizing: 'border-box', fontSize: '1rem', background: '#fff' };
+  const labelStyle = { fontSize: '0.85rem', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', color: '#334155' };
 
   return (
-    <div style={{ fontFamily: 'sans-serif', maxWidth: '700px', margin: '0 auto', padding: '20px', paddingBottom: '120px' }}>
-      {message && <div style={{ position: 'fixed', top: 20, left: '50%', transform: 'translateX(-50%)', width: '90%', padding: '15px', background: '#dcfce7', color: '#166534', borderRadius: '8px', zIndex: 1001, textAlign: 'center', boxShadow: '0 4px 10px rgba(0,0,0,0.1)' }}>{message}</div>}
+    <div style={containerStyle}>
+      {/* 🔔 通知メッセージ */}
+      {message && (
+        <div style={{ position: 'fixed', top: 20, left: '50%', transform: 'translateX(-50%)', width: '90%', padding: '15px', background: '#dcfce7', color: '#166534', borderRadius: '12px', zIndex: 1001, textAlign: 'center', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)', fontWeight: 'bold' }}>
+          {message}
+        </div>
+      )}
+
+      {/* 🚀 ナビゲーションヘッダー */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px' }}>
+        <button 
+          onClick={() => navigate(`/admin/${shopId}/dashboard`)} // ✅ 修正: 新しいAdminDashboardへ遷移
+          style={{ background: '#fff', border: '1px solid #e2e8f0', padding: '10px 16px', borderRadius: '30px', fontSize: '0.85rem', fontWeight: 'bold', color: '#64748b', display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', boxShadow: '0 2px 4px rgba(0,0,0,0.05)' }}
+        >
+          <ArrowLeft size={16} /> ダッシュボードへ
+        </button>
+
+        <button 
+          onClick={() => navigate(`/admin/${shopId}/settings/basic-guide`)}
+          style={{ background: themeColor, border: 'none', padding: '10px 20px', borderRadius: '30px', fontSize: '0.85rem', fontWeight: 'bold', color: '#fff', display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', boxShadow: `0 4px 12px ${themeColor}44` }}
+        >
+          <Sparkles size={16} /> 案内人を召喚
+        </button>
+      </div>
+
+      <h2 style={{ fontSize: '1.4rem', color: '#1e293b', marginBottom: '24px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '10px' }}>
+        店舗基本設定
+      </h2>
 
       <section style={cardStyle}>
-        <h3 style={{ marginTop: 0, marginBottom: '20px' }}>🏪 店舗プロフィール</h3>
+        <h3 style={{ marginTop: 0, marginBottom: '24px', fontSize: '1.1rem', color: '#1e293b', display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <Camera size={20} color={themeColor} /> 店舗プロフィール
+        </h3>
         
-        {/* --- 🖼️ 店舗画像セクション (本家を忠実に再現) --- */}
-        <label style={{ fontSize: '0.8rem', fontWeight: 'bold', display: 'block', marginBottom: '8px' }}>店舗画像（推奨 1:1）</label>
-        <div style={{ marginBottom: '20px', padding: '15px', background: '#f8fafc', borderRadius: '16px', border: '1px dashed #cbd5e1', textAlign: 'center' }}>
+        {/* --- 🖼️ 店舗画像セクション --- */}
+        <label style={{ ...labelStyle, display: 'block' }}>店舗画像（推奨 1:1）</label>
+        <div style={{ marginBottom: '24px', padding: '24px', background: '#f8fafc', borderRadius: '20px', border: '2px dashed #cbd5e1', textAlign: 'center' }}>
           {imageUrl ? (
             <img 
               src={imageUrl} 
               alt="preview" 
-              style={{ width: '120px', height: '120px', objectFit: 'cover', borderRadius: '12px', marginBottom: '12px', boxShadow: '0 4px 10px rgba(0,0,0,0.05)' }} 
+              style={{ width: '140px', height: '140px', objectFit: 'cover', borderRadius: '16px', marginBottom: '16px', boxShadow: '0 4px 10px rgba(0,0,0,0.1)' }} 
             />
           ) : (
-            <div style={{ width: '120px', height: '120px', background: '#e2e8f0', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b', fontSize: '0.7rem', margin: '0 auto 12px' }}>
+            <div style={{ width: '140px', height: '140px', background: '#e2e8f0', borderRadius: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b', fontSize: '0.8rem', margin: '0 auto 16px', fontWeight: 'bold' }}>
               NO IMAGE
             </div>
           )}
-          <div style={{ position: 'relative', display: 'inline-block', width: '100%' }}>
+          <div style={{ position: 'relative', display: 'inline-block', width: '100%', maxWidth: '300px' }}>
             <input 
               type="file" 
               accept="image/*" 
@@ -143,7 +173,7 @@ if (uploadError) {
             />
             <button 
               type="button" 
-              style={{ width: '100%', padding: '12px', background: '#fff', border: `1px solid ${themeColor}`, color: themeColor, borderRadius: '10px', fontWeight: 'bold', fontSize: '0.9rem' }}
+              style={{ width: '100%', padding: '12px', background: '#fff', border: `2px solid ${themeColor}`, color: themeColor, borderRadius: '12px', fontWeight: 'bold', fontSize: '0.9rem' }}
             >
               📸 写真を撮る / 変更する
             </button>
@@ -151,47 +181,68 @@ if (uploadError) {
         </div>
 
         {/* 店舗名・代表者名 */}
-        <label style={{ fontSize: '0.8rem', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>店舗名 / かな</label>
-        <div style={{ display: 'flex', gap: '10px', marginBottom: '15px' }}>
-          <input value={businessName} onChange={(e) => setBusinessName(e.target.value)} style={inputStyle} placeholder="店舗名" />
-          <input value={businessNameKana} onChange={(e) => setBusinessNameKana(e.target.value)} style={inputStyle} placeholder="かな" />
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px', marginBottom: '20px' }}>
+          <div>
+            <label style={labelStyle}>店舗名</label>
+            <input value={businessName} onChange={(e) => setBusinessName(e.target.value)} style={inputStyle} placeholder="お店の名前" />
+          </div>
+          <div>
+            <label style={labelStyle}>ふりがな</label>
+            <input value={businessNameKana} onChange={(e) => setBusinessNameKana(e.target.value)} style={inputStyle} placeholder="てんぽめい" />
+          </div>
         </div>
 
-        <label style={{ fontSize: '0.8rem', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>代表者名 / かな</label>
-        <div style={{ display: 'flex', gap: '10px', marginBottom: '15px' }}>
-          <input value={ownerName} onChange={(e) => setOwnerName(e.target.value)} style={inputStyle} placeholder="代表者名" />
-          <input value={ownerNameKana} onChange={(e) => setOwnerNameKana(e.target.value)} style={inputStyle} placeholder="かな" />
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px', marginBottom: '20px' }}>
+          <div>
+            <label style={labelStyle}>代表者名</label>
+            <input value={ownerName} onChange={(e) => setOwnerName(e.target.value)} style={inputStyle} placeholder="お名前" />
+          </div>
+          <div>
+            <label style={labelStyle}>ふりがな</label>
+            <input value={ownerNameKana} onChange={(e) => setOwnerNameKana(e.target.value)} style={inputStyle} placeholder="おなまえ" />
+          </div>
         </div>
 
         {/* 業種・URL */}
-        <label style={{ fontSize: '0.8rem', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>業種</label>
-        <select value={businessType} onChange={(e) => setBusinessType(e.target.value)} style={{ ...inputStyle, marginBottom: '15px' }}>
-          <option value="美容室・理容室">美容室・理容室</option>
-          <option value="ネイル・アイラッシュ">ネイル・アイラッシュ</option>
-          <option value="エステ・リラク">エステ・リラク</option>
-          <option value="整体・接骨院・針灸">整体・接骨院・針灸</option>
-          <option value="飲食店・カフェ">飲食店・カフェ</option>
-          <option value="その他・ライフ">その他・ライフ</option>
-        </select>
+        <div style={{ marginBottom: '20px' }}>
+          <label style={labelStyle}>業種</label>
+          <select value={businessType} onChange={(e) => setBusinessType(e.target.value)} style={inputStyle}>
+            <option value="美容室・理容室">美容室・理容室</option>
+            <option value="ネイル・アイラッシュ">ネイル・アイラッシュ</option>
+            <option value="エステ・リラク">エステ・リラク</option>
+            <option value="整体・接骨院・針灸">整体・接骨院・針灸</option>
+            <option value="飲食店・カフェ">飲食店・カフェ</option>
+            <option value="その他・ライフ">その他・ライフ</option>
+          </select>
+        </div>
         
-        <label style={{ fontSize: '0.8rem', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>🌐 公式サイトURL</label>
-        <input value={officialUrl} onChange={(e) => setOfficialUrl(e.target.value)} style={{ ...inputStyle, marginBottom: '15px' }} placeholder="https://..." />
+        <div style={{ marginBottom: '20px' }}>
+          <label style={labelStyle}><Globe size={14} /> 公式サイトURL</label>
+          <input value={officialUrl} onChange={(e) => setOfficialUrl(e.target.value)} style={inputStyle} placeholder="https://..." />
+        </div>
         
         {/* 基本連絡先 */}
-        <label style={{ fontSize: '0.8rem', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>住所</label>
-        <input value={address} onChange={(e) => setAddress(e.target.value)} style={{ ...inputStyle, marginBottom: '15px' }} />
+        <div style={{ marginBottom: '20px' }}>
+          <label style={labelStyle}><MapPin size={14} /> 住所</label>
+          <input value={address} onChange={(e) => setAddress(e.target.value)} style={inputStyle} placeholder="店舗の所在地" />
+        </div>
         
-        <label style={{ fontSize: '0.8rem', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>電話番号</label>
-        <input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} style={{ ...inputStyle, marginBottom: '15px' }} />
-        
-        <label style={{ fontSize: '0.8rem', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>メール</label>
-        <input type="email" value={emailContact} onChange={(e) => setEmailContact(e.target.value)} style={{ ...inputStyle, marginBottom: '15px' }} />
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px', marginBottom: '20px' }}>
+          <div>
+            <label style={labelStyle}><Phone size={14} /> 電話番号</label>
+            <input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} style={inputStyle} placeholder="090-0000-0000" />
+          </div>
+          <div>
+            <label style={labelStyle}><Mail size={14} /> お問い合わせ用メール</label>
+            <input type="email" value={emailContact} onChange={(e) => setEmailContact(e.target.value)} style={inputStyle} placeholder="mail@example.com" />
+          </div>
+        </div>
         
         {/* サブタイトル (プレビュー付き) */}
-        <label style={{ fontSize: '0.8rem', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>サブタイトル</label>
+        <label style={labelStyle}>サブタイトル (予約画面に表示されます)</label>
         <input value={description} onChange={(e) => setDescription(e.target.value)} style={{ ...inputStyle, marginBottom: '8px' }} placeholder="スラッシュ(/)で改行できます" />
-        <div style={{ marginBottom: '20px', padding: '12px', background: '#f8fafc', borderRadius: '10px', border: '1px solid #e2e8f0' }}>
-          <div style={{ fontSize: '0.85rem', fontWeight: 'bold', color: themeColor, lineHeight: '1.5' }}>
+        <div style={{ marginBottom: '24px', padding: '16px', background: '#f8fafc', borderRadius: '12px', border: `1px solid ${themeColor}22` }}>
+          <div style={{ fontSize: '0.85rem', fontWeight: 'bold', color: themeColor, lineHeight: '1.6' }}>
             {description ? description.split('/').map((line, idx) => (
               <React.Fragment key={idx}>{line}{idx < description.split('/').length - 1 && <br />}</React.Fragment>
             )) : 'プレビューが表示されます'}
@@ -199,17 +250,21 @@ if (uploadError) {
         </div>
 
         {/* 紹介・詳細 */}
-        <label style={{ fontSize: '0.8rem', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>店舗紹介・詳細アピール文</label>
-        <textarea value={introText} onChange={(e) => setIntroText(e.target.value)} style={{ ...inputStyle, minHeight: '150px', marginBottom: '15px' }} />
+        <div style={{ marginBottom: '20px' }}>
+          <label style={labelStyle}><Info size={14} /> 店舗紹介・詳細アピール文</label>
+          <textarea value={introText} onChange={(e) => setIntroText(e.target.value)} style={{ ...inputStyle, minHeight: '150px' }} placeholder="お客様へのメッセージをご記入ください" />
+        </div>
         
-        <label style={{ fontSize: '0.8rem', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>注意事項</label>
-        <textarea value={notes} onChange={(e) => setNotes(e.target.value)} style={{ ...inputStyle, border: '2px solid #ef4444', minHeight: '80px' }} />
+        <div style={{ marginBottom: '24px' }}>
+          <label style={labelStyle}><AlertCircle size={14} /> 注意事項</label>
+          <textarea value={notes} onChange={(e) => setNotes(e.target.value)} style={{ ...inputStyle, border: '2px solid #fee2e2', minHeight: '80px' }} placeholder="キャンセル規定や遅刻についてなど" />
+        </div>
 
         <button 
           onClick={handleSave} 
-          style={{ width: '100%', padding: '16px', background: themeColor, color: '#fff', border: 'none', borderRadius: '12px', fontWeight: 'bold', fontSize: '1rem', marginTop: '20px', boxShadow: '0 4px 12px rgba(0,0,0,0.1)', cursor: 'pointer' }}
+          style={{ width: '100%', padding: '18px', background: themeColor, color: '#fff', border: 'none', borderRadius: '16px', fontWeight: 'bold', fontSize: '1.1rem', marginTop: '10px', boxShadow: `0 8px 20px ${themeColor}44`, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
         >
-          店舗プロフィールを保存する 💾
+          <Save size={20} /> 設定内容を保存する 💾
         </button>
       </section>
     </div>

@@ -1,13 +1,14 @@
 import React, { useEffect, useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import { supabase } from "../supabaseClient";
 import { 
   Settings, Menu as MenuIcon, Clock, ClipboardList, 
-  ExternalLink, MessageCircle, MapPin, Sparkles
+  ExternalLink, MessageCircle, MapPin, Sparkles, Mail
 } from 'lucide-react';
 
 const AdminDashboard = () => {
   const { shopId } = useParams();
+  const navigate = useNavigate();
   const [shopData, setShopData] = useState(null);
 
   useEffect(() => {
@@ -27,13 +28,15 @@ const AdminDashboard = () => {
   const gridStyle = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '20px' };
   
   const cardStyle = { 
-    background: '#fff', padding: '24px', borderRadius: '20px', border: '1px solid #e2e8f0', 
+    background: '#fff', padding: '32px 24px', borderRadius: '24px', border: '1px solid #e2e8f0', 
     display: 'flex', flexDirection: 'column', alignItems: 'center', 
-    textAlign: 'center', transition: 'transform 0.2s', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)' 
+    textAlign: 'center', transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)', 
+    boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)', cursor: 'pointer',
+    textDecoration: 'none', position: 'relative', overflow: 'hidden'
   };
   
   const iconBoxStyle = (color) => ({ 
-    width: '64px', height: '64px', borderRadius: '16px', 
+    width: '64px', height: '64px', borderRadius: '20px', 
     background: `${color}10`, color: color, 
     display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '16px' 
   });
@@ -60,47 +63,51 @@ const AdminDashboard = () => {
       {/* カードグリッド */}
       <div style={gridStyle}>
         
-        {/* 予約台帳（案内人なし） */}
+        {/* 予約台帳 */}
         <NavCard 
           title="予約台帳" desc="最新予約の確認・手動登録" icon={<ClipboardList size={28} />} color="#10b981"
           to={`/admin/${shopId}/reservations`}
           cardStyle={cardStyle} iconBoxStyle={iconBoxStyle} 
         />
 
-        {/* 店舗情報（案内人あり） */}
+        {/* 店舗情報 */}
         <NavCard 
-          title="店舗情報" desc="店名、住所、魔王を倒すサブタイトルなど" icon={<MapPin size={28} />} color="#3b82f6"
+          title="店舗情報" desc="店名、住所、サブタイトルなどの基本設定" icon={<MapPin size={28} />} color="#3b82f6"
           to={`/admin/${shopId}/settings/basic`}
-          guideTo={`/admin/${shopId}/settings/basic-guide`}
           cardStyle={cardStyle} iconBoxStyle={iconBoxStyle} 
         />
 
-        {/* メニュー管理（案内人あり） */}
+        {/* メニュー管理 */}
         <NavCard 
           title="メニュー管理" desc="サービス・連動設定の構築" icon={<MenuIcon size={28} />} color="#ec4899"
           to={`/admin/${shopId}/settings/menu`}
-          guideTo={`/admin/${shopId}/settings/menu-guide`}
           cardStyle={cardStyle} iconBoxStyle={iconBoxStyle} 
         />
 
-        {/* 営業時間（案内人あり） */}
+        {/* 営業時間 */}
         <NavCard 
-          title="営業時間・休日" desc="1コマの単位・休憩・定休日" icon={<Clock size={28} />} color="#f59e0b"
+          title="営業時間・休日" desc="1コマの単位・休憩・定休日・予約制限" icon={<Clock size={28} />} color="#f59e0b"
           to={`/admin/${shopId}/settings/schedule`}
-          guideTo={`/admin/${shopId}/settings/schedule-guide`}
           cardStyle={cardStyle} iconBoxStyle={iconBoxStyle} 
         />
 
-        {/* LINE連携（案内人なし） */}
+        {/* メール設定 */}
         <NavCard 
-          title="LINE連携" desc="通知設定・Messaging API" icon={<MessageCircle size={28} />} color="#00b900"
+          title="メール設定" desc="予約完了メールを自分らしくカスタマイズ" icon={<Mail size={28} />} color="#8b5cf6"
+          to={`/admin/${shopId}/settings/email`}
+          cardStyle={cardStyle} iconBoxStyle={iconBoxStyle} 
+        />
+
+        {/* LINE連携 */}
+        <NavCard 
+          title="LINE連携" desc="通知設定・Messaging APIの連携" icon={<MessageCircle size={28} />} color="#00b900"
           to={`/admin/${shopId}/settings/line`}
           cardStyle={cardStyle} iconBoxStyle={iconBoxStyle} 
         />
 
-        {/* 全般設定（案内人なし） */}
+        {/* 全般設定 */}
         <NavCard 
-          title="全般設定" desc="カラー・共有ID・パスワード" icon={<Settings size={28} />} color="#6366f1"
+          title="全般設定" desc="カラー・共有ID・パスワード設定" icon={<Settings size={28} />} color="#6366f1"
           to={`/admin/${shopId}/settings/general`}
           cardStyle={cardStyle} iconBoxStyle={iconBoxStyle} 
         />
@@ -108,49 +115,44 @@ const AdminDashboard = () => {
       </div>
 
       <footer style={{ marginTop: '50px', textAlign: 'center' }}>
-        <p style={{ fontSize: '0.7rem', color: '#94a3b8', fontWeight: 'bold' }}>QUEST HUB v1.0.5 - READY FOR ADVENTURE</p>
+        <p style={{ fontSize: '0.7rem', color: '#94a3b8', fontWeight: 'bold' }}>QUEST HUB v1.0.6 - READY FOR ADVENTURE</p>
       </footer>
     </div>
   );
 };
 
-// --- サブコンポーネント：NavCard ---
-const NavCard = ({ to, guideTo, title, desc, icon, color, cardStyle, iconBoxStyle }) => {
+// --- サブコンポーネント：NavCard (リニューアル版) ---
+const NavCard = ({ to, title, desc, icon, color, cardStyle, iconBoxStyle }) => {
   return (
-    <div 
+    <Link 
+      to={to}
       style={cardStyle}
-      onMouseOver={(e) => e.currentTarget.style.transform = 'translateY(-5px)'}
-      onMouseOut={(e) => e.currentTarget.style.transform = 'translateY(0)'}
+      onMouseOver={(e) => {
+        e.currentTarget.style.transform = 'translateY(-8px)';
+        e.currentTarget.style.borderColor = color;
+        e.currentTarget.style.boxShadow = `0 12px 20px -5px ${color}22`;
+      }}
+      onMouseOut={(e) => {
+        e.currentTarget.style.transform = 'translateY(0)';
+        e.currentTarget.style.borderColor = '#e2e8f0';
+        e.currentTarget.style.boxShadow = '0 4px 6px -1px rgba(0,0,0,0.05)';
+      }}
     >
       <div style={iconBoxStyle(color)}>{icon}</div>
-      <h3 style={{ margin: '0 0 8px', color: '#1e293b', fontSize: '1.1rem' }}>{title}</h3>
-      <p style={{ margin: '0 0 24px', color: '#64748b', fontSize: '0.75rem', lineHeight: '1.5', minHeight: '3em' }}>{desc}</p>
+      <h3 style={{ margin: '0 0 8px', color: '#1e293b', fontSize: '1.2rem', fontWeight: 'bold' }}>{title}</h3>
+      <p style={{ margin: '0', color: '#64748b', fontSize: '0.85rem', lineHeight: '1.5' }}>{desc}</p>
       
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', width: '100%', marginTop: 'auto' }}>
-        {/* 自力で設定ボタン */}
-        <Link to={to} style={{ 
-          textDecoration: 'none', padding: '12px', borderRadius: '10px', 
-          background: '#f1f5f9', color: '#475569', fontSize: '0.8rem', 
-          fontWeight: 'bold', textAlign: 'center', transition: '0.2s'
-        }}>
-          自力で設定する
-        </Link>
-        
-        {/* 案内人召喚ボタン（設定がある場合のみ表示） */}
-        {guideTo && (
-          <Link to={guideTo} style={{ 
-            textDecoration: 'none', padding: '12px', borderRadius: '10px', 
-            background: color, color: '#fff', fontSize: '0.8rem', 
-            fontWeight: 'bold', textAlign: 'center', display: 'flex', 
-            alignItems: 'center', justifyContent: 'center', gap: '6px',
-            boxShadow: `0 4px 12px ${color}33`
-          }}>
-            <Sparkles size={14} /> 案内人を召喚
-          </Link>
-        )}
+      {/* 右下の小さな矢印演出 */}
+      <div style={{ position: 'absolute', bottom: '20px', right: '20px', color: '#cbd5e1' }}>
+        <ChevronRight size={20} />
       </div>
-    </div>
+    </Link>
   );
 };
+
+// ヘルパー用（ChevronRightが必要なため追加）
+const ChevronRight = ({ size, color }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+);
 
 export default AdminDashboard;
