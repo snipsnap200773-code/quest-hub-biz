@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useLocation, useNavigate } from 'react-router-dom';
-// ✅ 既存のインポートを維持
 import { supabase, supabaseAnon } from '../supabaseClient';
 
 function ConfirmReservation() {
@@ -8,7 +7,6 @@ function ConfirmReservation() {
   const location = useLocation();
   const navigate = useNavigate();
 
-  // ✅ 前の画面から引き継いだデータ（customShopName を追加）
   const { 
     people, 
     totalSlotsNeeded, 
@@ -17,7 +15,7 @@ function ConfirmReservation() {
     adminDate, 
     adminTime, 
     lineUser, 
-    customShopName // 🆕 入り口別の専用屋号
+    customShopName 
   } = location.state || {};
   
   const isAdminEntry = !!adminDate; 
@@ -27,11 +25,8 @@ function ConfirmReservation() {
   const [customerPhone, setCustomerPhone] = useState('');
   const [customerEmail, setCustomerEmail] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
-
-  // 🆕 顧客連動用State
   const [suggestedCustomers, setSuggestedCustomers] = useState([]);
   const [selectedCustomerId, setSelectedCustomerId] = useState(null);
-  // 🆕 キーボード選択用のIndex
   const [selectedIndex, setSelectedIndex] = useState(-1);
 
   useEffect(() => {
@@ -40,7 +35,6 @@ function ConfirmReservation() {
       return;
     }
 
-    // ✅ 【最優先ロジック】LINE ID で名簿を照合
     const checkLineCustomer = async () => {
       if (lineUser?.userId) {
         const { data: cust } = await supabase
@@ -66,7 +60,7 @@ function ConfirmReservation() {
 
     checkLineCustomer();
     fetchShop();
-  }, [lineUser, shopId]);
+  }, [lineUser, shopId, date, adminDate, navigate]);
 
   const fetchShop = async () => {
     const { data } = await supabase.from('profiles').select('*').eq('id', shopId).single();
@@ -75,13 +69,7 @@ function ConfirmReservation() {
 
   useEffect(() => {
     const searchCustomers = async () => {
-      // 🛑 管理者モード（ねじ込み予約）でない場合は、検索ロジックを停止
-      if (!isAdminEntry) {
-        setSuggestedCustomers([]);
-        return;
-      }
-
-      if (!customerName || customerName.length < 1 || selectedCustomerId) {
+      if (!isAdminEntry || !customerName || customerName.length < 1 || selectedCustomerId) {
         setSuggestedCustomers([]);
         setSelectedIndex(-1);
         return;
@@ -94,11 +82,11 @@ function ConfirmReservation() {
         .limit(5);
       
       setSuggestedCustomers(data || []);
-      setSelectedIndex(-1); // リストが変わったら選択をリセット
+      setSelectedIndex(-1);
     };
     const timer = setTimeout(searchCustomers, 300);
     return () => clearTimeout(timer);
-  }, [customerName, selectedCustomerId, isAdminEntry]);
+  }, [customerName, selectedCustomerId, isAdminEntry, shopId]);
 
   const handleSelectCustomer = (c) => {
     setCustomerName(c.name);
@@ -109,10 +97,8 @@ function ConfirmReservation() {
     setSelectedIndex(-1);
   };
 
-  // 🆕 キーボード操作ハンドラー
   const handleKeyDown = (e) => {
     if (suggestedCustomers.length === 0) return;
-
     if (e.key === 'ArrowDown') {
       e.preventDefault();
       setSelectedIndex(prev => (prev < suggestedCustomers.length - 1 ? prev + 1 : prev));
@@ -150,7 +136,7 @@ function ConfirmReservation() {
     const cancelUrl = `${window.location.origin}/cancel?token=${cancelToken}`;
 
     try {
-      // ✅ 紐付けチェック
+      // ✅ 顧客紐付け・更新
       let query = supabase.from('customers').select('id, total_visits').eq('shop_id', shopId);
       if (lineUser?.userId) {
         query = query.eq('line_user_id', lineUser.userId);
@@ -160,36 +146,31 @@ function ConfirmReservation() {
       const { data: existingCust } = await query.maybeSingle();
 
       if (existingCust) {
-        await supabase
-          .from('customers')
-          .update({
-            phone: customerPhone || undefined,
-            email: customerEmail || undefined,
-            line_user_id: lineUser?.userId || undefined,
-            total_visits: (existingCust.total_visits || 0) + 1,
-            last_arrival_at: startDateTime.toISOString(),
-            updated_at: new Date().toISOString()
-          })
-          .eq('id', existingCust.id);
+        await supabase.from('customers').update({
+          phone: customerPhone || undefined,
+          email: customerEmail || undefined,
+          line_user_id: lineUser?.userId || undefined,
+          total_visits: (existingCust.total_visits || 0) + 1,
+          last_arrival_at: startDateTime.toISOString(),
+          updated_at: new Date().toISOString()
+        }).eq('id', existingCust.id);
       } else {
-        await supabase
-          .from('customers')
-          .insert([{
-            shop_id: shopId,
-            name: customerName,
-            phone: customerPhone,
-            email: customerEmail,
-            line_user_id: lineUser?.userId || null,
-            total_visits: 1,
-            last_arrival_at: startDateTime.toISOString()
-          }]);
+        await supabase.from('customers').insert([{
+          shop_id: shopId,
+          name: customerName,
+          phone: customerPhone,
+          email: customerEmail,
+          line_user_id: lineUser?.userId || null,
+          total_visits: 1,
+          last_arrival_at: startDateTime.toISOString()
+        }]);
       }
 
-// ✅ 修正：ReservationFormで作った「fullName（合体名）」を正式採用します
       const menuLabel = people.length > 1
         ? people.map((p, i) => `${i + 1}人目: ${p.fullName}`).join(' / ')
         : (people[0]?.fullName || 'メニューなし');
 
+      // ✅ 予約データの挿入
       const { error: dbError } = await supabase.from('reservations').insert([
         {
           shop_id: shopId,
@@ -204,10 +185,9 @@ function ConfirmReservation() {
           res_type: 'normal',
           line_user_id: lineUser?.userId || null,
           cancel_token: cancelToken,
-          menu_name: menuLabel, // 🆕 ここで新設したmenu_nameカラムに保存！
+          menu_name: menuLabel,
           options: { 
             people: people,
-            // 🆕 予約データにも「入り口別の屋号」を記録しておく（後で確認しやすくするため）
             applied_shop_name: customShopName || shop.business_name 
           }
         }
@@ -215,14 +195,14 @@ function ConfirmReservation() {
 
       if (dbError) throw dbError;
 
+      // ✅ 通知メール送信 (resend 関数を呼び出し)
       if (!isAdminEntry) {
-        // ✅ 【重要】メール送信時の店名を customShopName で上書き
-        await supabaseAnon.functions.invoke('send-reservation-email', {
+        await supabaseAnon.functions.invoke('resend', {
           body: {
+            type: 'booking', 
             shopId, 
             customerEmail, 
             customerName, 
-            // 🆕 ここで専用屋号を優先的に使用
             shopName: customShopName || shop.business_name,
             shopEmail: shop.email_contact, 
             startTime: `${targetDate.replace(/-/g, '/')} ${targetTime}`,
@@ -250,10 +230,7 @@ function ConfirmReservation() {
   };
 
   if (!shop) return null;
-
-  // ✅ テーマカラーの取得
   const themeColor = shop?.theme_color || '#2563eb';
-
   const displayDate = (adminDate || date).replace(/-/g, '/');
   const displayTime = adminTime || time;
 
@@ -272,27 +249,23 @@ function ConfirmReservation() {
         </div>
       )}
 
-      {/* 予約内容カード */}
       <div style={{ background: '#f8fafc', padding: '20px', borderRadius: '15px', marginBottom: '25px', border: '1px solid #e2e8f0' }}>
-        {/* 🆕 屋号の表示（専用屋号があればそれを表示、なければ元の店名） */}
         <p style={{ margin: '0 0 12px 0', fontSize: '1.1rem', fontWeight: 'bold', color: themeColor }}>
           🏨 {customShopName || shop.business_name}
         </p>
-        
         <p style={{ margin: '0 0 12px 0' }}>📅 <b>日時：</b> {displayDate} {displayTime} 〜</p>
-<p style={{ margin: '0 0 8px 0' }}>📋 <b>選択メニュー：</b></p>
+        <p style={{ margin: '0 0 8px 0' }}>📋 <b>選択メニュー：</b></p>
         <div style={{ background: '#fff', padding: '10px', borderRadius: '8px', border: '1px solid #eee', fontSize: '0.85rem' }}>
           {people && people.map((person, idx) => (
             <div key={idx} style={{ marginBottom: idx < people.length - 1 ? '10px' : 0, paddingBottom: idx < people.length - 1 ? '10px' : 0, borderBottom: idx < people.length - 1 ? '1px dashed #eee' : 'none' }}>
               {people.length > 1 && (
                 <div style={{ fontWeight: 'bold', color: themeColor, marginBottom: '4px' }}>{idx + 1}人目</div>
               )}
-              {/* ✅ ここを修正：合体名(fullName)をドーンと表示します */}
               <div style={{ fontWeight: 'bold' }}>{person.fullName}</div>
             </div>
           ))}
         </div>
-              </div>
+      </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
         <div style={{ position: 'relative' }}>
@@ -305,7 +278,6 @@ function ConfirmReservation() {
             placeholder="お名前を入力" 
             style={{ width: '100%', padding: '14px', borderRadius: '10px', border: '1px solid #ddd', boxSizing: 'border-box', fontSize: '1rem' }} 
           />
-          
           {isAdminEntry && suggestedCustomers.length > 0 && (
             <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: '#fff', boxShadow: '0 10px 25px rgba(0,0,0,0.1)', borderRadius: '10px', zIndex: 100, border: '1px solid #eee', overflow: 'hidden' }}>
               {suggestedCustomers.map((c, index) => (
