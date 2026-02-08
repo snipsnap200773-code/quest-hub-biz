@@ -141,12 +141,11 @@ const ScheduleSettings = () => {
             同時予約の受け入れ上限（キャパシティ）
           </label>
           <select value={maxCapacity} onChange={(e) => setMaxCapacity(parseInt(e.target.value))} style={selectStyle}>
-            {[1, 2, 3, 4, 5, 10].map(num => (
-              <option key={num} value={num}>
-                {num}名（{num === 1 ? 'マンツーマン' : '同時受付可能'}）
-              </option>
-            ))}
-          </select>
+{Array.from({ length: 10 }, (_, i) => i + 1).map(num => (
+  <option key={num} value={num}>
+    {num}名（{num === 1 ? 'マンツーマン' : '同時受付可能'}）
+  </option>
+))}          </select>
           <p style={{ fontSize: '0.7rem', color: '#64748b', marginTop: '6px', lineHeight: '1.4' }}>
             ※同じ時間枠に最大何名まで予約を許可するか設定します。
           </p>
@@ -177,7 +176,7 @@ const ScheduleSettings = () => {
           <b style={{ fontSize: '0.9rem', color: '#334155' }}>自動詰め機能を有効にする</b>
         </label>
       </section>
-      
+
       {/* 📅 定休日の設定 */}
       <section style={{ ...cardStyle, border: '1px solid #fee2e2' }}>
         <h3 style={{ marginTop: 0, color: '#ef4444', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '1.1rem', marginBottom: '20px' }}>
