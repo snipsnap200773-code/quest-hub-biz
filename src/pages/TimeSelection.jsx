@@ -107,11 +107,10 @@ function TimeSelection() {
     return slots;
   }, [shop]);
 
-// ✅ 三土手さんの重要ロジック：空き状況チェック（全店舗の予約を合算判定するように強化 ＆ 曜日判定バグ修正版）
+  // ✅ 三土手さんの重要ロジック：空き状況チェック（キャパシティカウント方式にアップデート）
   const checkAvailability = (date, timeStr) => {
     if (!shop?.business_hours) return { status: 'none' };
     
-    // 1. 定休日設定（赤いボタン）のチェック。これが最優先。
     if (checkIsRegularHoliday(date)) return { status: 'closed', label: '休' };
 
     const dayOfWeek = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'][date.getDay()];
@@ -120,13 +119,6 @@ function TimeSelection() {
     const now = new Date();
     const todayStr = now.toLocaleDateString('sv-SE');
 
-    // ❌ 【修正箇所】ここで !hours や is_closed を見て「休」を返すのをやめました。
-    // これにより、定休日ボタンが押されていない限り、勝手に「休」になることはありません。
-
-    // 2. 営業時間外の判定
-    // 営業時間が入力されている場合のみチェックし、未入力ならデフォルト（例: 09:00-18:00）として扱う、
-    // あるいは「設定なし＝営業外」とするかは三土手さんの仕様次第ですが、
-    // ここでは安全のため「!hours」の場合はデフォルト値を通るように書き換えます。
     const openTime = hours?.open || "09:00";
     const closeTime = hours?.close || "18:00";
 
@@ -135,6 +127,7 @@ function TimeSelection() {
 
     const targetDateTime = new Date(`${dateStr}T${timeStr}:00`);
     const buffer = shop.buffer_preparation_min || 0;
+    const interval = shop.slot_interval_min || 15;
 
     const limitDays = Math.floor((shop.min_lead_time_hours || 0) / 24);
     const limitDate = new Date(now);
@@ -144,7 +137,6 @@ function TimeSelection() {
     if (dateStr === todayStr && targetDateTime < now) return { status: 'past', label: '－' };
     if (new Date(dateStr) < limitDate) return { status: 'past', label: '－' };
 
-    const interval = shop.slot_interval_min || 15;
     const totalMinRequired = (totalSlotsNeeded * interval);
     const potentialEndTime = new Date(targetDateTime.getTime() + totalMinRequired * 60 * 1000);
 
@@ -152,19 +144,29 @@ function TimeSelection() {
     const closeDateTime = new Date(`${dateStr}T${String(closeH).padStart(2,'0')}:${String(closeM).padStart(2,'0')}:00`);
     if (potentialEndTime > closeDateTime) return { status: 'short', label: '△' };
 
-    // ...（以下、existingReservations.some による予約重複チェックや自動詰めロジックへ続く）
-    // ✅ ここで全店舗（自分＋同期店）の予約を合算チェック
-    const isBooked = existingReservations.some(res => {
-      const resStart = new Date(res.start_time).getTime();
-      const resEnd = new Date(res.end_time).getTime();
-      const bufferEnd = resEnd + (buffer * 60 * 1000);
-      return (targetDateTime.getTime() < bufferEnd && potentialEndTime.getTime() > resStart);
-    });
+    // --- 🆕 キャパシティ（同時予約数）のカウント方式へ変更 ---
+    const maxCapacity = shop?.max_capacity || 1;
+    let isFull = false;
 
-    if (isBooked) return { status: 'booked', label: '×' };
+    // メニューの所要時間中、すべてのコマで上限に達していないかチェック
+    for (let t = targetDateTime.getTime(); t < potentialEndTime.getTime(); t += interval * 60 * 1000) {
+      const slotCount = existingReservations.filter(res => {
+        const resStart = new Date(res.start_time).getTime();
+        const resEnd = new Date(res.end_time).getTime();
+        const bufferEnd = resEnd + (buffer * 60 * 1000);
+        return t >= resStart && t < bufferEnd;
+      }).length;
 
-    // ✅ 三土手さんの高度なロジック：自動詰め（隙間ブロック）も全店舗予約ベースで動作
-    if (shop.auto_fill_logic) {
+      if (slotCount >= maxCapacity) {
+        isFull = true;
+        break;
+      }
+    }
+
+    if (isFull) return { status: 'booked', label: '×' };
+
+    // ✅ 自動詰め（隙間ブロック）ロジック：上限1名の時のみ動作させる
+    if (shop.auto_fill_logic && maxCapacity === 1) {
       const dayRes = existingReservations.filter(r => r.start_time.startsWith(dateStr));
       if (dayRes.length > 0) {
         const specialSlots = [];
