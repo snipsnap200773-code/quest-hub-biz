@@ -253,13 +253,13 @@ function AdminReservations() {
         }
       }
 
-      const payload = {
+const payload = {
         shop_id: shopId,
         name: editFields.name,
-        phone: editFields.phone,
-        email: editFields.email,
-        memo: editFields.memo,
-        line_user_id: editFields.line_user_id,
+        phone: editFields.phone || null,        // 👈 空なら null
+        email: editFields.email || null,        // 👈 空なら null
+        memo: editFields.memo || null,          // 👈 空なら null
+        line_user_id: editFields.line_user_id || null, // 👈 これが 400 エラーの主犯格であることが多いです
         updated_at: new Date().toISOString()
       };
 
@@ -714,13 +714,14 @@ onClick={() => {
       openDetail(res[0]);
     }
   } 
-  // 2. 管理者ブロック枠（予定・休みなど）の場合
-  else if (res && res.res_type === 'blocked') {
+  // 2. 管理者ブロック枠（予定・休みなど）のうち、「手動入力したもの」だけを判定
+  // 💡 ポイント：!res.isRegularHoliday を追加して、システムの定休日をここから除外します
+  else if (res && res.res_type === 'blocked' && !res.isRegularHoliday) {
     openDetail(res);
   } 
-  // 3. それ以外（空き枠、定休日、インターバルなど）
+  // 3. それ以外（空き枠、システム上の定休日、インターバルなど）
   else {
-    // 💡 何もない場所や特殊な枠をタップしたら、管理メニューを開く
+    // 💡 これで、定休日をタップしたときも「管理メニュー」が開くようになります！
     setShowMenuModal(true); 
   } 
 }}
@@ -783,10 +784,38 @@ onClick={() => {
         )}
       </div>
 
-      {(showCustomerModal || showDetailModal) && (
+{(showCustomerModal || showDetailModal) && (
         <div onClick={() => { if(selectedRes?.isRegularHoliday) return; setShowCustomerModal(false); setShowDetailModal(false); }} style={overlayStyle}>
           <div onClick={(e) => e.stopPropagation()} style={{ ...modalContentStyle, maxWidth: '650px', position: 'relative' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}>
+            
+            {/* 🆕 最上部：ねじ込み予約ボタン (通常予約がある場合のみ表示) */}
+            {selectedRes?.res_type === 'normal' && (
+              <button 
+                onClick={() => navigate(`/shop/${shopId}/reserve`, { 
+                  state: { adminDate: selectedDate, adminTime: targetTime, isAdminMode: true } 
+                })} 
+                style={{ 
+                  width: '100%', 
+                  padding: '16px', 
+                  background: themeColor, 
+                  color: '#fff', 
+                  border: 'none', 
+                  borderRadius: '15px', 
+                  fontWeight: 'bold', 
+                  cursor: 'pointer', 
+                  marginBottom: '20px',
+                  fontSize: '1rem',
+                  boxShadow: `0 4px 12px ${themeColor}44`,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '8px'
+                }}
+              >
+                ➕ この時間にさらに予約を入れる（ねじ込み）
+              </button>
+            )}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}>
               <h2 style={{ margin: 0, fontSize: '1.2rem' }}>{showCustomerModal ? '👤 顧客マスター編集' : (selectedRes?.res_type === 'blocked' ? (selectedRes.isRegularHoliday ? '📅 定休日' : '🚫 ブロック設定') : '📅 予約詳細・名簿更新')}</h2>
               {isPC && <button onClick={() => { setShowCustomerModal(false); setShowDetailModal(false); }} style={{ background: 'none', border: 'none', fontSize: '1.5rem', cursor: 'pointer' }}>×</button>}
             </div>
@@ -902,87 +931,56 @@ onClick={() => {
         </div>
       )}
 
-{/* 👥 予約者選択リストModal (複数予約がある場合に表示) */}
+{/* 👥 2. 予約者選択リストModal (複数予約がある場合に表示) */}
       {showSlotListModal && (
         <div onClick={() => setShowSlotListModal(false)} style={overlayStyle}>
-          <div 
-            onClick={(e) => e.stopPropagation()} 
-            style={{ 
-              ...modalContentStyle, 
-              maxWidth: '450px', 
-              textAlign: 'center', 
-              background: '#f8fafc', // 少し落ち着いた背景色
-              padding: '25px'
-            }}
-          >
+          <div onClick={(e) => e.stopPropagation()} style={{ ...modalContentStyle, maxWidth: '450px', textAlign: 'center', background: '#f8fafc', padding: '25px' }}>
             <div style={{ marginBottom: '20px' }}>
               <h3 style={{ margin: '0 0 5px 0', color: '#64748b', fontSize: '0.9rem' }}>{selectedDate.replace(/-/g, '/')}</h3>
               <p style={{ fontWeight: '900', color: themeColor, fontSize: '1.8rem', margin: 0 }}>{targetTime} の予約</p>
               <p style={{ fontSize: '0.8rem', color: '#94a3b8', marginTop: '5px' }}>詳細を見たい方を選択してください</p>
             </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', maxHeight: '50vh', overflowY: 'auto', padding: '5px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', maxHeight: '55vh', overflowY: 'auto', padding: '5px' }}>
+              {/* 🆕 最上部：ねじ込み予約ボタン (リストModal版) */}
+              <div 
+                onClick={() => {
+                  setShowSlotListModal(false);
+                  navigate(`/shop/${shopId}/reserve`, { 
+                    state: { adminDate: selectedDate, adminTime: targetTime, isAdminMode: true } 
+                  });
+                }}
+                style={{
+                  background: themeColor,
+                  padding: '18px',
+                  borderRadius: '18px',
+                  border: `2px solid ${themeColor}`,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: 'pointer',
+                  color: '#fff',
+                  fontWeight: 'bold',
+                  boxShadow: `0 4px 12px ${themeColor}44`,
+                  marginBottom: '10px'
+                }}
+              >
+                ➕ 新しい予約をねじ込む
+              </div>
+
               {selectedSlotReservations.map((res, idx) => (
-                <div 
-                  key={res.id || idx}
-                  onClick={() => {
-                    setShowSlotListModal(false);
-                    openDetail(res);
-                  }}
-                  style={{
-                    background: '#fff',
-                    padding: '18px',
-                    borderRadius: '18px',
-                    border: `1px solid #e2e8f0`,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    cursor: 'pointer',
-                    transition: 'transform 0.2s, border-color 0.2s',
-                    boxShadow: '0 4px 6px rgba(0,0,0,0.02)'
-                  }}
-                  onMouseOver={(e) => {
-                    e.currentTarget.style.borderColor = themeColor;
-                    e.currentTarget.style.transform = 'translateY(-2px)';
-                  }}
-                  onMouseOut={(e) => {
-                    e.currentTarget.style.borderColor = '#e2e8f0';
-                    e.currentTarget.style.transform = 'translateY(0)';
-                  }}
-                >
+                <div key={res.id || idx} onClick={() => { setShowSlotListModal(false); openDetail(res); }} style={{ background: '#fff', padding: '18px', borderRadius: '18px', border: `1px solid #e2e8f0`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', boxShadow: '0 4px 6px rgba(0,0,0,0.02)' }}>
                   <div style={{ textAlign: 'left', flex: 1 }}>
                     <div style={{ fontWeight: '900', fontSize: '1.1rem', color: '#1e293b', marginBottom: '4px' }}>
                       {res.res_type === 'blocked' ? `🚫 ${res.customer_name}` : `👤 ${res.customer_name} 様`}
                     </div>
-                    <div style={{ fontSize: '0.75rem', color: '#64748b' }}>
-                      {res.res_type === 'normal' ? (
-                        res.options?.services?.map(s => s.name).join(', ') || 'メニュー未設定'
-                      ) : (
-                        'スケジュールブロック'
-                      )}
-                    </div>
+                    <div style={{ fontSize: '0.75rem', color: '#64748b' }}>{res.res_type === 'normal' ? (res.options?.services?.map(s => s.name).join(', ') || 'メニュー未設定') : 'スケジュールブロック'}</div>
                   </div>
-                  <div style={{ color: themeColor, fontSize: '1.2rem', fontWeight: 'bold' }}>
-                    〉
-                  </div>
+                  <div style={{ color: themeColor, fontSize: '1.2rem' }}>〉</div>
                 </div>
               ))}
             </div>
-
-            <button 
-              onClick={() => setShowSlotListModal(false)} 
-              style={{ 
-                marginTop: '25px', 
-                padding: '12px', 
-                border: 'none', 
-                background: 'none', 
-                color: '#94a3b8', 
-                fontWeight: 'bold', 
-                cursor: 'pointer' 
-              }}
-            >
-              キャンセル
-            </button>
+            <button onClick={() => setShowSlotListModal(false)} style={{ marginTop: '25px', padding: '12px', border: 'none', background: 'none', color: '#94a3b8', fontWeight: 'bold', cursor: 'pointer' }}>キャンセル</button>
 
             {!isPC && (
               <button 
@@ -1008,6 +1006,7 @@ onClick={() => {
           </div>
         </div>
       )}
+
 {/* ⚙️ 3. 管理メニューModal (本家再現：ねじ込み予約・ブロック) */}
       {showMenuModal && (
         <div onClick={() => setShowMenuModal(false)} style={overlayStyle}>
