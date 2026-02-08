@@ -461,17 +461,17 @@ if (matches.length > 0) {
     const interval = shop.slot_interval_min || 15;
     const end = new Date(start.getTime() + interval * 60000);
     
-    const insertData = {
-      shop_id: shopId, 
-      customer_name: reason, // 🆕 3. 入力された文字を保存する
-      res_type: 'blocked',
-      start_at: start.toISOString(), end_at: end.toISOString(),
-      start_time: start.toISOString(), end_time: end.toISOString(),
-      total_slots: 1, 
-      customer_email: 'admin@example.com', 
-      customer_phone: '---', 
-      options: { services: [] }
-    };
+const insertData = {
+  shop_id: shopId, 
+  customer_name: reason, 
+  res_type: 'blocked', // 👈 SQLで追加したカラム
+  start_time: start.toISOString(), 
+  end_time: end.toISOString(),
+  total_slots: 1, 
+  customer_email: 'admin@example.com', 
+  customer_phone: '---', 
+  options: { type: 'admin_block' } // 👈 SQLで追加したカラム
+};
     
     const { error } = await supabase.from('reservations').insert([insertData]);
     if (error) alert(`エラー: ${error.message}`); 
@@ -701,27 +701,29 @@ if (matches.length > 0) {
   return (
     <td 
       key={`${dStr}-${time}`} 
-      onClick={() => { 
-        setSelectedDate(dStr); 
-        setTargetTime(time); 
-        
-        if (isArray) {
-          if (reservationCount > 1) {
-            // ✅ 2人以上の場合は「リスト選択Modal」を開く（後で作成）
-            setSelectedSlotReservations(res);
-            setShowSlotListModal(true);
-          } else {
-            // ✅ 1人の場合は既存の「詳細Modal」を直接開く
-            openDetail(res[0]);
-          }
-        } else if (res && !res.isRegularHoliday && res.res_type === 'blocked') {
-          // ブロック枠の場合
-          openDetail(res);
-        } else {
-          // 予約なし、または定休日
-          setShowMenuModal(true); 
-        } 
-      }} 
+onClick={() => { 
+  setSelectedDate(dStr); 
+  setTargetTime(time); 
+  
+  // 1. 予約がある場合（配列）
+  if (isArray) {
+    if (reservationCount > 1) {
+      setSelectedSlotReservations(res);
+      setShowSlotListModal(true);
+    } else {
+      openDetail(res[0]);
+    }
+  } 
+  // 2. 管理者ブロック枠（予定・休みなど）の場合
+  else if (res && res.res_type === 'blocked') {
+    openDetail(res);
+  } 
+  // 3. それ以外（空き枠、定休日、インターバルなど）
+  else {
+    // 💡 何もない場所や特殊な枠をタップしたら、管理メニューを開く
+    setShowMenuModal(true); 
+  } 
+}}
       style={{ borderRight: '1px solid #f1f5f9', borderBottom: '1px solid #f1f5f9', position: 'relative', cursor: 'pointer' }}
     >
       {res && (
@@ -1006,7 +1008,32 @@ if (matches.length > 0) {
           </div>
         </div>
       )}
+{/* ⚙️ 3. 管理メニューModal (本家再現：ねじ込み予約・ブロック) */}
+      {showMenuModal && (
+        <div onClick={() => setShowMenuModal(false)} style={overlayStyle}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: '#fff', padding: '35px', borderRadius: '30px', width: '90%', maxWidth: '340px', textAlign: 'center', position: 'relative' }}>
+            <h3 style={{ margin: '0 0 10px 0', color: '#64748b', fontSize: '0.9rem' }}>{selectedDate.replace(/-/g, '/')}</h3>
+            <p style={{ fontWeight: '900', color: themeColor, fontSize: '2.2rem', margin: '0 0 30px 0' }}>{targetTime}</p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <button 
+                onClick={() => navigate(`/shop/${shopId}/reserve`, { state: { adminDate: selectedDate, adminTime: targetTime, isAdminMode: true } })} 
+                style={{ padding: '22px', background: themeColor, color: '#fff', border: 'none', borderRadius: '20px', fontWeight: '900', fontSize: '1.2rem' }}
+              >
+                予約を入れる
+              </button>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                <button onClick={handleBlockTime} style={{ padding: '15px', background: '#fff', color: themeColor, border: `2px solid ${themeColorLight}`, borderRadius: '20px', fontWeight: 'bold', fontSize: '0.85rem' }}>「✕」または予定</button>
+                <button onClick={handleBlockFullDay} style={{ padding: '15px', background: '#ef4444', color: '#fff', border: 'none', borderRadius: '20px', fontWeight: 'bold', fontSize: '0.85rem' }}>今日を休みにする</button>
+              </div>
+              <button onClick={() => setShowMenuModal(false)} style={{ padding: '15px', border: 'none', background: 'none', color: '#94a3b8' }}>キャンセル</button>
+            </div>
+            {!isPC && (
+              <button onClick={() => setShowMenuModal(false)} style={{ position: 'fixed', bottom: '30px', left: '50%', transform: 'translateX(-50%)', background: '#1e293b', color: '#fff', border: 'none', padding: '12px 40px', borderRadius: '50px', fontWeight: 'bold', boxShadow: '0 10px 20px rgba(0,0,0,0.3)', zIndex: 4000 }}>閉じる ✕</button>
+            )}
           </div>
+        </div>
+      )}
+    </div>
   );
 }
 
