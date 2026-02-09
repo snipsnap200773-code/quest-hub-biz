@@ -16,6 +16,7 @@ function applyPlaceholders(template: string, data: any) {
     .replace(/{name}/g, data.customerName || "")
     .replace(/{shop_name}/g, data.shopName || "")
     .replace(/{start_time}/g, data.startTime || "")
+    .replace(/{staff_name}/g, data.staffName || "担当者なし")
     .replace(/{services}/g, data.services || "")
     .replace(/{cancel_url}/g, data.cancelUrl || "")
     .replace(/{official_url}/g, data.officialUrl || "");
@@ -46,7 +47,8 @@ Deno.serve(async (req) => {
       type, shopId, customerEmail, customerName, shopName, 
       startTime, services, shopEmail, cancelUrl, lineUserId, 
       notifyLineEnabled, owner_email, dashboard_url, reservations_url, 
-      reserve_url, password, ownerName, phone: ownerPhone, businessType
+      reserve_url, password, ownerName, phone: ownerPhone, businessType,
+      staffName
     } = payload;
     
     const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? "";
@@ -72,7 +74,7 @@ Deno.serve(async (req) => {
 
       const { data: resList, error: resError } = await supabaseAdmin
         .from('reservations')
-        .select('*, profiles(*)')
+        .select('*, profiles(*), staffs(name)')
         .gte('start_time', `${dateStr}T00:00:00.000Z`)
         .lte('start_time', `${dateStr}T23:59:59.999Z`)
         .eq('remind_sent', false)
@@ -230,12 +232,14 @@ finalSubject = `予約完了のお知らせ：${customerName} 様`;
 finalHtml = `<div lang="ja" style="font-family: sans-serif; color: #333; line-height: 1.6;">
     <h2 style="color: #2563eb;">予約完了のお知らせ</h2>
     <p><strong>${customerName} 様</strong></p>
-    <p>この度は ${shopName} をご利用いただきありがとうございます。</p>                <div style="background: #f8fafc; padding: 20px; border-radius: 10px; border: 1px solid #e2e8f0; margin: 20px 0;">
-                  <p style="margin: 5px 0;">👤 <strong>お客様:</strong> ${customerName} 様</p>
-                  <p style="margin: 5px 0;">📅 <strong>日時:</strong> ${startTime}</p>
-                  <p style="margin: 5px 0;">📋 <strong>メニュー:</strong> ${services}</p>
-                </div>
-                ${cancelUrl ? `<p style="font-size: 0.85rem;"><a href="${cancelUrl}" style="color: #2563eb;">ご予約のキャンセルはこちら</a></p>` : ''}
+    <p>この度は ${shopName} をご利用いただきありがとうございます。</p>
+    <div style="background: #f8fafc; padding: 20px; border-radius: 10px; border: 1px solid #e2e8f0; margin: 20px 0;">
+      <p style="margin: 5px 0;">👤 <strong>お客様:</strong> ${customerName} 様</p>
+      <p style="margin: 5px 0;">📅 <strong>日時:</strong> ${startTime}</p>
+      <p style="margin: 5px 0;">👤 <strong>担当:</strong> ${staffName || '店舗スタッフ'}</p>
+      <p style="margin: 5px 0;">📋 <strong>メニュー:</strong> ${services}</p>
+    </div>
+                    ${cancelUrl ? `<p style="font-size: 0.85rem;"><a href="${cancelUrl}" style="color: #2563eb;">ご予約のキャンセルはこちら</a></p>` : ''}
               </div>`;
           }
         }
@@ -265,7 +269,7 @@ finalHtml = `<div lang="ja" style="font-family: sans-serif; color: #333; line-he
     if (lineUserId && currentToken) {
       const customerMsg = type === 'cancel' 
         ? `【キャンセル完了】\n${customerName} 様、キャンセル手続きが完了いたしました。`
-        : `${customerName}様\nご予約ありがとうございます。\n日時: ${startTime}〜\n\n■キャンセル・変更について\n${cancelUrl}`;
+        : `${customerName}様\nご予約ありがとうございます。\n担当: ${staffName}\n日時: ${startTime}〜\n\n■キャンセル・変更について\n${cancelUrl}`;
       customerLineSent = await safePushToLine(lineUserId, customerMsg, currentToken, "CUSTOMER");
     }
     if (notifyLineEnabled !== false && currentToken && currentAdminId) {

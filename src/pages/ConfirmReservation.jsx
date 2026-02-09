@@ -15,7 +15,8 @@ function ConfirmReservation() {
     adminDate, 
     adminTime, 
     lineUser, 
-    customShopName 
+    customShopName,
+    staffId 
   } = location.state || {};
   
   const isAdminEntry = !!adminDate; 
@@ -28,6 +29,7 @@ function ConfirmReservation() {
   const [suggestedCustomers, setSuggestedCustomers] = useState([]);
   const [selectedCustomerId, setSelectedCustomerId] = useState(null);
   const [selectedIndex, setSelectedIndex] = useState(-1);
+  const [staffName, setStaffName] = useState('');
 
   useEffect(() => {
     if (!date && !adminDate) {
@@ -58,8 +60,21 @@ function ConfirmReservation() {
       }
     };
 
+    // 🆕 担当スタッフ名を取得する関数を追加
+    const fetchStaffName = async () => {
+      if (staffId) {
+        const { data } = await supabase
+          .from('staffs')
+          .select('name')
+          .eq('id', staffId)
+          .single();
+        if (data) setStaffName(data.name);
+      }
+    };
+
     checkLineCustomer();
     fetchShop();
+    fetchStaffName(); // 🆕 ここで実行！
   }, [lineUser, shopId, date, adminDate, navigate]);
 
   const fetchShop = async () => {
@@ -174,9 +189,12 @@ function ConfirmReservation() {
       const { error: dbError } = await supabase.from('reservations').insert([
         {
           shop_id: shopId,
+          staff_id: staffId,           // 🆕 送られてきたスタッフIDを保存
+          reservation_date: targetDate, // 🆕 カレンダー表示を高速化するための日付
           customer_name: customerName,
           customer_phone: customerPhone || '---',
           customer_email: customerEmail || 'admin@example.com',
+          // ... (以下、既存の項目はそのまま)
           start_at: startDateTime.toISOString(),
           end_at: endDateTime.toISOString(),
           start_time: startDateTime.toISOString(),
@@ -204,6 +222,7 @@ function ConfirmReservation() {
             customerEmail, 
             customerName, 
             shopName: customShopName || shop.business_name,
+            staffName: staffName,
             shopEmail: shop.email_contact, 
             startTime: `${targetDate.replace(/-/g, '/')} ${targetTime}`,
             services: menuLabel, 
@@ -250,11 +269,17 @@ function ConfirmReservation() {
       )}
 
       <div style={{ background: '#f8fafc', padding: '20px', borderRadius: '15px', marginBottom: '25px', border: '1px solid #e2e8f0' }}>
-        <p style={{ margin: '0 0 12px 0', fontSize: '1.1rem', fontWeight: 'bold', color: themeColor }}>
-          🏨 {customShopName || shop.business_name}
-        </p>
-        <p style={{ margin: '0 0 12px 0' }}>📅 <b>日時：</b> {displayDate} {displayTime} 〜</p>
-        <p style={{ margin: '0 0 8px 0' }}>📋 <b>選択メニュー：</b></p>
+  <p style={{ margin: '0 0 12px 0', fontSize: '1.1rem', fontWeight: 'bold', color: themeColor }}>
+    🏨 {customShopName || shop.business_name}
+  </p>
+  <p style={{ margin: '0 0 12px 0' }}>📅 <b>日時：</b> {displayDate} {displayTime} 〜</p>
+  
+  {/* 🆕 ここに担当者名を追加！ */}
+  {staffName && (
+    <p style={{ margin: '0 0 12px 0' }}>👤 <b>担当：</b> {staffName}</p>
+  )}
+
+  <p style={{ margin: '0 0 8px 0' }}>📋 <b>選択メニュー：</b></p>
         <div style={{ background: '#fff', padding: '10px', borderRadius: '8px', border: '1px solid #eee', fontSize: '0.85rem' }}>
           {people && people.map((person, idx) => (
             <div key={idx} style={{ marginBottom: idx < people.length - 1 ? '10px' : 0, paddingBottom: idx < people.length - 1 ? '10px' : 0, borderBottom: idx < people.length - 1 ? '1px dashed #eee' : 'none' }}>

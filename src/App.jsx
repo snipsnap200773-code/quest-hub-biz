@@ -23,6 +23,7 @@ import ScheduleSettings from './pages/admin/settings/ScheduleSettings';
 import LineSettings from './pages/admin/settings/LineSettings';
 import GeneralSettings from './pages/admin/settings/GeneralSettings';
 import EmailSettings from './pages/admin/settings/EmailSettings';
+import StaffSettings from './pages/admin/settings/StaffSettings';
 
 // ✨ 案内人（ガイド）
 import BasicSettingsGuide from './pages/admin/settings/BasicSettingsGuide';
@@ -66,6 +67,7 @@ function App() {
 
         {/* --- 🆕 QUEST HUB 個別設定ルート --- */}
         <Route path="/admin/:shopId/settings/basic" element={<BasicSettings />} />
+        <Route path="/admin/:shopId/settings/staff" element={<StaffSettings />} />
         <Route path="/admin/:shopId/settings/menu" element={<MenuSettings />} />
         <Route path="/admin/:shopId/settings/schedule" element={<ScheduleSettings />} />
         <Route path="/admin/:shopId/settings/email" element={<EmailSettings />} />

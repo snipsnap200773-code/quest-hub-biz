@@ -20,8 +20,10 @@ function ReservationForm() {
   const isLineSource = queryParams.get('source') === 'line';
   const isLineApp = /Line/i.test(navigator.userAgent);
 
-  // 🆕 【重要】入り口識別キー（?type=xxx）を取得
+// 🆕 【重要】入り口識別キー（?type=xxx）を取得
   const entryType = queryParams.get('type');
+  // 🆕 スタッフID（?staff=xxx）を取得
+  const staffIdFromUrl = queryParams.get('staff');
 
   // 基本データState
   const [shop, setShop] = useState(null);
@@ -254,13 +256,17 @@ const handleNextStep = () => {
       customShopName: displayBranding.name 
     };
 
-    if (isAdminMode) {
-      navigate(`/shop/${shopId}/confirm`, { 
-        state: { ...commonState, date: adminDate, time: adminTime, adminDate, adminTime } 
-      });
-    } else {
-      navigate(`/shop/${shopId}/reserve/time`, { state: commonState });
-    }
+if (isAdminMode) {
+  // 管理者モードの場合も、念のためURLパラメータを維持
+  const adminUrl = `/shop/${shopId}/confirm${staffIdFromUrl ? `?staff=${staffIdFromUrl}` : ''}`;
+  navigate(adminUrl, { 
+    state: { ...commonState, date: adminDate, time: adminTime, adminDate, adminTime } 
+  });
+} else {
+  // 🆕 URLの末尾に ?staff=xxx を付け足して移動する
+  const nextUrl = `/shop/${shopId}/reserve/time${staffIdFromUrl ? `?staff=${staffIdFromUrl}` : ''}`;
+  navigate(nextUrl, { state: commonState });
+}
   };
 
   const getGroupedOptions = (serviceId) => {

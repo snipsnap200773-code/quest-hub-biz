@@ -3,7 +3,8 @@ import { useParams, Link, useNavigate } from 'react-router-dom';
 import { supabase } from "../supabaseClient";
 import { 
   Settings, Menu as MenuIcon, Clock, ClipboardList, 
-  ExternalLink, MessageCircle, MapPin, Sparkles, Mail
+  ExternalLink, MessageCircle, MapPin, Sparkles, Mail,
+  Users
 } from 'lucide-react';
 
 const AdminDashboard = () => {
@@ -67,6 +68,13 @@ const AdminDashboard = () => {
         <NavCard 
           title="予約台帳" desc="最新予約の確認・手動登録" icon={<ClipboardList size={28} />} color="#10b981"
           to={`/admin/${shopId}/reservations`}
+          cardStyle={cardStyle} iconBoxStyle={iconBoxStyle} 
+        />
+
+        {/* スタッフ管理（ここに追加！） */}
+        <NavCard 
+          title="スタッフ管理" desc="担当者の登録・カラー設定・表示順" icon={<Users size={28} />} color="#f43f5e"
+          to={`/admin/${shopId}/settings/staff`}
           cardStyle={cardStyle} iconBoxStyle={iconBoxStyle} 
         />
 

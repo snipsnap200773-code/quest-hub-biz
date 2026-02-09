@@ -7,23 +7,46 @@ function TimeSelection() {
   const location = useLocation();
   const navigate = useNavigate();
 
-  const { totalSlotsNeeded } = location.state || { totalSlotsNeeded: 0 };
+  // 🆕 URLから ?staff=xxx を取得
+  const queryParams = new URLSearchParams(location.search);
+  const staffIdFromUrl = queryParams.get('staff');
+
+// 🆕 バトンケース(state)からもIDを受け取れるようにする
+  const { totalSlotsNeeded, staffId: staffIdFromState } = location.state || { totalSlotsNeeded: 0 };
+  
+  // URLのIDを優先し、なければstateのIDを使う
+  const effectiveStaffId = staffIdFromUrl || staffIdFromState;
 
   const [shop, setShop] = useState(null);
+  const [allStaffs, setAllStaffs] = useState([]);      // 🆕 店舗の全スタッフ
+  const [targetStaff, setTargetStaff] = useState(null); // 🆕 指名されたスタッフ
   const [existingReservations, setExistingReservations] = useState([]);
   const [loading, setLoading] = useState(true);
   const [startDate, setStartDate] = useState(new Date());
   const [selectedDateTime, setSelectedDateTime] = useState({ date: null, time: null });
 
-  useEffect(() => { fetchInitialData(); }, [shopId]);
+// 🆕 staffIdFromState も監視対象に入れる
+  useEffect(() => { fetchInitialData(); }, [shopId, staffIdFromUrl, staffIdFromState]);
 
-  // ✅ ツイン・カレンダー対応版：他店舗の予約も合算して取得するロジック
+  // ✅ ツイン・カレンダー & スタッフ情報の一括取得
   const fetchInitialData = async () => {
     setLoading(true);
     // 1. 自分の店舗プロフィールを取得
     const { data: profile } = await supabase.from('profiles').select('*').eq('id', shopId).single();
     if (!profile) { setLoading(false); return; }
     setShop(profile);
+
+    // 🆕 2. 店舗の全スタッフを取得
+    const { data: staffsData } = await supabase.from('staffs').select('*').eq('shop_id', shopId);
+    const staffs = staffsData || [];
+    setAllStaffs(staffs);
+
+    // 🆕 3. 指名スタッフがいればセット
+// 🆕 URLかState、どちらかにIDがあればスタッフをセットする
+    if (effectiveStaffId) {
+      const found = staffs.find(s => s.id === effectiveStaffId);
+      setTargetStaff(found || null);
+    }
 
     // 2. スケジュール共有設定（schedule_sync_id）を確認
     let targetShopIds = [shopId];
@@ -37,17 +60,17 @@ function TimeSelection() {
       }
     }
 
-    // 3. 全関連店舗の予約データを一括取得（start_time, end_time）
+    // 3. 全関連店舗の予約データを一括取得（staff_idも取得）
     const { data: resData } = await supabase
       .from('reservations')
-      .select('start_time, end_time')
+      .select('start_time, end_time, staff_id')
       .in('shop_id', targetShopIds);
 
     setExistingReservations(resData || []);
     setLoading(false);
   };
 
-  // ✅ 三土手さんの重要ロジック：定休日判定（複雑な計算を完全維持）
+  // ✅ 三土手さんの重要ロジック：定休日判定（完全維持）
   const checkIsRegularHoliday = (date) => {
     if (!shop?.business_hours?.regular_holidays) return false;
     const holidays = shop.business_hours.regular_holidays;
@@ -69,6 +92,12 @@ function TimeSelection() {
     return false;
   };
 
+  // 🆕 スタッフ個別の休み判定ロジック
+  const isStaffOnHoliday = (date, staff) => {
+    if (!staff?.weekly_holidays) return false;
+    return staff.weekly_holidays.includes(date.getDay());
+  };
+
   const weekDays = useMemo(() => {
     const days = [];
     for (let i = 0; i < 7; i++) {
@@ -79,7 +108,6 @@ function TimeSelection() {
     return days;
   }, [startDate]);
 
-  // ✅ 三土手さんのロジック：AdminDashboard設定に連動した可変スロット生成
   const timeSlots = useMemo(() => {
     if (!shop?.business_hours) return [];
     let minOpen = "23:59", maxClose = "00:00";
@@ -88,18 +116,14 @@ function TimeSelection() {
       if (typeof h === 'object' && h.open && h.open < minOpen) minOpen = h.open;
       if (typeof h === 'object' && h.close && h.close > maxClose) maxClose = h.close;
     });
-    
     const slots = [];
     const interval = shop.slot_interval_min || 15;
-    
     let current = new Date();
     const [h, m] = minOpen.split(':').map(Number);
     current.setHours(h, m, 0, 0);
-    
     const dayEnd = new Date();
     const [eh, em] = maxClose.split(':').map(Number);
     dayEnd.setHours(eh, em, 0, 0);
-    
     while (current < dayEnd) {
       slots.push(current.toTimeString().slice(0, 5));
       current.setMinutes(current.getMinutes() + interval);
@@ -107,10 +131,11 @@ function TimeSelection() {
     return slots;
   }, [shop]);
 
-  // ✅ 三土手さんの重要ロジック：空き状況チェック（キャパシティカウント方式にアップデート）
+// ✅ 三土手さんの重要ロジック：空き状況チェック（ダブルチェック決定版）
   const checkAvailability = (date, timeStr) => {
     if (!shop?.business_hours) return { status: 'none' };
     
+    // 1. 店舗の共通定休日チェック
     if (checkIsRegularHoliday(date)) return { status: 'closed', label: '休' };
 
     const dayOfWeek = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'][date.getDay()];
@@ -129,6 +154,7 @@ function TimeSelection() {
     const buffer = shop.buffer_preparation_min || 0;
     const interval = shop.slot_interval_min || 15;
 
+    // リードタイム判定
     const limitDays = Math.floor((shop.min_lead_time_hours || 0) / 24);
     const limitDate = new Date(now);
     limitDate.setHours(0,0,0,0);
@@ -144,30 +170,47 @@ function TimeSelection() {
     const closeDateTime = new Date(`${dateStr}T${String(closeH).padStart(2,'0')}:${String(closeM).padStart(2,'0')}:00`);
     if (potentialEndTime > closeDateTime) return { status: 'short', label: '△' };
 
-    // --- 🆕 キャパシティ（同時予約数）のカウント方式へ変更 ---
-    const maxCapacity = shop?.max_capacity || 1;
-    let isFull = false;
+    // --- 🆕 ダブルチェック・ロジック ---
+    const storeMax = shop?.max_capacity || 1;
+    const activeStaffs = allStaffs.filter(s => {
+      if (targetStaff && s.id !== targetStaff.id) return false;
+      if (isStaffOnHoliday(date, s)) return false;
+      return true;
+    });
 
-    // メニューの所要時間中、すべてのコマで上限に達していないかチェック
+    // 予約時間の全スロットをチェック
     for (let t = targetDateTime.getTime(); t < potentialEndTime.getTime(); t += interval * 60 * 1000) {
-      const slotCount = existingReservations.filter(res => {
+      
+      // A. 【お店全体のチェック】
+      const globalCount = existingReservations.filter(res => {
         const resStart = new Date(res.start_time).getTime();
         const resEnd = new Date(res.end_time).getTime();
         const bufferEnd = resEnd + (buffer * 60 * 1000);
         return t >= resStart && t < bufferEnd;
       }).length;
 
-      if (slotCount >= maxCapacity) {
-        isFull = true;
-        break;
-      }
+      if (globalCount >= storeMax) return { status: 'booked', label: '×' };
+
+      // B. 【スタッフ個別のチェック】
+      const anyStaffAvailable = activeStaffs.some(staff => {
+        const staffCurrentLoad = existingReservations.filter(res => {
+          if (res.staff_id !== staff.id) return false;
+          const resStart = new Date(res.start_time).getTime();
+          const resEnd = new Date(res.end_time).getTime();
+          const bufferEnd = resEnd + (buffer * 60 * 1000);
+          return t >= resStart && t < bufferEnd;
+        }).length;
+
+        const staffMax = staff.concurrent_capacity || 1;
+        return staffCurrentLoad < staffMax;
+      });
+
+      if (!anyStaffAvailable) return { status: 'booked', label: '×' };
     }
 
-    if (isFull) return { status: 'booked', label: '×' };
-
-    // ✅ 自動詰め（隙間ブロック）ロジック：上限1名の時のみ動作させる
-    if (shop.auto_fill_logic && maxCapacity === 1) {
-      const dayRes = existingReservations.filter(r => r.start_time.startsWith(dateStr));
+    // ✅ 三土手さんの自動詰めロジック（完全維持）
+    if (shop.auto_fill_logic && (storeMax === 1 || targetStaff)) {
+      const dayRes = existingReservations.filter(r => r.start_time.startsWith(dateStr) && (!targetStaff || r.staff_id === targetStaff.id));
       if (dayRes.length > 0) {
         const specialSlots = [];
         const gapBlockCandidates = [];
@@ -200,7 +243,7 @@ function TimeSelection() {
 
     return { status: 'available', label: '◎' };
   };
-
+  
   if (loading) return <div style={{textAlign:'center', padding:'100px'}}>読み込み中...</div>;
 
   const themeColor = shop?.theme_color || '#2563eb';
@@ -210,7 +253,9 @@ function TimeSelection() {
       <div style={{ padding: '15px', borderBottom: '1px solid #eee', display: 'flex', justifyContent: 'space-between', alignItems: 'center', position: 'sticky', top: 0, background: '#fff', zIndex: 100 }}>
         <button onClick={() => navigate(-1)} style={{ border: 'none', background: 'none', color: '#666', fontWeight: 'bold' }}>← 戻る</button>
         <div style={{ textAlign: 'center' }}>
-          <div style={{ fontWeight: 'bold', fontSize: '0.9rem' }}>日時選択</div>
+          <div style={{ fontWeight: 'bold', fontSize: '0.9rem' }}>
+            {targetStaff ? `${targetStaff.name} 指名予約` : '日時選択'}
+          </div>
           <div style={{ fontSize: '0.7rem', color: themeColor }}>所要時間: {totalSlotsNeeded * (shop?.slot_interval_min || 15)}分</div>
         </div>
         <div style={{ width: '40px' }}></div>
@@ -274,7 +319,18 @@ function TimeSelection() {
       {selectedDateTime.time && (
         <div style={{ position: 'fixed', bottom: 0, left: 0, right: 0, background: '#fff', padding: '20px', borderTop: '1px solid #e2e8f0', textAlign: 'center', zIndex: 1000, boxShadow: '0 -4px 12px rgba(0,0,0,0.1)' }}>
           <div style={{ marginBottom: '10px', fontSize: '0.9rem' }}>選択：<b>{selectedDateTime.date.replace(/-/g, '/')} {selectedDateTime.time}</b></div>
-          <button style={{ width: '100%', maxWidth: '400px', padding: '16px', background: themeColor, color: '#fff', border: 'none', borderRadius: '12px', fontWeight: 'bold' }} onClick={() => navigate(`/shop/${shopId}/confirm`, { state: { ...location.state, ...selectedDateTime } })}>予約内容の確認へ進む</button>
+          <button 
+            style={{ width: '100%', maxWidth: '400px', padding: '16px', background: themeColor, color: '#fff', border: 'none', borderRadius: '12px', fontWeight: 'bold' }} 
+            onClick={() => navigate(`/shop/${shopId}/confirm`, { 
+              state: { 
+                ...location.state, 
+                ...selectedDateTime,
+                staffId: targetStaff?.id || staffIdFromUrl // 🆕 スタッフIDを次画面に引き継ぐ
+              } 
+            })}
+          >
+            予約内容の確認へ進む
+          </button>
         </div>
       )}
     </div>
