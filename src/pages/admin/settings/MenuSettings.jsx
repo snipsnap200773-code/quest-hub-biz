@@ -280,7 +280,7 @@ const MenuSettings = () => {
               必要コマ数: <span style={{ color: themeColor, fontSize: '1.1rem' }}>{newServiceSlots}コマ（{newServiceSlots * slotIntervalMin}分）</span>
             </label>
             <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-              {[1, 2, 3, 4, 5, 6, 7, 8].map(n => (
+              {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(n => (
                 <button key={n} type="button" onClick={() => setNewServiceSlots(n)} style={{ width: '45px', height: '45px', borderRadius: '12px', border: '2px solid', borderColor: newServiceSlots === n ? themeColor : '#e2e8f0', background: newServiceSlots === n ? themeColor : 'white', color: newServiceSlots === n ? 'white' : '#1e293b', fontWeight: 'bold', cursor: 'pointer', transition: '0.2s' }}>{n}</button>
               ))}
             </div>
