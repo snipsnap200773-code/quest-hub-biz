@@ -71,7 +71,8 @@ const EmailSettings = () => {
                .replace(/{start_time}/g, '予約日時')
                .replace(/{services}/g, 'メールの内容')
                .replace(/{cancel_url}/g, 'キャンセル用URL')
-               .replace(/{official_url}/g, '公式HP/SNS');
+               .replace(/{official_url}/g, '公式HP/SNS')
+               .replace(/{staff}/g, '担当者名');
   };
 
   if (loading) return null;
@@ -131,6 +132,7 @@ const EmailSettings = () => {
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '12px' }}>
                 {[
                   { t: '{name}', l: 'お客様名' },
+                  { t: '{staff}', l: '担当者名' },
                   { t: '{start_time}', l: '予約日時' },
                   { t: '{services}', l: 'メニュー内容' },
                   { t: '{shop_name}', l: '店名' },

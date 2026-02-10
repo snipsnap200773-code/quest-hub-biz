@@ -25,6 +25,8 @@ function AdminManagement() {
   const [serviceOptions, setServiceOptions] = useState([]); 
   const [adminAdjustments, setAdminAdjustments] = useState([]);
   const [products, setProducts] = useState([]); 
+  const [staffs, setStaffs] = useState([]); // 🆕 追加済み（再確認）
+  const [staffPickerRes, setStaffPickerRes] = useState(null);
   const [deletedAdjIds, setDeletedAdjIds] = useState([]);
   const [deletedProductIds, setDeletedProductIds] = useState([]);
 
@@ -68,28 +70,52 @@ const [isMenuPopupOpen, setIsMenuPopupOpen] = useState(false);
     if (cleanShopId) fetchInitialData();
   }, [cleanShopId, activeMenu, selectedDate]);
 
-  const fetchInitialData = async () => {
+const fetchInitialData = async () => {
     try {
       setLoading(true);
-      const shopRes = await supabase.from('profiles').select('*').eq('id', cleanShopId).single();
-      if (shopRes.data) setShop(shopRes.data);
+      // 1. プロフィール取得
+      const { data: profile } = await supabase.from('profiles').select('*').eq('id', cleanShopId).single();
+      if (profile) setShop(profile);
+      
       const startOfYear = `${new Date().getFullYear()}-01-01`;
       const endOfYear = `${new Date().getFullYear()}-12-31`;
-      const { data: resData } = await supabase.from('reservations').select('*').eq('shop_id', cleanShopId).order('start_time', { ascending: true });
+
+      // 2. 予約データ取得（担当者名をJoin）
+      const { data: resData } = await supabase
+        .from('reservations')
+        .select('*, staffs(name)')
+        .eq('shop_id', cleanShopId)
+        .order('start_time', { ascending: true });
       setAllReservations(resData || []);
-      const { data: sData } = await supabase.from('sales').select('*').eq('shop_id', cleanShopId).gte('sale_date', startOfYear).lte('sale_date', endOfYear);
-      setSalesRecords(sData || []);
-      const [catRes, servRes, optRes, adjRes, prodRes] = await Promise.all([
+
+      // 3. スタッフ名簿を「確実」に取得（独立させて実行します）
+      const { data: staffsData } = await supabase.from('staffs').select('*').eq('shop_id', cleanShopId);
+      setStaffs(staffsData || []);
+
+      // 4. その他のマスターデータ取得（Promise.all）
+      const [catRes, servRes, optRes, adjRes, prodRes, sDataRes] = await Promise.all([
         supabase.from('service_categories').select('*').eq('shop_id', cleanShopId).order('sort_order'),
         supabase.from('services').select('*').eq('shop_id', cleanShopId).order('sort_order'),
         supabase.from('service_options').select('*'),
         supabase.from('admin_adjustments').select('*'),
-        supabase.from('products').select('*').eq('shop_id', cleanShopId).order('sort_order')
+        supabase.from('products').select('*').eq('shop_id', cleanShopId).order('sort_order'),
+        supabase.from('sales').select('*').eq('shop_id', cleanShopId).gte('sale_date', startOfYear).lte('sale_date', endOfYear)
       ]);
-      setCategories(catRes.data || []); setServices(servRes.data || []); setServiceOptions(optRes.data || []); setAdminAdjustments(adjRes.data || []); setProducts(prodRes.data || []);
-    } catch (err) { console.error("Fetch Error:", err); } finally { setLoading(false); }
-  };
 
+      setCategories(catRes.data || []);
+      setServices(servRes.data || []);
+      setServiceOptions(optRes.data || []);
+      setAdminAdjustments(adjRes.data || []);
+      setProducts(prodRes.data || []);
+      setSalesRecords(sDataRes.data || []);
+
+    } catch (err) { 
+      console.error("Fetch Error:", err); 
+    } finally { 
+      setLoading(false); 
+    }
+  };
+    
   // ✅ ② [修正箇所] データの読み込み口：商品名(savedProducts)を抽出できるようにしました
 const parseReservationDetails = (res) => {
     if (!res) return { menuName: '', totalPrice: 0, items: [], subItems: [], savedAdjustments: [], savedProducts: [] };
@@ -333,7 +359,7 @@ options: {
   const openCustomerInfo = async (res) => {
     setSelectedRes(res);
     const { data: cust } = await supabase.from('customers').select('*').eq('shop_id', cleanShopId).eq('name', res.customer_name).maybeSingle();
-    const { data: history } = await supabase.from('reservations').select('*').eq('shop_id', cleanShopId).eq('customer_name', res.customer_name).order('start_time', { ascending: false });
+    const { data: history } = await supabase.from('reservations').select('*, staffs(name)').eq('shop_id', cleanShopId).eq('customer_name', res.customer_name).order('start_time', { ascending: false });
     setSelectedCustomer(cust || { name: res.customer_name, phone: res.customer_phone, email: res.customer_email });
     setEditName(cust?.name || res.customer_name); setEditPhone(cust?.phone || res.customer_phone || ''); setEditEmail(cust?.email || res.customer_email || ''); setCustomerMemo(cust?.memo || ''); setPastVisits(history || []); setFirstArrivalDate(cust?.first_arrival_date || (history?.length > 0 ? history[history.length - 1].start_time.split('T')[0] : ''));
     setIsCustomerInfoOpen(true); setIsCheckoutOpen(false);
@@ -354,6 +380,22 @@ options: {
       if (currentId) await supabase.from('customers').update(payload).eq('id', currentId); else await supabase.from('customers').insert([payload]);
       alert("情報を更新しました。"); fetchInitialData();
     } catch (err) { alert("失敗: " + err.message); } finally { setIsSavingMemo(false); }
+  };
+
+  // 🆕 2. 担当者変更ロジック：saveCustomerInfo のすぐ下に配置
+  const handleUpdateStaffDirectly = async (resId, newStaffId) => {
+    try {
+      const { error } = await supabase
+        .from('reservations')
+        .update({ staff_id: newStaffId })
+        .eq('id', resId);
+
+      if (error) throw error;
+      setStaffPickerRes(null); // モーダルを閉じる
+      fetchInitialData();      // 名前を最新にするために再読込
+    } catch (err) {
+      alert("担当者の変更に失敗しました");
+    }
   };
 
   const cycleAdjType = (id) => {
@@ -402,7 +444,7 @@ options: {
       </div>
 
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
-        {activeMenu === 'work' && (
+{activeMenu === 'work' && (
           <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
             <div style={{ background: '#d34817', padding: '15px 25px', color: '#fff', display: 'flex', justifyContent: 'flex-start', alignItems: 'center' }}>
               <h2 style={{ margin: 0, fontStyle: 'italic', fontSize: '1.4rem' }}>受付台帳：{selectedDate.replace(/-/g, '/')}</h2>
@@ -417,17 +459,56 @@ options: {
             </div>
             <div style={{ flex: 1, overflowY: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                <thead><tr style={{ background: '#f3f0ff', borderBottom: '2px solid #4b2c85' }}><th style={thStyle}>時間</th><th style={thStyle}>お客様名 (カルテ)</th><th style={thStyle}>メニュー(予定)</th><th style={thStyle}>お会計 (レジ)</th></tr></thead>
+                <thead>
+                  <tr style={{ background: '#f3f0ff', borderBottom: '2px solid #4b2c85' }}>
+                    <th style={thStyle}>担当者</th>
+                    <th style={thStyle}>時間</th>
+                    <th style={thStyle}>お客様名 (カルテ)</th>
+                    <th style={thStyle}>メニュー(予定)</th>
+                    <th style={thStyle}>お会計 (レジ)</th>
+                  </tr>
+                </thead>
                 <tbody>
                   {allReservations.filter(r => r.start_time.startsWith(selectedDate) && r.res_type === 'normal').length > 0 ? 
                     allReservations.filter(r => r.start_time.startsWith(selectedDate) && r.res_type === 'normal').map((res) => (
                       <tr key={res.id} style={{ borderBottom: '1px solid #eee', cursor: 'pointer' }}>
-                        <td onClick={() => openCheckout(res)} style={tdStyle}>{new Date(res.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</td>
-                        <td onClick={() => openCustomerInfo(res)} style={{ ...tdStyle, background: res.status === 'completed' ? '#eee' : '#008000', color: res.status === 'completed' ? '#333' : '#fff', fontWeight: 'bold' }}>{res.customer_name} {res.status === 'completed' && '✓'}</td>
-                        <td onClick={() => openCheckout(res)} style={tdStyle}>{parseReservationDetails(res).menuName}</td>
-                        <td onClick={() => openCheckout(res)} style={{ ...tdStyle, fontWeight: 'bold' }}>¥ {Number(res.total_price || parseReservationDetails(res).totalPrice).toLocaleString()}</td>
+                        {/* 1. 担当者 */}
+<td 
+  onClick={(e) => {
+    e.stopPropagation(); // 他のクリックイベント（レジ）を防ぐ
+    setStaffPickerRes(res); // 選択モードへ
+  }} 
+  style={{ 
+    ...tdStyle, 
+    fontWeight: 'bold', 
+    color: '#4b2c85', 
+    background: '#fdfbff', // 少し色を変えて「押せる」感を出す
+    cursor: 'pointer' 
+  }}
+>
+  {res.staffs?.name || 'フリー'}
+</td>
+                        {/* 2. 時間 */}
+                        <td onClick={() => openCheckout(res)} style={tdStyle}>
+                          {new Date(res.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </td>
+                        {/* 3. お客様名 */}
+                        <td onClick={() => openCustomerInfo(res)} style={{ ...tdStyle, background: res.status === 'completed' ? '#eee' : '#008000', color: res.status === 'completed' ? '#333' : '#fff', fontWeight: 'bold' }}>
+                          {res.customer_name} {res.status === 'completed' && '✓'}
+                        </td>
+                        {/* 4. メニュー */}
+                        <td onClick={() => openCheckout(res)} style={tdStyle}>
+                          {parseReservationDetails(res).menuName}
+                        </td>
+                        {/* 5. お会計 */}
+                        <td onClick={() => openCheckout(res)} style={{ ...tdStyle, fontWeight: 'bold' }}>
+                          ¥ {Number(res.total_price || parseReservationDetails(res).totalPrice).toLocaleString()}
+                        </td>
                       </tr>
-                    )) : (<tr><td colSpan="4" style={{ padding: '50px', textAlign: 'center', color: '#999' }}>予約なし</td></tr>)}
+                    )) : (
+                      <tr><td colSpan="5" style={{ padding: '50px', textAlign: 'center', color: '#999' }}>予約なし</td></tr>
+                    )
+                  }
                 </tbody>
               </table>
             </div>
@@ -666,9 +747,10 @@ options: {
                         <b>{v.start_time.split('T')[0]}</b>
                         <span style={{color:'#d34817'}}>¥{Number(v.total_price || 0).toLocaleString()}</span>
                       </div>
-                      <p style={{ margin: 0, fontSize: '0.8rem' }}>
-                        {details.menuName}
-                        {details.savedProducts?.length > 0 && (
+<p style={{ margin: 0, fontSize: '0.8rem' }}>
+  <span style={{ fontWeight: 'bold', color: '#4b2c85', marginRight: '8px' }}>👤 {v.staffs?.name || 'フリー'}</span> {/* 🆕 追加 */}
+  {details.menuName}
+                          {details.savedProducts?.length > 0 && (
                           <span style={{ color: '#008000', fontWeight: 'bold' }}>
                             {" "}＋({details.savedProducts.map(p => p.name).join(', ')})
                           </span>
@@ -764,6 +846,34 @@ options: {
             <div style={{ padding: '20px', background: '#f8fafc', borderTop: '1px solid #ddd' }}>
               <button onClick={applyMenuChangeToLedger} style={{ ...completeBtnStyle, background: '#4b2c85' }}>完了して反映</button>
             </div>
+          </div>
+        </div>
+      )}
+{/* 🆕 ここ！ここに「スタッフ選択モーダル」を差し込みます */}
+      {staffPickerRes && (
+        <div style={modalOverlayStyle} onClick={() => setStaffPickerRes(null)}>
+          <div style={{ ...modalContentStyle, maxWidth: '300px', textAlign: 'center' }} onClick={e => e.stopPropagation()}>
+            <h3 style={{ fontSize: '1rem', marginBottom: '20px', color: '#4b2c85' }}>
+              「{staffPickerRes.customer_name}」様の<br />担当者を変更
+            </h3>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <button 
+                onClick={() => handleUpdateStaffDirectly(staffPickerRes.id, null)}
+                style={{ padding: '12px', borderRadius: '10px', border: '1px solid #ddd', background: '#f8fafc', fontWeight: 'bold', cursor: 'pointer' }}
+              >
+                担当なし（フリー）
+              </button>
+              {staffs.map(s => (
+                <button 
+                  key={s.id}
+                  onClick={() => handleUpdateStaffDirectly(staffPickerRes.id, s.id)}
+                  style={{ padding: '12px', borderRadius: '10px', border: 'none', background: '#4b2c85', color: '#fff', fontWeight: 'bold', cursor: 'pointer' }}
+                >
+                  {s.name}
+                </button>
+              ))}
+            </div>
+            <button onClick={() => setStaffPickerRes(null)} style={{ marginTop: '20px', color: '#94a3b8', background: 'none', border: 'none', cursor: 'pointer' }}>キャンセル</button>
           </div>
         </div>
       )}

@@ -9,6 +9,7 @@ function AdminReservations() {
 
   // --- 状態管理 ---
   const [shop, setShop] = useState(null);
+  const [staffs, setStaffs] = useState([]);
   const [reservations, setReservations] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -81,8 +82,10 @@ function AdminReservations() {
     // 3. 全関連店舗の予約データを合算して取得（店名も一緒に取得）
     const { data: resData } = await supabase
       .from('reservations')
-      .select('*, profiles(business_name)') // プロフィールから店名も結合
+      .select('*, profiles(business_name), staffs(name)')
       .in('shop_id', targetShopIds);
+    const { data: staffsData } = await supabase.from('staffs').select('*').eq('shop_id', shopId);
+    setStaffs(staffsData || []);
 
     setReservations(resData || []);
     setLoading(false);
@@ -277,7 +280,8 @@ const payload = {
       let resQuery = supabase.from('reservations').update({ 
         customer_name: editFields.name,
         customer_phone: editFields.phone,
-        customer_email: editFields.email
+        customer_email: editFields.email,
+        staff_id: selectedRes.staff_id
       }).eq('shop_id', shopId);
 
       if (editFields.line_user_id) {
@@ -871,6 +875,33 @@ onClick={() => {
       </div>
     )}
 
+    {/* 🆕 担当者情報の表示 */}
+    {selectedRes?.res_type === 'normal' && (
+      <div style={{ background: '#f8fafc', padding: '10px', borderRadius: '8px', marginBottom: '15px', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <span style={{ fontSize: '0.9rem' }}>👤</span>
+        <span style={{ fontSize: '0.8rem', color: '#475569' }}>
+          <strong>担当スタッフ:</strong> {selectedRes.staffs?.name || '店舗スタッフ'}
+        </span>
+      </div>
+    )}
+
+    {/* 🆕 担当者の変更ドロップダウン */}
+    {selectedRes?.res_type === 'normal' && (
+      <div style={{ background: '#f8fafc', padding: '15px', borderRadius: '12px', marginBottom: '15px', border: '1px solid #e2e8f0' }}>
+        <label style={labelStyle}>担当スタッフの変更</label>
+        <select 
+          value={selectedRes.staff_id || ''} 
+          onChange={(e) => setSelectedRes({...selectedRes, staff_id: e.target.value || null})}
+          style={inputStyle}
+        >
+          <option value="">フリー（担当なし）</option>
+          {staffs.map(s => (
+            <option key={s.id} value={s.id}>{s.name}</option>
+          ))}
+        </select>
+      </div>
+    )}
+
     {/* 📝 入力フォーム（定休日でも表示されるようになります） */}
     <label style={labelStyle}>お客様名（または予定名）</label>
     <input type="text" value={editFields.name} onChange={(e) => setEditFields({...editFields, name: e.target.value})} style={inputStyle} />
@@ -974,7 +1005,14 @@ onClick={() => {
                     <div style={{ fontWeight: '900', fontSize: '1.1rem', color: '#1e293b', marginBottom: '4px' }}>
                       {res.res_type === 'blocked' ? `🚫 ${res.customer_name}` : `👤 ${res.customer_name} 様`}
                     </div>
-                    <div style={{ fontSize: '0.75rem', color: '#64748b' }}>{res.res_type === 'normal' ? (res.options?.services?.map(s => s.name).join(', ') || 'メニュー未設定') : 'スケジュールブロック'}</div>
+<div style={{ fontSize: '0.75rem', color: '#64748b' }}>
+  {res.res_type === 'normal' ? (
+    <>
+      <div style={{ color: themeColor, fontWeight: 'bold' }}>📋 {res.menu_name || res.options?.services?.map(s => s.name).join(', ') || 'メニュー未設定'}</div>
+      <div style={{ marginTop: '2px' }}>👤 担当: {res.staffs?.name || '店舗スタッフ'}</div>
+    </>
+  ) : 'スケジュールブロック'}
+</div>
                   </div>
                   <div style={{ color: themeColor, fontSize: '1.2rem' }}>〉</div>
                 </div>
