@@ -669,7 +669,7 @@ const insertData = {
     // 🆕 酔い対策：移動距離を30→10へ短縮、不透明度をメインに
     initial={{ opacity: 0, x: 10 }} 
     animate={{ opacity: 1, x: 0 }} 
-    exit={{ opacity: 0, x: -10 }} 
+    exit={{ opacity: 0 }} 
     
     // 🆕 Spring（バネ）設定
     transition={{ 
