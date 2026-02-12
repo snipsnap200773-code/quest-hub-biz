@@ -662,18 +662,27 @@ const insertData = {
 {/* ✅ 親要素：はみ出しを隠し、高さを固定 */}
         <div style={{ flex: 1, overflow: 'hidden', position: 'relative', display: 'flex', flexDirection: 'column' }}>
           
-          <AnimatePresence mode="popLayout" initial={false}>
-            <motion.div
-              key={startDate.toISOString()} // 📅 週が切り替わるたびにアニメーション
-              initial={{ opacity: 0, x: 30 }} 
-              animate={{ opacity: 1, x: 0 }} 
-              exit={{ opacity: 0, x: -30 }} 
-              transition={{ duration: 0.25, ease: "easeOut" }}
+<AnimatePresence mode="wait" initial={false}> {/* ✅ modeを"wait"にすると残像が消えます */}
+  <motion.div
+    key={startDate.toISOString()}
+    
+    // 🆕 酔い対策：移動距離を30→10へ短縮、不透明度をメインに
+    initial={{ opacity: 0, x: 10 }} 
+    animate={{ opacity: 1, x: 0 }} 
+    exit={{ opacity: 0, x: -10 }} 
+    
+    // 🆕 Spring（バネ）設定
+    transition={{ 
+      type: "spring", 
+      stiffness: 260, // バネの強さ（大きいほど速い）
+      damping: 26,    // 抵抗（大きいほど揺れがすぐ止まる）
+      mass: 0.5       // 軽さ（小さいほど軽快に動く）
+    }}
 
-              // ✅ スワイプ（ドラッグ）設定
-              drag="x" 
-              dragConstraints={{ left: 0, right: 0 }}
-              dragElastic={0.5} 
+    drag="x" 
+    dragConstraints={{ left: 0, right: 0 }}
+    dragElastic={0.1} // ✅ ゴムのような伸びを小さくして、ピタッと止まるように変更
+    // ...あとの設定はそのまま...              
               onDragEnd={(e, { offset }) => {
                 const swipeThreshold = 80;
                 if (offset.x > swipeThreshold) goPrev(); // 右スワイプで前週
