@@ -30,6 +30,28 @@ function AdminReservations() {
     return dateParam || new Date().toLocaleDateString('sv-SE');
   }); 
   
+  // --- デザイン（スタイル）の定義をここに追加 ---
+const resItemRowStyle = { 
+  fontSize: '0.9rem', 
+  color: '#1e293b', 
+  background: '#fff', 
+  padding: '8px 12px', 
+  borderRadius: '8px', 
+  border: '1px solid rgba(0,0,0,0.05)', 
+  display: 'flex',
+  alignItems: 'flex-start',
+  lineHeight: '1.4',
+  marginBottom: '5px'
+};
+
+const resIndexStyle = (color) => ({ 
+  fontWeight: '900', 
+  color: color, 
+  marginRight: '10px', 
+  whiteSpace: 'nowrap' 
+});
+// ------------------------------------------
+
   const [showMenuModal, setShowMenuModal] = useState(false);
   const [targetTime, setTargetTime] = useState('');
   const [showDetailModal, setShowDetailModal] = useState(false);
@@ -264,7 +286,7 @@ function AdminReservations() {
       alert('エラーが発生しました: ' + err.message);
     }
   };
-  
+
   const deleteRes = async (id) => {
     const isBlock = selectedRes?.res_type === 'blocked';
     const msg = isBlock ? 'このブロックを解除して予約を「可能」に戻しますか？' : 'この予約データを消去して予約を「可能」に戻しますか？';
@@ -728,25 +750,40 @@ const insertData = {
                                   (!isArray && res.res_type === 'system_blocked') ? <span style={{fontSize:'0.6rem'}}>{res.customer_name}</span> : 
                                   (isStart ? (
                                     <div style={{ fontWeight: 'bold', fontSize: isPC ? '0.9rem' : 'calc(0.7rem + 0.2vw)', lineHeight: '1.1', height: '100%', width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-{reservationCount > 1 ? (
-  <span style={{ fontSize: '1.1rem' }}>👥 {reservationCount}名</span>
-) : (
-  isPC ? (
-    `${res[0].customer_name} 様`
-  ) : (
-    <div style={{ 
-      writingMode: 'vertical-rl', 
-      textOrientation: 'upright', 
-      fontSize: '0.85rem', 
-      fontWeight: 'bold', 
-      lineHeight: '1',
-      maxHeight: '55px', // セルの高さに合わせて調整
-      overflow: 'hidden'
-    }}>
-      {getFamilyName(res[0].customer_name)} {/* ✅ ここで名字だけにカット！ */}
-</div>
-  )
-)}
+{(() => {
+  // 1. この時間枠（time）に「ちょうど開始する」予約だけを抜き出す
+  const startingHere = res.filter(r => 
+    new Date(r.start_time).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', hour12: false }) === time
+  );
+
+  // 2. この枠で新しく始まる人が1人なら、その人の名前を最優先で表示！
+  if (startingHere.length === 1) {
+    const target = startingHere[0];
+    return isPC ? (
+      `${target.customer_name} 様`
+    ) : (
+      <div style={{ 
+        writingMode: 'vertical-rl', 
+        textOrientation: 'upright', 
+        fontSize: '0.85rem', 
+        fontWeight: 'bold', 
+        lineHeight: '1',
+        maxHeight: '55px',
+        overflow: 'hidden'
+      }}>
+        {getFamilyName(target.customer_name)}
+      </div>
+    );
+  }
+
+  // 3. もし同じ時間に2人以上同時にスタートする場合は「👥 ◯名」と表示
+  if (startingHere.length > 1) {
+    return <span style={{ fontSize: '1.1rem' }}>👥 {startingHere.length}名</span>;
+  }
+
+  // 4. 開始枠ではない（前の時間から続いている施術）の場合は、ドットなどで「埋まってる感」を出す
+  return <span style={{ fontSize: '0.6rem', opacity: 0.4 }}>・</span>;
+})()}
                                     </div>
                                   ) : isArray ? '・' : '')
                                 )}
@@ -819,40 +856,58 @@ const insertData = {
 <div style={{ display: 'flex', flexDirection: 'column', gap: '15px', maxWidth: '500px', margin: '0 auto' }}>
   <div style={{ background: '#f8fafc', padding: '15px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
     
-    {/* 📋 予約メニューの表示（予約がある場合のみ） */}
+{/* 📋 予約メニュー内訳（1人ならまとめ、複数人なら分ける厳密なロジック） */}
     {selectedRes?.res_type === 'normal' && (
-      <div style={{ background: themeColorLight, padding: '10px', borderRadius: '8px', marginBottom: '15px', border: `1px solid ${themeColor}` }}>
-        <label style={{ fontSize: '0.7rem', fontWeight: 'bold', color: themeColor }}>📋 予約メニュー</label>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px', marginTop: '5px' }}>
-{selectedRes.options?.people ? (
-  selectedRes.options.people.map((person, pIdx) => (
-    person.services.map((s, sIdx) => {
-      // ✅ このメニュー(s.id)に紐づくオプション名を抽出
-      const optNames = Object.values(person.options || {})
-        .filter(opt => opt.service_id === s.id)
-        .map(opt => opt.option_name);
-      const displayName = optNames.length > 0 ? `${s.name}（${optNames.join(', ')}）` : s.name;
+      <div style={{ background: themeColorLight, padding: '16px', borderRadius: '15px', marginBottom: '20px', border: `1px solid ${themeColor}` }}>
+        <label style={{ fontSize: '0.75rem', fontWeight: '900', color: themeColor, display: 'block', marginBottom: '10px' }}>
+          📋 予約メニュー内訳
+        </label>
+        
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          {(() => {
+            const opt = selectedRes.options || {};
+            // people配列がある場合はそれを使用し、ない場合は空配列とする
+            const people = Array.isArray(opt.people) ? opt.people : [];
+            // services配列は、peopleが定義されていない場合のフォールバックとして使用
+            const services = Array.isArray(opt.services) ? opt.services : [];
 
-      return (
-        <span key={`${pIdx}-${sIdx}`} style={{ background: themeColor, color: '#fff', padding: '2px 10px', borderRadius: '15px', fontSize: '0.75rem', fontWeight: 'bold' }}>
-          {selectedRes.options.people.length > 1 ? `(${pIdx + 1})${displayName}` : displayName}
-        </span>
-      );
-    })
-  ))
-) : (
-  selectedRes.options?.services?.map((s, idx) => {
-    // 単名予約の場合のオプション抽出
-    const optNames = Object.values(selectedRes.options.options || {})
-      .filter(opt => opt.service_id === s.id)
-      .map(opt => opt.option_name);
-    const displayName = optNames.length > 0 ? `${s.name}（${optNames.join(', ')}）` : s.name;
+            // 🟢 ケースA：本当に複数人の予約（people配列が2つ以上）
+            if (people.length > 1) {
+              return people.map((person, pIdx) => {
+                // その人の全メニューとオプションを結合
+                const sText = person.services?.map(s => {
+                  const oNames = Object.values(person.options || {}).filter(o => o.service_id === s.id).map(o => o.option_name);
+                  return oNames.length > 0 ? `${s.name}（${oNames.join(', ')}）` : s.name;
+                }).join(', ');
 
-    return (
-      <span key={idx} style={{ background: themeColor, color: '#fff', padding: '2px 10px', borderRadius: '15px', fontSize: '0.75rem', fontWeight: 'bold' }}>{displayName}</span>
-    );
-  }) || <span style={{fontSize:'0.75rem', color:'#94a3b8'}}>メニュー情報なし</span>
-)}
+                return (
+                  <div key={pIdx} style={resItemRowStyle}>
+                    <span style={resIndexStyle(themeColor)}>{pIdx + 1}人目：</span>
+                    <span>{sText || 'メニュー未設定'}</span>
+                  </div>
+                );
+              });
+            }
+
+            // ⚪ ケースB：1人予約の場合（メニューが複数あってもまとめて表示）
+            // 表示すべきサービスリストを決定（people[0]のservices、またはルートのservices）
+            const targetServices = (people.length > 0 && people[0].services) ? people[0].services : services;
+            // オプション情報を決定（people[0]のoptions、またはルートのoptions）
+            const targetOptions = (people.length > 0 && people[0].options) ? people[0].options : (opt.options || {});
+
+            if (targetServices.length > 0) {
+              // 複数のメニューをカンマ区切りで連結
+              const sText = targetServices.map(s => {
+                const oNames = Object.values(targetOptions).filter(o => o.service_id === s.id).map(o => o.option_name);
+                return oNames.length > 0 ? `${s.name}（${oNames.join(', ')}）` : s.name;
+              }).join(', ');
+
+              return <div style={{ fontSize: '1rem', fontWeight: 'bold', color: '#1e293b', padding: '4px 8px' }}>{sText}</div>;
+            }
+            
+            // フォールバック：メニュー情報がうまく取得できない場合
+            return <div style={{ fontSize: '1rem', fontWeight: 'bold', color: '#1e293b', padding: '4px 8px' }}>{selectedRes.menu_name || 'メニュー未設定'}</div>;
+          })()}
         </div>
       </div>
     )}

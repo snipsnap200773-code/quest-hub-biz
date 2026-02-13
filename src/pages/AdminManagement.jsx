@@ -1040,41 +1040,41 @@ const completePayment = async () => {
     {(() => {
       // 1. 予約データを解析
       const opt = typeof selectedRes?.options === 'string' ? JSON.parse(selectedRes.options) : (selectedRes?.options || {});
-      const people = opt.people || [];
-      const rootServices = opt.services || [];
+      const people = Array.isArray(opt.people) ? opt.people : [];
+      const services = Array.isArray(opt.services) ? opt.services : [];
 
-      // 🟢 複数人予約、または1人予約でもメニューが複数ある場合
-      // (矢沢さんのようにメニューが2つ以上あれば、1人ずつに分けて表示します)
-      if (people.length > 1 || rootServices.length > 1) {
-        // 表示用のリストを作成
-        const displayList = people.length > 0 ? people : rootServices.map(s => ({ services: [s], options: opt.options }));
-
-        return displayList.map((p, i) => {
-          // メニュー名と枝分かれ（なし、など）を取得
-          const sNames = p.services?.map(s => s.name).join(', ') || (p.name ? p.name : '');
-          const oNames = p.options 
-            ? Object.values(p.options).map(o => o.option_name).filter(Boolean).join(', ') 
-            : '';
-          const displayMenu = oNames ? `${sNames}（${oNames}）` : sNames;
+      // 🟢 ケースA：本当に複数人の予約（グループ予約）の場合
+      if (people.length > 1) {
+        return people.map((person, pIdx) => {
+          // その人の全メニューとオプションを結合
+          const sText = person.services?.map(s => {
+            const oNames = Object.values(person.options || {}).filter(o => o.service_id === s.id).map(o => o.option_name);
+            return oNames.length > 0 ? `${s.name}（${oNames.join(', ')}）` : s.name;
+          }).join(', ');
 
           return (
-            <div key={i} style={{ fontSize: '0.95rem', marginBottom: '8px', borderBottom: i !== displayList.length - 1 ? '1px solid #eef' : 'none', paddingBottom: '4px' }}>
-              <span style={{ color: '#4b2c85', fontWeight: '900' }}>{i + 1}人目：</span>
-              {displayMenu}
+            <div key={pIdx} style={{ fontSize: '0.95rem', marginBottom: '8px', borderBottom: pIdx !== people.length - 1 ? '1px solid #eef' : 'none', paddingBottom: '4px' }}>
+              <span style={{ color: '#4b2c85', fontWeight: '900' }}>{pIdx + 1}人目：</span>
+              {sText || 'メニュー未設定'}
             </div>
           );
         });
-      } else {
-        // ⚪ メニューが1つだけの場合（スッキリ表示）
-        const person = people[0] || {};
-        const sNames = person.services?.map(s => s.name).join(', ') || parseReservationDetails(selectedRes).menuName;
-        const oNames = person.options 
-          ? Object.values(person.options).map(o => o.option_name).filter(Boolean).join(', ') 
-          : '';
-        const displayMenu = oNames ? `${sNames}（${oNames}）` : sNames;
+      } 
 
-        return <div style={{ fontSize: '1rem' }}>{displayMenu}</div>;
+      // ⚪ ケースB：1人予約の場合（メニューが複数あっても1つにまとめる）
+      const targetServices = (people.length > 0 && people[0].services) ? people[0].services : services;
+      const targetOptions = (people.length > 0 && people[0].options) ? people[0].options : (opt.options || {});
+
+      if (targetServices.length > 0) {
+        const sText = targetServices.map(s => {
+          const oNames = Object.values(targetOptions).filter(o => o.service_id === s.id).map(o => o.option_name);
+          return oNames.length > 0 ? `${s.name}（${oNames.join(', ')}）` : s.name;
+        }).join(', ');
+
+        return <div style={{ fontSize: '1rem' }}>{sText}</div>;
       }
+      
+      return <div style={{ fontSize: '1rem' }}>{selectedRes?.menu_name || 'メニュー未設定'}</div>;
     })()}
   </div>
 
@@ -1085,7 +1085,6 @@ const completePayment = async () => {
     </span>
   </div>
 </div>
-
               <SectionTitle icon={<Settings size={16} />} title="プロの微調整" color="#ef4444" />
               {(() => {
                 const resIds = checkoutServices.map(s => s.id);

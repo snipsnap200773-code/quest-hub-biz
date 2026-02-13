@@ -79,13 +79,18 @@ const MenuSettings = () => {
     if (targetIdx < 0 || targetIdx >= list.length) return;
     const newList = [...list]; const [moved] = newList.splice(idx, 1); newList.splice(targetIdx, 0, moved);
     const table = type === 'category' ? 'service_categories' : 'services';
-    const updates = newList.map((item, i) => ({ 
-      id: item.id, shop_id: shopId, sort_order: i, name: item.name, 
-      ...(type === 'service' ? { 
-  slots: Number(item.slots || 0), // ✅ ここでも Number化し、なければ0にする
-  category: item.category 
-} : {}) 
-    }));
+// --- moveItem 関数内の updates 定義部分 ---
+const updates = newList.map((item, i) => ({ 
+  id: item.id, 
+  shop_id: shopId, 
+  sort_order: i, 
+  name: item.name, 
+  ...(type === 'service' ? { 
+    // 0 を「値なし」と判定させないために ?? を使用
+    slots: Number(item.slots ?? 0), 
+    category: item.category 
+  } : {}) 
+}));
     await supabase.from(table).upsert(updates); fetchMenuDetails();
   };
 
