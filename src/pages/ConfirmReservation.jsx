@@ -170,45 +170,85 @@ const handleReserve = async () => {
         }
       }
 
-      // ✅ 顧客紐付け・更新
-      let query = supabase.from('customers').select('id, total_visits').eq('shop_id', shopId);
-      if (lineUser?.userId) {
-        query = query.eq('line_user_id', lineUser.userId);
-      } else {
-        query = query.eq('name', customerName);
-      }
-      const { data: existingCust } = await query.maybeSingle();
+// ==========================================
+      // ✅ 1. 顧客の特定（名寄せロジック強化）
+      // ==========================================
+      let finalCustomerId = selectedCustomerId; // 管理者が候補から選んだIDがあれば最優先
+      let existingCust = null;
 
-      if (existingCust) {
-        await supabase.from('customers').update({
-          phone: customerPhone || undefined,
-          email: customerEmail || undefined,
-          line_user_id: lineUser?.userId || undefined,
-          total_visits: (existingCust.total_visits || 0) + 1,
-          last_arrival_at: startDateTime.toISOString(),
-          updated_at: new Date().toISOString()
-        }).eq('id', existingCust.id);
+      if (!finalCustomerId) {
+        // LINE ID または 電話番号で「絶対にこの人！」という既存客を検索
+        let identifierFilter = `shop_id.eq.${shopId}`;
+        const orConditions = [];
+        if (lineUser?.userId) orConditions.push(`line_user_id.eq.${lineUser.userId}`);
+        if (customerPhone && customerPhone !== '---') orConditions.push(`phone.eq.${customerPhone}`);
+        
+        const { data: matchedByContact } = await supabase
+          .from('customers')
+          .select('id, total_visits')
+          .or(orConditions.length > 0 ? orConditions.join(',') : `name.eq.${customerName}`)
+          .eq('shop_id', shopId)
+          .maybeSingle();
+
+        if (matchedByContact) {
+          finalCustomerId = matchedByContact.id;
+          existingCust = matchedByContact;
+        } else {
+          // 連絡先で見つからない場合のみ、名前で最終チェック
+          const { data: matchedByName } = await supabase
+            .from('customers')
+            .select('id, total_visits')
+            .eq('shop_id', shopId)
+            .eq('name', customerName)
+            .maybeSingle();
+          
+          if (matchedByName) {
+            finalCustomerId = matchedByName.id;
+            existingCust = matchedByName;
+          }
+        }
       } else {
-        await supabase.from('customers').insert([{
-          shop_id: shopId,
-          name: customerName,
-          phone: customerPhone,
-          email: customerEmail,
-          line_user_id: lineUser?.userId || null,
-          total_visits: 1,
-          last_arrival_at: startDateTime.toISOString()
-        }]);
+        // すでにIDがある（候補から選んだ）場合、来店回数などの情報を取得
+        const { data } = await supabase.from('customers').select('id, total_visits').eq('id', finalCustomerId).single();
+        existingCust = data;
       }
 
+      // ==========================================
+      // ✅ 2. 名簿データの保存・更新 (upsert)
+      // ==========================================
+      const customerPayload = {
+        shop_id: shopId,
+        name: customerName,
+        phone: customerPhone || null,
+        email: customerEmail || null,
+        line_user_id: lineUser?.userId || null,
+        total_visits: (existingCust?.total_visits || 0) + 1,
+        last_arrival_at: startDateTime.toISOString(),
+        updated_at: new Date().toISOString()
+      };
+
+      if (finalCustomerId) {
+        // 既存客の情報を最新に更新
+        await supabase.from('customers').update(customerPayload).eq('id', finalCustomerId);
+      } else {
+        // まったくの新規客を登録
+        const { data: newCust, error: insError } = await supabase.from('customers').insert([customerPayload]).select().single();
+        if (insError) throw insError;
+        finalCustomerId = newCust.id;
+      }
+
+      // ==========================================
+      // ✅ 3. 予約データの挿入 (customer_id を確実に紐付け)
+      // ==========================================
       const menuLabel = people.length > 1
         ? people.map((p, i) => `${i + 1}人目: ${p.fullName}`).join(' / ')
         : (people[0]?.fullName || 'メニューなし');
 
-      // ✅ 予約データの挿入
       const { error: dbError } = await supabase.from('reservations').insert([
         {
           shop_id: shopId,
-          staff_id: finalStaffId,       // 🆕 判定後のスタッフIDを保存
+          customer_id: finalCustomerId, // 🆕 ここが重要！IDを紐付けることで分身を防ぐ
+          staff_id: finalStaffId,
           reservation_date: targetDate, 
           customer_name: customerName,
           customer_phone: customerPhone || '---',
@@ -228,7 +268,7 @@ const handleReserve = async () => {
           }
         }
       ]);
-
+      
       if (dbError) throw dbError;
 
       // ✅ 通知メール送信 (resend 関数を呼び出し)

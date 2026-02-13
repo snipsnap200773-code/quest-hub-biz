@@ -183,130 +183,88 @@ function AdminReservations() {
     setShowDetailModal(true);
   };
 
-  // ✅ 名簿保存 ＆ 統合（名寄せ）ロジック強化版
+// ✅ 名簿保存 ＆ 統合（名寄せ）ロジック：最強版
   const handleUpdateCustomer = async () => {
     try {
       let targetCustomerId = selectedCustomer?.id;
 
-      // --- 🆕 名寄せ（統合）チェックロジック ---
-      // 1. 編集中のID以外で、同じ名前の人がいないか探す
-      const { data: duplicateNameCust } = await supabase
-        .from('customers')
-        .select('*')
-        .eq('shop_id', shopId)
-        .eq('name', editFields.name)
-        .neq('id', targetCustomerId || '00000000-0000-0000-0000-000000000000') // 自分以外
-        .maybeSingle();
-
-      // 2. もし同姓同名が見つかった場合（山田花子さんケース）
-      if (duplicateNameCust) {
-        const confirmMerge = window.confirm(
-          `「${editFields.name}」様は既に名簿に存在します。\n現在編集中のデータ（LINE連携など）を、既存の「${editFields.name}」様のデータへ統合しますか？\n\n※過去の予約履歴もすべて一つにまとまります。`
-        );
-
-        if (confirmMerge) {
-          // A. 既存の顧客データ（山田花子側）を最新情報で更新
-          const { error: mergeUpdateError } = await supabase
-            .from('customers')
-            .update({
-              phone: editFields.phone || duplicateNameCust.phone,
-              email: editFields.email || duplicateNameCust.email,
-              memo: editFields.memo || duplicateNameCust.memo,
-              line_user_id: editFields.line_user_id || duplicateNameCust.line_user_id,
-              updated_at: new Date().toISOString()
-            })
-            .eq('id', duplicateNameCust.id);
-
-          if (mergeUpdateError) throw mergeUpdateError;
-
-          // B. 現在編集していた側の予約データをすべて既存顧客側に紐付け直す
-          // （旧名「パナコン」で入っていた予約を「山田花子」の名前に救出する）
-          if (selectedCustomer) {
-             await supabase
-              .from('reservations')
-              .update({ customer_name: editFields.name })
-              .eq('shop_id', shopId)
-              .eq('customer_name', selectedCustomer.name);
-
-            // C. 不要になった重複レコード（パナコン側）を削除
-            await supabase.from('customers').delete().eq('id', selectedCustomer.id);
-          }
-
-          alert('データの統合が完了しました！');
-          setShowCustomerModal(false); 
-          setShowDetailModal(false); 
-          fetchData();
-          return;
-        } else {
-          // 統合しない場合は、そのまま保存（同姓同名が並存する状態。SQLで制約を外したので可能）
-        }
-      }
-      // --- 🆕 統合チェック終了 ---
-
+      // --- 🆕 自動名寄せチェック ---
       if (!targetCustomerId) {
-        let checkQuery = supabase.from('customers').select('id').eq('shop_id', shopId).eq('name', editFields.name);
-        if (editFields.line_user_id) {
-          checkQuery = checkQuery.eq('line_user_id', editFields.line_user_id);
-        } else if (editFields.phone) {
-          checkQuery = checkQuery.eq('phone', editFields.phone);
-        }
+        // 1. まず LINE ID か 電話番号 で「絶対にこの人！」という既存客を探す
+        let identifierQuery = supabase.from('customers').select('id, name').eq('shop_id', shopId);
         
-        const { data: existingCust } = await checkQuery.maybeSingle();
-        if (existingCust) {
-          targetCustomerId = existingCust.id;
+        if (editFields.line_user_id) {
+          identifierQuery = identifierQuery.eq('line_user_id', editFields.line_user_id);
+        } else if (editFields.phone) {
+          identifierQuery = identifierQuery.eq('phone', editFields.phone);
+        }
+
+        const { data: matchedCust } = await identifierQuery.maybeSingle();
+
+        if (matchedCust) {
+          // ✅ A. LINEや電話が一致！ → 自動的にその人のIDを使う（分身を作らせない）
+          targetCustomerId = matchedCust.id;
+        } else {
+          // 2. 連絡先で見つからない場合のみ、名前で「同姓同名の別人かも？」をチェック
+          const { data: nameMatchCust } = await supabase
+            .from('customers')
+            .select('*')
+            .eq('shop_id', shopId)
+            .eq('name', editFields.name)
+            .maybeSingle();
+
+          if (nameMatchCust) {
+            const confirmMerge = window.confirm(
+              `「${editFields.name}」様は既に名簿に存在しますが、連絡先が一致しません。\n既存のデータへ統合しますか？`
+            );
+            if (confirmMerge) targetCustomerId = nameMatchCust.id;
+          }
         }
       }
+      // --- 🆕 チェック終了 ---
 
-const payload = {
+      const payload = {
         shop_id: shopId,
         name: editFields.name,
-        phone: editFields.phone || null,        // 👈 空なら null
-        email: editFields.email || null,        // 👈 空なら null
-        memo: editFields.memo || null,          // 👈 空なら null
-        line_user_id: editFields.line_user_id || null, // 👈 これが 400 エラーの主犯格であることが多いです
+        phone: editFields.phone || null,
+        email: editFields.email || null,
+        memo: editFields.memo || null,
+        line_user_id: editFields.line_user_id || null,
         updated_at: new Date().toISOString()
       };
 
       if (targetCustomerId) {
-        payload.id = targetCustomerId;
+        payload.id = targetCustomerId; // IDを指定することで「新規作成」ではなく「上書き」にする
       }
 
       const { error: custError } = await supabase.from('customers').upsert(payload, { onConflict: 'id' });
 
-      if (custError) { 
-        alert('名簿保存エラー: ' + custError.message); 
-        return;
-      }
+      if (custError) throw custError;
 
-      let resQuery = supabase.from('reservations').update({ 
+      // 予約データの名前も最新状態に同期させる
+      let resUpdateQuery = supabase.from('reservations').update({ 
         customer_name: editFields.name,
         customer_phone: editFields.phone,
-        customer_email: editFields.email,
-        staff_id: selectedRes.staff_id
+        customer_email: editFields.email
       }).eq('shop_id', shopId);
 
       if (editFields.line_user_id) {
-        resQuery = resQuery.eq('line_user_id', editFields.line_user_id);
-      } else if (selectedRes) {
-        resQuery = resQuery.eq('customer_name', selectedRes.customer_name);
+        resUpdateQuery = resUpdateQuery.eq('line_user_id', editFields.line_user_id);
+      } else {
+        resUpdateQuery = resUpdateQuery.eq('customer_name', selectedRes.customer_name);
       }
+      await resUpdateQuery;
 
-      const { error: resSyncError } = await resQuery;
-
-      if (resSyncError) {
-        console.error('予約データの同期に失敗しましたが名簿は更新されました:', resSyncError.message);
-      }
-
-      alert('名簿情報を更新し、カレンダーにも反映しました！'); 
+      alert('名簿情報を更新・統合しました！'); 
       setShowCustomerModal(false); 
       setShowDetailModal(false); 
       fetchData(); 
     } catch (err) {
       console.error(err);
-      alert('予期せぬエラーが発生しました');
+      alert('エラーが発生しました: ' + err.message);
     }
   };
-
+  
   const deleteRes = async (id) => {
     const isBlock = selectedRes?.res_type === 'blocked';
     const msg = isBlock ? 'このブロックを解除して予約を「可能」に戻しますか？' : 'この予約データを消去して予約を「可能」に戻しますか？';

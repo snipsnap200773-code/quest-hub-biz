@@ -19,6 +19,12 @@ function AdminManagement() {
   const [selectedDate, setSelectedDate] = useState(new Date().toLocaleDateString('sv-SE'));
   const [viewMonth, setViewMonth] = useState(new Date());
 
+  // --- 検索機能用State ---
+  const [searchTerm, setSearchTerm] = useState('');
+  const [searchResults, setSearchResults] = useState([]);
+  const [isSearchLoading, setIsSearchLoading] = useState(false);
+  const [selectedIndex, setSelectedIndex] = useState(-1);
+
   // --- マスターデータ ---
   const [categories, setCategories] = useState([]);
   const [services, setServices] = useState([]);
@@ -56,10 +62,25 @@ const [isMenuPopupOpen, setIsMenuPopupOpen] = useState(false);
   const [editEmail, setEditEmail] = useState('');
   const [customerMemo, setCustomerMemo] = useState('');
   const [firstArrivalDate, setFirstArrivalDate] = useState(''); 
-  const [pastVisits, setPastVisits] = useState([]);
+const [pastVisits, setPastVisits] = useState([]);
   const [isSavingMemo, setIsSavingMemo] = useState(false);
 
-  // ✅ 共通並び替え関数
+  // ==========================================
+  // --- 🆕 画面サイズ管理（エラー解決のために追加） ---
+  // ==========================================
+  const [windowWidth, setWindowWidth] = useState(window.innerWidth);
+
+  useEffect(() => {
+    const handleResize = () => setWindowWidth(window.innerWidth);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  // これで画面全体の isPC 判定が有効になります
+  const isPC = windowWidth > 1024; 
+  // ==========================================
+
+// ✅ 共通並び替え関数
   const sortItems = (items) => [...items].sort((a, b) => {
     const catA = a.category || 'その他'; const catB = b.category || 'その他';
     if (catA !== catB) return catA.localeCompare(catB, 'ja');
@@ -68,19 +89,19 @@ const [isMenuPopupOpen, setIsMenuPopupOpen] = useState(false);
 
   useEffect(() => {
     if (cleanShopId) fetchInitialData();
-  }, [cleanShopId, activeMenu, selectedDate]);
+  }, [cleanShopId, activeMenu, selectedDate, viewYear]); // viewYearが変わった時も再読込
 
-const fetchInitialData = async () => {
+  const fetchInitialData = async () => {
     try {
       setLoading(true);
       // 1. プロフィール取得
       const { data: profile } = await supabase.from('profiles').select('*').eq('id', cleanShopId).single();
       if (profile) setShop(profile);
       
-      const startOfYear = `${new Date().getFullYear()}-01-01`;
-      const endOfYear = `${new Date().getFullYear()}-12-31`;
+      const startOfYear = `${viewYear}-01-01`;
+      const endOfYear = `${viewYear}-12-31`;
 
-      // 2. 予約データ取得（担当者名をJoin）
+      // 2. 予約データ取得
       const { data: resData } = await supabase
         .from('reservations')
         .select('*, staffs(name)')
@@ -88,11 +109,11 @@ const fetchInitialData = async () => {
         .order('start_time', { ascending: true });
       setAllReservations(resData || []);
 
-      // 3. スタッフ名簿を「確実」に取得（独立させて実行します）
+      // 3. スタッフ名簿取得
       const { data: staffsData } = await supabase.from('staffs').select('*').eq('shop_id', cleanShopId);
       setStaffs(staffsData || []);
 
-      // 4. その他のマスターデータ取得（Promise.all）
+      // 4. 各種マスター ＆ 売上実績(sales)取得
       const [catRes, servRes, optRes, adjRes, prodRes, sDataRes] = await Promise.all([
         supabase.from('service_categories').select('*').eq('shop_id', cleanShopId).order('sort_order'),
         supabase.from('services').select('*').eq('shop_id', cleanShopId).order('sort_order'),
@@ -115,24 +136,74 @@ const fetchInitialData = async () => {
       setLoading(false); 
     }
   };
-    
-  // ✅ ② [修正箇所] データの読み込み口：商品名(savedProducts)を抽出できるようにしました
-const parseReservationDetails = (res) => {
-    if (!res) return { menuName: '', totalPrice: 0, items: [], subItems: [], savedAdjustments: [], savedProducts: [] };
 
-    const opt = typeof res.options === 'string' ? JSON.parse(res.options) : (res.options || {});
+  // 🆕 --- ここから：顧客検索ロジックを追加 ---
+  const handleSearch = async (val) => {
+    setSearchTerm(val);
+    if (val.length < 1) {
+      setSearchResults([]);
+      return;
+    }
+
+    setIsSearchLoading(true);
+    // ✅ 幽霊データを防ぐため、reservationsではなく「customers名簿」だけを検索
+    const { data, error } = await supabase
+      .from('customers')
+      .select('id, name, phone') // 電話番号も取得しておくと後で便利です
+      .eq('shop_id', cleanShopId)
+      .ilike('name', `%${val}%`) // あいまい検索
+      .limit(5); // 候補は5件まで
     
-    // ✅ 修正：people配列がある場合、全員分のservicesとoptionsを合体させる
+    if (error) console.error("Search Error:", error);
+    setSearchResults(data || []);
+    setIsSearchLoading(false);
+  };
+
+  // 検索結果の候補をクリックした時の処理
+  const selectSearchResult = (cust) => {
+    // 幽霊データを防ぐため、ダミーの予約オブジェクト形式にしてカルテ関数に渡す
+    openCustomerInfo({ customer_name: cust.name });
+    
+    // 検索窓をきれいにする
+    setSearchTerm('');
+    setSearchResults([]);
+  };
+
+// 🆕 キーボード操作（上下、エンター、エスケープ）を制御する
+  const handleKeyDown = (e) => {
+    if (searchResults.length === 0) return;
+
+    if (e.key === 'ArrowDown') {
+      // ↓キー：次の候補へ
+      e.preventDefault();
+      setSelectedIndex(prev => (prev < searchResults.length - 1 ? prev + 1 : prev));
+    } else if (e.key === 'ArrowUp') {
+      // ↑キー：前の候補へ
+      e.preventDefault();
+      setSelectedIndex(prev => (prev > 0 ? prev - 1 : prev));
+    } else if (e.key === 'Enter') {
+      // Enterキー：現在の選択を決定
+      if (selectedIndex >= 0) {
+        e.preventDefault();
+        selectSearchResult(searchResults[selectedIndex]);
+      }
+    } else if (e.key === 'Escape') {
+      // Escキー：閉じる
+      setSearchResults([]);
+      setSelectedIndex(-1);
+    }
+  };
+
+  const parseReservationDetails = (res) => {
+    if (!res) return { menuName: '', totalPrice: 0, items: [], subItems: [], savedAdjustments: [], savedProducts: [] };
+    const opt = typeof res.options === 'string' ? JSON.parse(res.options) : (res.options || {});
     let items = [];
     let subItems = [];
 
     if (opt.people && Array.isArray(opt.people)) {
-      // 全員のメニューを一つの配列にまとめる
       items = opt.people.flatMap(p => p.services || []);
-      // 全員の枝分かれ（シャンプー等）を一つの配列にまとめる
       subItems = opt.people.flatMap(p => Object.values(p.options || {}));
     } else {
-      // 従来の単名予約の場合
       items = opt.services || [];
       subItems = Object.values(opt.options || {});
     }
@@ -162,18 +233,11 @@ const parseReservationDetails = (res) => {
     };
   };
 
-  // ✅ ① [修正箇所] お会計金額の計算ロジック（ toggle関数の上に配置しました）
-// --- お会計計算 ＆ 連動ロジック（ここから） ---
-// --- お会計計算 ＆ 連動ロジック ---
-const calculateFinalTotal = (currentSvcs, currentAdjs, currentProds, currentOpts = checkoutOptions) => {
-    // 1. メインメニューの合計
+  const calculateFinalTotal = (currentSvcs, currentAdjs, currentProds, currentOpts = checkoutOptions) => {
     let total = currentSvcs.reduce((sum, s) => sum + (Number(s.price) || 0), 0);
-    
-    // ✅ 修正：予約データ(parseDetails)ではなく、レジで選択中のオプション(currentOpts)を合計する
     const optPrice = Object.values(currentOpts).reduce((sum, o) => sum + (Number(o.additional_price) || 0), 0);
     total += optPrice;
 
-    // 3. 店販・調整の計算
     currentProds.forEach(p => total += Number(p.price || 0));
     currentAdjs.filter(a => !a.is_percent).forEach(a => {
       total += a.is_minus ? -Number(a.price) : Number(a.price);
@@ -183,6 +247,7 @@ const calculateFinalTotal = (currentSvcs, currentAdjs, currentProds, currentOpts
     });
     setFinalPrice(Math.max(0, Math.round(total)));
   };
+
   const toggleCheckoutAdj = (adj) => {
     const isSelected = checkoutAdjustments.find(a => a.id === adj.id);
     const newSelection = isSelected ? checkoutAdjustments.filter(a => a.id !== adj.id) : [...checkoutAdjustments, adj];
@@ -204,7 +269,6 @@ const calculateFinalTotal = (currentSvcs, currentAdjs, currentProds, currentOpts
     calculateFinalTotal(newSelection, checkoutAdjustments, checkoutProducts);
   };
 
-  // ✅ 町田さんの件：完了ボタンを押した瞬間に台帳へ同期する命令
   const applyMenuChangeToLedger = () => {
     if (!selectedRes) return;
     const newBaseName = checkoutServices.map(s => s.name).join(', ');
@@ -221,157 +285,289 @@ const calculateFinalTotal = (currentSvcs, currentAdjs, currentProds, currentOpts
 const openCheckout = (res) => {
     const info = parseReservationDetails(res);
     setSelectedRes(res);
-    setCheckoutServices(info.items);
-    setCheckoutAdjustments(info.savedAdjustments);
+
+    // 🆕 【重要】今のマスターデータに存在する項目だけを抽出（お掃除）
+    // 1. 施術メニューの精査
+    const validServices = info.items.filter(savedSvc => 
+      services.some(masterSvc => masterSvc.id === savedSvc.id || masterSvc.name === savedSvc.name)
+    );
+
+    // 2. プロ調整項目の精査
+    const validAdjustments = info.savedAdjustments.filter(savedAdj => 
+      adminAdjustments.some(masterAdj => masterAdj.id === savedAdj.id || masterAdj.name === savedAdj.name)
+    );
+
+    setCheckoutServices(validServices);
+    setCheckoutAdjustments(validAdjustments);
     setCheckoutProducts(info.savedProducts);
 
-    // ✅ 追記：予約時の枝分かれ設定をレジ用の箱(checkoutOptions)にコピー
+    // 枝分かれ（オプション）のコピー
     const opt = typeof res.options === 'string' ? JSON.parse(res.options) : (res.options || {});
-    // 複数名予約(people)と単名予約(options)の両方から集約
     const initialOpts = opt.people 
       ? opt.people.flatMap(p => Object.entries(p.options || {})) 
       : Object.entries(opt.options || {});
     setCheckoutOptions(Object.fromEntries(initialOpts));
 
+    // 金額を再計算してセット
     setFinalPrice(res.total_price || info.totalPrice);
-    setOpenAdjCategory(null); setIsCheckoutOpen(true); setIsCustomerInfoOpen(false);
-  }; // 👈 ここで openCheckout は一旦終わり！
+    setOpenAdjCategory(null); 
+    setIsCheckoutOpen(true); 
+    setIsCustomerInfoOpen(false);
+  };
 
-  // --- 4. 操作用関数（新しく追加するもの） ---
-  // openCheckout の中ではなく、すぐ下に新しく書きます
   const toggleCheckoutOption = (serviceId, groupName, opt) => {
     const key = `${serviceId}-${groupName}`;
     const newOptions = { ...checkoutOptions, [key]: opt };
     setCheckoutOptions(newOptions);
     calculateFinalTotal(checkoutServices, checkoutAdjustments, checkoutProducts, newOptions);
   };
-  const completePayment = async () => {
+
+const completePayment = async () => {
     try {
       const totalSlots = checkoutServices.reduce((sum, s) => sum + (Number(s.slots) || 1), 0);
       const endTime = new Date(new Date(selectedRes.start_time).getTime() + totalSlots * (shop.slot_interval_min || 15) * 60000);
       
-      // ✅ 町田さんの件：お会計確定時も「枝分かれ込みの名前」でデータベースに保存
       const currentBaseName = checkoutServices.map(s => s.name).join(', ');
       const info = parseReservationDetails(selectedRes);
       const branchNames = info.subItems.map(o => o.option_name).filter(Boolean);
       const dbMenuName = branchNames.length > 0 ? `${currentBaseName}（${branchNames.join(', ')}）` : currentBaseName;
 
+// ✅ 1. 予約ステータスを更新（古いメニュー情報を新しいレジの内容で完全に上書き）
       await supabase.from('reservations').update({ 
         total_price: finalPrice, 
         status: 'completed', 
         total_slots: totalSlots, 
         end_time: endTime.toISOString(), 
-        menu_name: dbMenuName, // 👈 ここを修正
-options: { 
-  services: checkoutServices, 
-  adjustments: checkoutAdjustments, 
-  products: checkoutProducts, 
-  options: checkoutOptions // 👈 これを付け足す
-}      }).eq('id', selectedRes.id);
+        menu_name: dbMenuName, // 枝分かれ込みの新しい名前に上書き
+        options: { 
+          // 🆕 ここを「お会計時の内容」だけに絞ることで、本家の古いメニューを消し去ります
+          services: checkoutServices, 
+          adjustments: checkoutAdjustments, 
+          products: checkoutProducts, 
+          options: checkoutOptions,
+          isUpdatedFromCheckout: true // お会計で更新した目印（任意）
+        }
+      }).eq('id', selectedRes.id);
 
       const { data: cust } = await supabase.from('customers').select('id').eq('shop_id', cleanShopId).eq('name', selectedRes.customer_name).maybeSingle();
       const serviceAmt = checkoutServices.reduce((sum, s) => sum + (Number(s.price) || 0), 0);
       const productAmt = checkoutProducts.reduce((sum, p) => sum + (Number(p.price) || 0), 0);
-      await supabase.from('sales').insert([{ shop_id: cleanShopId, reservation_id: selectedRes.id, customer_id: cust?.id || null, total_amount: finalPrice, service_amount: serviceAmt, product_amount: productAmt, sale_date: selectedDate, details: { services: checkoutServices, products: checkoutProducts, adjustments: checkoutAdjustments } }]);
+      
+      // ==========================================
+      // ✅ 2. 【最重要：二重登録防止】
+      // すでにこの予約の売上データがあるか確認
+      // ==========================================
+      const { data: existingSale } = await supabase
+        .from('sales')
+        .select('id')
+        .eq('reservation_id', selectedRes.id)
+        .maybeSingle();
+
+      const salePayload = { 
+        shop_id: cleanShopId, 
+        reservation_id: selectedRes.id, 
+        customer_id: cust?.id || null, 
+        total_amount: finalPrice, 
+        service_amount: serviceAmt, 
+        product_amount: productAmt, 
+        sale_date: selectedDate, 
+        details: { services: checkoutServices, products: checkoutProducts, adjustments: checkoutAdjustments } 
+      };
+
+      if (existingSale) {
+        // すでにお会計済みなら「更新」
+        await supabase.from('sales').update(salePayload).eq('id', existingSale.id);
+      } else {
+        // 初めてのお会計なら「新規登録」
+        await supabase.from('sales').insert([salePayload]);
+      }
+      // ==========================================
       
       alert("お会計を確定しました。"); 
       setIsCheckoutOpen(false); 
       fetchInitialData();
-    } catch (err) { alert("確定失敗: " + err.message); }
-  };
+    } catch (err) { 
+      alert("確定失敗: " + err.message); 
+    }
+};
 
+  // 🆕 ここから追加：お会計リセット機能
+  const handleResetCheckout = () => {
+    if (!window.confirm("お会計内容を現在のマスター設定の状態にリセットしますか？\n（追加した店販や調整もリセットされます）")) return;
+
+    // 1. 予約時の本来のメニュー（最新のマスター価格を反映）に再構築
+    const info = parseReservationDetails(selectedRes);
+    
+    // 今のマスターに実在するメニューだけを最新価格で取得
+    const freshServices = info.items.map(saved => 
+      services.find(s => s.id === saved.id || s.name === saved.name)
+    ).filter(Boolean);
+
+    // 2. 各ステートを初期化
+    setCheckoutServices(freshServices);
+    setCheckoutAdjustments([]); // 調整をクリア
+    setCheckoutProducts([]);    // 店販をクリア
+    setCheckoutOptions({});     // 枝分かれ（シャンプー等）も一旦クリア
+    
+    // 3. 金額を再計算して画面に反映
+    calculateFinalTotal(freshServices, [], [], {});
+    
+    alert("現在のマスター設定でリセットしました。");
+  };
   const addAdjustment = (svcId = null) => {
     const name = prompt("項目名を入力してください"); if (!name) return;
     let cat = svcId === null ? (prompt("カテゴリー名を入力してください", "その他") || "その他") : null;
     setAdminAdjustments([...adminAdjustments, { id: crypto.randomUUID(), service_id: svcId, name, price: 0, is_percent: false, is_minus: false, category: cat }]);
   };
 
-  const handleRemoveAdjustment = (adj) => { if (adj.id && typeof adj.id === 'string' && !adj.id.includes('-temp')) setDeletedAdjIds(prev => [...prev, adj.id]); setAdminAdjustments(adminAdjustments.filter(a => a.id !== adj.id)); };
-  const addProduct = () => { const name = prompt("商品名を入力してください"); if (name) setProducts([...products, { id: crypto.randomUUID(), name, price: 0 }]); };
+  const handleRemoveAdjustment = (adj) => {
+    setAdminAdjustments(prev => prev.filter(a => a.id !== adj.id));
+    if (adj.id && adj.id.length >= 36) { // 正式なUUID(DB登録済み)の場合のみ削除リストへ
+      setDeletedAdjIds(prev => [...prev, adj.id]);
+    }
+  };
+
+  const addProduct = () => { 
+    const name = prompt("商品名を入力してください"); 
+    if (name) setProducts([...products, { id: crypto.randomUUID(), name, price: 0 }]); 
+  };
+
   const dailyTotalSales = useMemo(() => allReservations.filter(r => r.start_time.startsWith(selectedDate) && r.res_type === 'normal' && r.status === 'completed').reduce((sum, r) => sum + (r.total_price || 0), 0), [allReservations, selectedDate]);
 
-// ✅ ロジック修正：年単位で12ヶ月分を日別データ込みで集計します
+// ✅ 売上の人数と金額のズレを完全に解消する集計ロジック（厳格・台帳連動版）
   const analyticsData = useMemo(() => {
     const currentYear = viewYear;
-    // 12ヶ月分の箱を用意
-    const months = Array.from({ length: 12 }, (_, i) => {
-      const month = i + 1;
-      // その月の日数を計算
-      const daysInMonth = new Date(currentYear, month, 0).getDate();
-      return {
-        month: month,
-        total: 0,
-        count: 0,
-        days: Array.from({ length: daysInMonth }, (_, j) => ({ day: j + 1, total: 0, count: 0 }))
-      };
-    });
+    const months = Array.from({ length: 12 }, (_, i) => ({
+      month: i + 1, total: 0, count: 0,
+      days: Array.from({ length: new Date(currentYear, i + 1, 0).getDate() }, (_, j) => ({ day: j + 1, total: 0, count: 0 }))
+    }));
 
-    const salesResIds = new Set(salesRecords.map(s => s.reservation_id));
+    // 1️⃣ 台帳に表示される「通常予約(normal)」のIDだけを正解リストとして抽出
+    const validNormalRes = allReservations.filter(r => r.res_type === 'normal');
+    const validResIds = new Set(validNormalRes.map(r => r.id));
 
-    // 1. 予約データ（reservations）の集計
-    allReservations.filter(r => r.status === 'completed' && !salesResIds.has(r.id)).forEach(r => {
-      const d = new Date(r.start_time);
-      if (d.getFullYear() === currentYear) {
-        const mIdx = d.getMonth();
-        const dIdx = d.getDate() - 1;
-        months[mIdx].total += (r.total_price || 0);
-        months[mIdx].count += 1;
-        months[mIdx].days[dIdx].total += (r.total_price || 0);
-        months[mIdx].days[dIdx].count += 1;
-      }
-    });
-
-    // 2. 売上記録（sales）の集計
+    // 2️⃣ 会計記録(sales)を集計（※現存する通常予約に紐付いているものだけ）
     salesRecords.forEach(s => {
+      // 予約が削除されていたり、通常予約以外(✕印など)の売上は集計から除外
+      if (!s.reservation_id || !validResIds.has(s.reservation_id)) return;
+
       const d = new Date(s.sale_date);
       if (d.getFullYear() === currentYear) {
         const mIdx = d.getMonth();
         const dIdx = d.getDate() - 1;
-        months[mIdx].total += (s.total_amount || 0);
-        months[mIdx].count += 1;
-        if (months[mIdx].days[dIdx]) {
-          months[mIdx].days[dIdx].total += (s.total_amount || 0);
+        if (months[mIdx] && months[mIdx].days[dIdx]) {
+          months[mIdx].total += (Number(s.total_amount) || 0);
+          months[mIdx].count += 1;
+          months[mIdx].days[dIdx].total += (Number(s.total_amount) || 0);
+          months[mIdx].days[dIdx].count += 1;
+        }
+      }
+    });
+
+    // 3️⃣ まだ会計(sales)に載っていない「完了済み予約(完了 ✓)」を補完
+    const accountedResIds = new Set(salesRecords.map(s => s.reservation_id));
+    
+    validNormalRes.filter(r => 
+      r.status === 'completed' && 
+      !accountedResIds.has(r.id)
+    ).forEach(r => {
+      const d = new Date(r.start_time);
+      if (d.getFullYear() === currentYear) {
+        const mIdx = d.getMonth();
+        const dIdx = d.getDate() - 1;
+        if (months[mIdx] && months[mIdx].days[dIdx]) {
+          months[mIdx].total += (Number(r.total_price) || 0);
+          months[mIdx].count += 1;
+          months[mIdx].days[dIdx].total += (Number(r.total_price) || 0);
           months[mIdx].days[dIdx].count += 1;
         }
       }
     });
 
     return months;
-  }, [allReservations, salesRecords, viewYear]);
-
+  }, [allReservations, salesRecords, viewYear]);  
   const groupedWholeAdjustments = useMemo(() => {
     const sorted = sortItems(adminAdjustments.filter(adj => adj.service_id === null));
     return sorted.reduce((acc, adj) => { const cat = adj.category || 'その他'; if (!acc[cat]) acc[cat] = []; acc[cat].push(adj); return acc; }, {});
   }, [adminAdjustments]);
 
+  // ✅ 削除・整形・保存を一括で行う関数（エラー解消版）
   const saveAllMasters = async () => {
     setIsSaving(true);
     try {
+      // 1. 物理削除を実行
+      if (deletedAdjIds.length > 0) {
+        await supabase.from('admin_adjustments').delete().in('id', deletedAdjIds);
+        setDeletedAdjIds([]); 
+      }
+      if (deletedProductIds.length > 0) {
+        await supabase.from('products').delete().in('id', deletedProductIds);
+        setDeletedProductIds([]);
+      }
+
+      // 2. 整形
       const formattedServices = services.map(svc => ({ id: svc.id, shop_id: cleanShopId, name: svc.name, price: svc.price || 0, category: svc.category, sort_order: svc.sort_order || 0, slots: svc.slots || 1 }));
       const formattedOptions = serviceOptions.map(opt => ({ id: opt.id, service_id: opt.service_id, group_name: opt.group_name, option_name: opt.option_name, additional_price: opt.additional_price || 0 }));
-const formattedAdjustments = adminAdjustments.map(adj => ({ 
-        id: adj.id, 
-        shop_id: cleanShopId, // ✅ 🆕 保存時に店舗IDをセット
-        service_id: adj.service_id, 
-        name: adj.name, 
-        price: adj.price || 0, 
-        is_percent: adj.is_percent || false, 
-        is_minus: adj.is_minus || false, 
-        category: adj.service_id ? null : (adj.category || 'その他') 
+      const formattedAdjustments = adminAdjustments.map(adj => ({ 
+        id: adj.id, shop_id: cleanShopId, service_id: adj.service_id, name: adj.name, price: adj.price || 0, 
+        is_percent: adj.is_percent || false, is_minus: adj.is_minus || false, category: adj.service_id ? null : (adj.category || 'その他') 
       }));
-            const formattedProducts = products.map((p, i) => ({ id: p.id, shop_id: cleanShopId, name: p.name, price: p.price || 0, sort_order: i }));
-      await Promise.all([ supabase.from('services').upsert(formattedServices), supabase.from('service_options').upsert(formattedOptions), supabase.from('admin_adjustments').upsert(formattedAdjustments), supabase.from('products').upsert(formattedProducts) ]);
-      alert("保存しました。"); fetchInitialData();
-    } catch (err) { alert("保存失敗: " + err.message); } finally { setIsSaving(false); }
+      const formattedProducts = products.map((p, i) => ({ id: p.id, shop_id: cleanShopId, name: p.name, price: p.price || 0, sort_order: i }));
+
+      // 3. 一括保存(upsert)
+      await Promise.all([ 
+        supabase.from('services').upsert(formattedServices), 
+        supabase.from('service_options').upsert(formattedOptions), 
+        supabase.from('admin_adjustments').upsert(formattedAdjustments), 
+        supabase.from('products').upsert(formattedProducts) 
+      ]);
+
+      alert("設定をすべて保存しました。"); 
+      fetchInitialData();
+    } catch (err) { 
+      console.error(err);
+      alert("保存失敗: " + err.message); 
+    } finally { 
+      setIsSaving(false); 
+    }
   };
 
+  // 🆕 ここから追加：お客様詳細（カルテ）を開く関数
   const openCustomerInfo = async (res) => {
-    setSelectedRes(res);
-    const { data: cust } = await supabase.from('customers').select('*').eq('shop_id', cleanShopId).eq('name', res.customer_name).maybeSingle();
-    const { data: history } = await supabase.from('reservations').select('*, staffs(name)').eq('shop_id', cleanShopId).eq('customer_name', res.customer_name).order('start_time', { ascending: false });
-    setSelectedCustomer(cust || { name: res.customer_name, phone: res.customer_phone, email: res.customer_email });
-    setEditName(cust?.name || res.customer_name); setEditPhone(cust?.phone || res.customer_phone || ''); setEditEmail(cust?.email || res.customer_email || ''); setCustomerMemo(cust?.memo || ''); setPastVisits(history || []); setFirstArrivalDate(cust?.first_arrival_date || (history?.length > 0 ? history[history.length - 1].start_time.split('T')[0] : ''));
-    setIsCustomerInfoOpen(true); setIsCheckoutOpen(false);
+    try {
+      // 1. 予約名からお客様の基本情報を取得
+      const { data: customer } = await supabase
+        .from('customers')
+        .select('*')
+        .eq('shop_id', cleanShopId)
+        .eq('name', res.customer_name)
+        .maybeSingle();
+
+      // ステートにセット
+      setSelectedCustomer(customer || { name: res.customer_name });
+      setEditName(customer?.name || res.customer_name);
+      setEditPhone(customer?.phone || '');
+      setEditEmail(customer?.email || '');
+      setCustomerMemo(customer?.memo || '');
+      setFirstArrivalDate(customer?.first_arrival_date || '');
+
+      // 2. 過去の来店履歴（完了済み予約）を取得
+      const { data: visits } = await supabase
+        .from('reservations')
+        .select('*, staffs(name)')
+        .eq('shop_id', cleanShopId)
+        .eq('customer_name', res.customer_name)
+        .eq('status', 'completed')
+        .order('start_time', { ascending: false });
+
+      setPastVisits(visits || []);
+      
+      // パネルを表示
+      setIsCustomerInfoOpen(true);
+      setIsCheckoutOpen(false); // レジが開いていたら閉じる
+    } catch (err) {
+      console.error("Customer Info Error:", err);
+    }
   };
 
   const saveCustomerInfo = async () => {
@@ -391,33 +587,16 @@ const formattedAdjustments = adminAdjustments.map(adj => ({
     } catch (err) { alert("失敗: " + err.message); } finally { setIsSavingMemo(false); }
   };
 
-  // 🆕 2. 担当者変更ロジック：saveCustomerInfo のすぐ下に配置
   const handleUpdateStaffDirectly = async (resId, newStaffId) => {
     try {
-      const { error } = await supabase
-        .from('reservations')
-        .update({ staff_id: newStaffId })
-        .eq('id', resId);
-
+      const { error } = await supabase.from('reservations').update({ staff_id: newStaffId }).eq('id', resId);
       if (error) throw error;
-      setStaffPickerRes(null); // モーダルを閉じる
-      fetchInitialData();      // 名前を最新にするために再読込
-    } catch (err) {
-      alert("担当者の変更に失敗しました");
-    }
-  };
-
-  const cycleAdjType = (id) => {
-    setAdminAdjustments(prev => prev.map(a => {
-      if (a.id !== id) return a;
-      if (!a.is_minus && !a.is_percent) return { ...a, is_minus: true, is_percent: false };
-      if (a.is_minus) return { ...a, is_minus: false, is_percent: true };
-      return { ...a, is_minus: false, is_percent: false };
-    }));
+      setStaffPickerRes(null); 
+      fetchInitialData();
+    } catch (err) { alert("担当者の変更に失敗しました"); }
   };
 
   const handleDateChangeUI = (days) => { const d = new Date(selectedDate); d.setDate(d.getDate() + days); setSelectedDate(d.toLocaleDateString('sv-SE')); };
-
   return (
     <div style={fullPageWrapper}>
       <div style={sidebarStyle}>
@@ -455,75 +634,239 @@ const formattedAdjustments = adminAdjustments.map(adj => ({
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
 {activeMenu === 'work' && (
           <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-            <div style={{ background: '#d34817', padding: '15px 25px', color: '#fff', display: 'flex', justifyContent: 'flex-start', alignItems: 'center' }}>
-              <h2 style={{ margin: 0, fontStyle: 'italic', fontSize: '1.4rem' }}>受付台帳：{selectedDate.replace(/-/g, '/')}</h2>
-              <div style={{ display: 'flex', gap: '8px', marginLeft: '20px' }}>
-                <button onClick={() => handleDateChangeUI(-1)} style={headerBtnSmall}>前日</button>
-                <button onClick={() => setSelectedDate(new Date().toLocaleDateString('sv-SE'))} style={headerBtnSmall}>今日</button>
-                <button onClick={() => handleDateChangeUI(1)} style={headerBtnSmall}>次日</button>
-              </div>
-              <div style={{ background: '#fff', color: '#d34817', padding: '5px 15px', fontWeight: 'bold', marginLeft: 'auto' }}>
-                {allReservations.filter(r => r.start_time.startsWith(selectedDate) && r.res_type === 'normal').length}件の予約
-              </div>
-            </div>
-            <div style={{ flex: 1, overflowY: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                <thead>
-                  <tr style={{ background: '#f3f0ff', borderBottom: '2px solid #4b2c85' }}>
-                    <th style={thStyle}>担当者</th>
-                    <th style={thStyle}>時間</th>
-                    <th style={thStyle}>お客様名 (カルテ)</th>
-                    <th style={thStyle}>メニュー(予定)</th>
-                    <th style={thStyle}>お会計 (レジ)</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {allReservations.filter(r => r.start_time.startsWith(selectedDate) && r.res_type === 'normal').length > 0 ? 
-                    allReservations.filter(r => r.start_time.startsWith(selectedDate) && r.res_type === 'normal').map((res) => (
-                      <tr key={res.id} style={{ borderBottom: '1px solid #eee', cursor: 'pointer' }}>
-                        {/* 1. 担当者 */}
-<td 
-  onClick={(e) => {
-    e.stopPropagation(); // 他のクリックイベント（レジ）を防ぐ
-    setStaffPickerRes(res); // 選択モードへ
-  }} 
-  style={{ 
-    ...tdStyle, 
-    fontWeight: 'bold', 
-    color: '#4b2c85', 
-    background: '#fdfbff', // 少し色を変えて「押せる」感を出す
-    cursor: 'pointer' 
+            
+            {/* 🚀 ヘッダー部分：スマホではボタンを小さく、分析ボタンを追加 */}
+            <div style={{ 
+              background: '#d34817', 
+              padding: isPC ? '15px 25px' : '10px 15px', 
+              color: '#fff', 
+              display: 'flex', 
+              justifyContent: 'space-between', 
+              alignItems: 'center',
+              flexWrap: 'wrap',
+              gap: '10px'
+            }}>
+              <h2 style={{ margin: 0, fontStyle: 'italic', fontSize: isPC ? '1.4rem' : '1.1rem' }}>
+                台帳：{selectedDate.replace(/-/g, '/')}
+              </h2>
+<div style={{ display: 'flex', gap: '6px', alignItems: 'center', position: 'relative' }}>
+  {/* 🔍 検索入力エリア */}
+  <div style={{ position: 'relative' }}>
+<input 
+  type="text" 
+  placeholder="顧客検索..." 
+  value={searchTerm}
+  onChange={(e) => {
+    handleSearch(e.target.value);
+    setSelectedIndex(-1); // 文字を変えたら選択をリセット
   }}
->
-  {res.staffs?.name || 'フリー'}
-</td>
-                        {/* 2. 時間 */}
-                        <td onClick={() => openCheckout(res)} style={tdStyle}>
-                          {new Date(res.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                        </td>
-                        {/* 3. お客様名 */}
-                        <td onClick={() => openCustomerInfo(res)} style={{ ...tdStyle, background: res.status === 'completed' ? '#eee' : '#008000', color: res.status === 'completed' ? '#333' : '#fff', fontWeight: 'bold' }}>
-                          {res.customer_name} {res.status === 'completed' && '✓'}
-                        </td>
-                        {/* 4. メニュー */}
-                        <td onClick={() => openCheckout(res)} style={tdStyle}>
-                          {parseReservationDetails(res).menuName}
-                        </td>
-                        {/* 5. お会計 */}
-                        <td onClick={() => openCheckout(res)} style={{ ...tdStyle, fontWeight: 'bold' }}>
-                          ¥ {Number(res.total_price || parseReservationDetails(res).totalPrice).toLocaleString()}
-                        </td>
-                      </tr>
-                    )) : (
-                      <tr><td colSpan="5" style={{ padding: '50px', textAlign: 'center', color: '#999' }}>予約なし</td></tr>
-                    )
-                  }
-                </tbody>
-              </table>
+  onKeyDown={handleKeyDown} // 🆕 キー入力を監視
+  style={{ 
+    padding: '5px 10px', 
+    borderRadius: '6px', 
+    border: 'none', 
+    fontSize: '0.8rem', 
+    width: isPC ? '150px' : '100px',
+    marginRight: '10px',
+    outline: 'none'
+  }} 
+/>
+{/* 検索結果のドロップダウン */}
+{searchResults.length > 0 && (
+  <div style={{ 
+    position: 'absolute', top: '35px', left: 0, width: '250px', 
+    background: '#fff', color: '#333', borderRadius: '8px', 
+    boxShadow: '0 4px 12px rgba(0,0,0,0.2)', zIndex: 100,
+    overflow: 'hidden'
+  }}>
+    {searchResults.map((cust, index) => (
+      <div 
+        key={cust.id} 
+        onClick={() => selectSearchResult(cust)}
+        onMouseEnter={() => setSelectedIndex(index)} // 🆕 マウスが乗った時も同期
+        style={{ 
+          padding: '10px', 
+          borderBottom: '1px solid #eee', 
+          cursor: 'pointer', 
+          fontSize: '0.85rem',
+          // 🆕 選択されている項目に背景色をつける
+          background: selectedIndex === index ? '#f3f0ff' : '#fff',
+          color: selectedIndex === index ? '#4b2c85' : '#333',
+          fontWeight: selectedIndex === index ? 'bold' : 'normal'
+        }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+          <span>{cust.name} 様</span>
+          <span style={{ fontSize: '0.7rem', color: '#94a3b8' }}>{cust.phone?.slice(-4)}</span>
+        </div>
+      </div>
+    ))}
+  </div>
+)}
+    {/* 検索結果のドロップダウン */}
+    {searchResults.length > 0 && (
+      <div style={{ 
+        position: 'absolute', top: '35px', left: 0, width: '200px', 
+        background: '#fff', color: '#333', borderRadius: '8px', 
+        boxShadow: '0 4px 12px rgba(0,0,0,0.2)', zIndex: 100 
+      }}>
+        {searchResults.map(cust => (
+          <div 
+            key={cust.id} 
+            onClick={() => selectSearchResult(cust)}
+            style={{ padding: '10px', borderBottom: '1px solid #eee', cursor: 'pointer', fontSize: '0.85rem' }}
+          >
+            {cust.name} 様
+          </div>
+        ))}
+      </div>
+    )}
+  </div>
+
+  <button onClick={() => handleDateChangeUI(-1)} style={headerBtnSmall}>前日</button>
+                  <button onClick={() => setSelectedDate(new Date().toLocaleDateString('sv-SE'))} style={headerBtnSmall}>今日</button>
+                <button onClick={() => handleDateChangeUI(1)} style={headerBtnSmall}>次日</button>
+                {/* 📊 スマホ版のみ、サイドバーの代わりに「分析」ボタンを表示 */}
+                {!isPC && (
+                  <button onClick={() => setActiveMenu('analytics')} style={{ ...headerBtnSmall, background: '#008000', border: 'none' }}>📊 分析</button>
+                )}
+              </div>
             </div>
-            <div style={{ display: 'flex', background: '#d34817', padding: '15px 25px', justifyContent: 'flex-end', alignItems: 'center', gap: '15px', color: '#fff' }}>
-               <div style={{ fontSize: '0.9rem', fontWeight: 'bold' }}>本日のお会計確定 合計</div>
-               <div style={{ fontSize: '1.8rem', fontWeight: '900' }}>¥ {dailyTotalSales.toLocaleString()}</div>
+
+            {/* 🚀 メインエリア：ここで「PC（表）」と「スマホ（カード）」を切り替えます */}
+            <div style={{ 
+              flex: 1, 
+              overflowY: 'auto', 
+              background: isPC ? '#fff' : '#f4f7f9', 
+              padding: isPC ? '0' : '15px' 
+            }}>
+              
+              {isPC ? (
+                /* ==========================================
+                   💻 PC版：既存の正確なテーブル（表）形式
+                   ========================================== */
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead style={{ position: 'sticky', top: 0, background: '#fff', zIndex: 10 }}>
+                    <tr style={{ background: '#f3f0ff', borderBottom: '2px solid #4b2c85' }}>
+                      <th style={thStyle}>担当者</th>
+                      <th style={thStyle}>時間</th>
+                      <th style={thStyle}>お客様名 (カルテ)</th>
+                      <th style={thStyle}>メニュー(予定)</th>
+                      <th style={thStyle}>お会計 (レジ)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {allReservations.filter(r => r.start_time.startsWith(selectedDate) && r.res_type === 'normal').length > 0 ? 
+                      allReservations.filter(r => r.start_time.startsWith(selectedDate) && r.res_type === 'normal').map((res) => (
+                        <tr key={res.id} style={{ borderBottom: '1px solid #eee', cursor: 'pointer' }}>
+                          <td onClick={(e) => { e.stopPropagation(); setStaffPickerRes(res); }} style={{ ...tdStyle, fontWeight: 'bold', color: '#4b2c85', background: '#fdfbff' }}>
+                            {res.staffs?.name || 'フリー'}
+                          </td>
+                          <td onClick={() => openCheckout(res)} style={tdStyle}>
+                            {new Date(res.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </td>
+                          <td onClick={() => openCustomerInfo(res)} style={{ ...tdStyle, background: res.status === 'completed' ? '#eee' : '#008000', color: res.status === 'completed' ? '#333' : '#fff', fontWeight: 'bold' }}>
+                            {res.customer_name} {res.status === 'completed' && '✓'}
+                          </td>
+                          <td onClick={() => openCheckout(res)} style={tdStyle}>
+                            {parseReservationDetails(res).menuName}
+                          </td>
+                          <td onClick={() => openCheckout(res)} style={{ ...tdStyle, fontWeight: 'bold' }}>
+                            ¥ {Number(res.total_price || parseReservationDetails(res).totalPrice).toLocaleString()}
+                          </td>
+                        </tr>
+                      )) : (
+                        <tr><td colSpan="5" style={{ padding: '50px', textAlign: 'center', color: '#999' }}>予約なし</td></tr>
+                      )
+                    }
+                  </tbody>
+                </table>
+              ) : (
+                /* ==========================================
+                   📱 スマホ版：見やすい「売上カード」形式
+                   ========================================== */
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  {allReservations.filter(r => r.start_time.startsWith(selectedDate) && r.res_type === 'normal').length > 0 ? (
+                    allReservations.filter(r => r.start_time.startsWith(selectedDate) && r.res_type === 'normal').map((res) => {
+                      const details = parseReservationDetails(res);
+                      const isCompleted = res.status === 'completed';
+                      return (
+                        <div 
+                          key={res.id} 
+                          style={{ 
+                            background: '#fff', 
+                            borderRadius: '16px', 
+                            padding: '16px', 
+                            boxShadow: '0 4px 15px rgba(0,0,0,0.05)', 
+                            border: `1px solid ${isCompleted ? '#e2e8f0' : '#d3481722'}`,
+                            position: 'relative'
+                          }}
+                        >
+                          {/* ステータスバー（左端の色） */}
+                          <div style={{ position: 'absolute', left: 0, top: 15, bottom: 15, width: '4px', background: isCompleted ? '#94a3b8' : '#008000', borderRadius: '0 4px 4px 0' }} />
+                          
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px', paddingLeft: '8px' }}>
+                            <span style={{ fontSize: '1.1rem', fontWeight: '900', color: '#1e293b' }}>
+                              {new Date(res.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                            <button 
+                              onClick={() => setStaffPickerRes(res)}
+                              style={{ background: '#f3f0ff', color: '#4b2c85', border: 'none', padding: '4px 10px', borderRadius: '6px', fontSize: '0.7rem', fontWeight: 'bold' }}
+                            >
+                              👤 {res.staffs?.name || '担当者選択'}
+                            </button>
+                          </div>
+
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px', paddingLeft: '8px' }}>
+                            <div 
+                              onClick={() => openCustomerInfo(res)} 
+                              style={{ flex: 1, fontSize: '1.1rem', fontWeight: 'bold', color: '#1e293b', textDecoration: 'underline', textDecorationColor: '#cbd5e1' }}
+                            >
+                              {res.customer_name} 様
+                            </div>
+                            <button 
+                              onClick={() => openCheckout(res)}
+                              style={{ 
+                                background: isCompleted ? '#f1f5f9' : '#008000', 
+                                color: isCompleted ? '#94a3b8' : '#fff', 
+                                border: 'none', padding: '6px 12px', borderRadius: '8px', fontSize: '0.8rem', fontWeight: 'bold' 
+                              }}
+                            >
+                              {isCompleted ? '確定済 ✓' : 'レジへ'}
+                            </button>
+                          </div>
+
+                          <div style={{ fontSize: '0.8rem', color: '#64748b', marginBottom: '10px', paddingLeft: '8px', lineHeight: '1.4' }}>
+                            📋 {details.menuName}
+                          </div>
+
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid #f1f5f9', paddingTop: '10px', paddingLeft: '8px' }}>
+                            <span style={{ fontSize: '0.7rem', color: '#94a3b8' }}>お会計金額</span>
+                            <span style={{ fontSize: '1.3rem', fontWeight: '900', color: isCompleted ? '#1e293b' : '#d34817' }}>
+                              ¥ {Number(res.total_price || details.totalPrice).toLocaleString()}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <div style={{ textAlign: 'center', padding: '50px', color: '#999' }}>予約なし</div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* 🚀 フッター：合計金額表示 */}
+            <div style={{ 
+              display: 'flex', 
+              background: '#d34817', 
+              padding: isPC ? '15px 25px' : '10px 20px', 
+              justifyContent: 'space-between', 
+              alignItems: 'center', 
+              color: '#fff' 
+            }}>
+               <div style={{ fontSize: isPC ? '0.9rem' : '0.75rem', fontWeight: 'bold' }}>本日のお会計確定 合計</div>
+               <div style={{ fontSize: isPC ? '1.8rem' : '1.4rem', fontWeight: '900' }}>¥ {dailyTotalSales.toLocaleString()}</div>
             </div>
           </div>
         )}
@@ -674,32 +1017,67 @@ const formattedAdjustments = adminAdjustments.map(adj => ({
       {isCheckoutOpen && (
         <div style={checkoutOverlayStyle} onClick={() => setIsCheckoutOpen(false)}>
           <div style={checkoutPanelStyle} onClick={(e) => e.stopPropagation()}>
-            <div style={checkoutHeaderStyle}><div><h3 style={{ margin: 0 }}>{selectedRes?.customer_name} 様</h3><p style={{ fontSize: '0.8rem', margin: 0 }}>レジ・お会計</p></div><button onClick={() => setIsCheckoutOpen(false)} style={{ background: 'none', border: 'none', color: '#fff' }}><X size={24} /></button></div>
+<div style={checkoutHeaderStyle}>
+  <div>
+    <h3 style={{ margin: 0 }}>{selectedRes?.customer_name} 様</h3>
+    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+      <p style={{ fontSize: '0.8rem', margin: 0 }}>レジ・お会計</p>
+      {/* 🆕 リセットボタンを追加 */}
+      <button 
+        onClick={handleResetCheckout}
+        style={{ background: 'rgba(255,255,255,0.2)', border: '1px solid #fff', color: '#fff', fontSize: '0.6rem', padding: '2px 8px', borderRadius: '4px', cursor: 'pointer' }}
+      >
+        <RefreshCw size={10} style={{ marginRight: '4px' }} /> 設定リセット
+      </button>
+    </div>
+  </div>
+  <button onClick={() => setIsCheckoutOpen(false)} style={{ background: 'none', border: 'none', color: '#fff' }}><X size={24} /></button>
+</div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '20px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '2px solid #4b2c85', marginBottom: '15px' }}><div style={{ fontWeight: 'bold' }}>施術内容</div><button onClick={() => setIsMenuPopupOpen(true)} style={{ background: '#f3f0ff', color: '#4b2c85', border: '1px solid #4b2c85', padding: '2px 10px', fontSize: '0.75rem', cursor: 'pointer' }}><Edit3 size={12} /> 変更</button></div>
 <div style={{ background: '#f9f9ff', padding: '15px', borderRadius: '10px', marginBottom: '25px', border: '1px dashed #4b2c85' }}>
   <div style={{ fontWeight: 'bold', marginBottom: '10px' }}>
-    {/* ✅ 修正：2人以上の時だけ「n人目」を表示し、1人の時はメニュー名のみ表示 */}
     {(() => {
+      // 1. 予約データを解析
       const opt = typeof selectedRes?.options === 'string' ? JSON.parse(selectedRes.options) : (selectedRes?.options || {});
       const people = opt.people || [];
+      const rootServices = opt.services || [];
 
-      if (people.length > 1) {
-        // 2人以上の場合
-        return people.map((p, i) => (
-          <div key={i} style={{ fontSize: '0.9rem', marginBottom: '5px' }}>
-            <span style={{ color: '#4b2c85' }}>{i + 1}人目:</span> {p.fullName || p.services.map(s => s.name).join(', ')}
-          </div>
-        ));
+      // 🟢 複数人予約、または1人予約でもメニューが複数ある場合
+      // (矢沢さんのようにメニューが2つ以上あれば、1人ずつに分けて表示します)
+      if (people.length > 1 || rootServices.length > 1) {
+        // 表示用のリストを作成
+        const displayList = people.length > 0 ? people : rootServices.map(s => ({ services: [s], options: opt.options }));
+
+        return displayList.map((p, i) => {
+          // メニュー名と枝分かれ（なし、など）を取得
+          const sNames = p.services?.map(s => s.name).join(', ') || (p.name ? p.name : '');
+          const oNames = p.options 
+            ? Object.values(p.options).map(o => o.option_name).filter(Boolean).join(', ') 
+            : '';
+          const displayMenu = oNames ? `${sNames}（${oNames}）` : sNames;
+
+          return (
+            <div key={i} style={{ fontSize: '0.95rem', marginBottom: '8px', borderBottom: i !== displayList.length - 1 ? '1px solid #eef' : 'none', paddingBottom: '4px' }}>
+              <span style={{ color: '#4b2c85', fontWeight: '900' }}>{i + 1}人目：</span>
+              {displayMenu}
+            </div>
+          );
+        });
       } else {
-        // 1人の場合（1人目という文字を消してスッキリ表示）
-        const singleMenu = people[0]?.fullName || 
-                           people[0]?.services.map(s => s.name).join(', ') || 
-                           parseReservationDetails(selectedRes).menuName;
-        return <div>{singleMenu}</div>;
+        // ⚪ メニューが1つだけの場合（スッキリ表示）
+        const person = people[0] || {};
+        const sNames = person.services?.map(s => s.name).join(', ') || parseReservationDetails(selectedRes).menuName;
+        const oNames = person.options 
+          ? Object.values(person.options).map(o => o.option_name).filter(Boolean).join(', ') 
+          : '';
+        const displayMenu = oNames ? `${sNames}（${oNames}）` : sNames;
+
+        return <div style={{ fontSize: '1rem' }}>{displayMenu}</div>;
       }
     })()}
   </div>
+
   <div style={{ fontSize: '0.8rem', display: 'flex', justifyContent: 'space-between', borderTop: '1px solid #eee', paddingTop: '8px' }}>
     <span>合計コマ数: {selectedRes?.total_slots || 0} コマ</span>
     <span style={{ fontWeight: 'bold', color: '#d34817', fontSize: '1rem' }}>
@@ -707,6 +1085,7 @@ const formattedAdjustments = adminAdjustments.map(adj => ({
     </span>
   </div>
 </div>
+
               <SectionTitle icon={<Settings size={16} />} title="プロの微調整" color="#ef4444" />
               {(() => {
                 const resIds = checkoutServices.map(s => s.id);
