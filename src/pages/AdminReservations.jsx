@@ -792,10 +792,10 @@ drag="x"
   }
 
   // 4. 開始枠ではない（前の時間から続いている施術）の場合は、ドットなどで「埋まってる感」を出す
-  return <span style={{ fontSize: '0.6rem', opacity: 0.4 }}>・</span>;
+  return <span style={{ fontSize: '0.6rem', opacity: 0.4 }}>✕</span>;
 })()}
                                     </div>
-                                  ) : isArray ? '・' : '')
+                                  ) : isArray ? '✕' : '')
                                 )}
                               </div>
                             )}
