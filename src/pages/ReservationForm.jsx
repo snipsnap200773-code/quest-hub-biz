@@ -251,23 +251,23 @@ function ReservationForm() {
     if (Object.keys(grouped).every(gn => newOptions[`${serviceId}-${gn}`])) scrollToNextValidCategory(catIdx);
   };
 
-  const handleNextStep = () => {
+const handleNextStep = () => {
     window.scrollTo(0,0);
 
-    // ✅ 修正：現在の人（n人目）の合体メニュー名を作る
+    // 1. 現在選択中のメニューを「n人目」のデータとして整形
     const currentBaseName = selectedServices.map(s => s.name).join(', ');
     const currentOptionName = Object.values(selectedOptions).map(o => o.option_name).join(', ');
     const currentFullName = currentOptionName ? `${currentBaseName}（${currentOptionName}）` : currentBaseName;
 
+    // 2. 新しいカレンダー版（TimeSelectionCalendar）へ引き継ぐ共通データ一式
     const commonState = { 
-      // 既存のpeopleデータに、今の人の合体名(fullName)を足して渡す
       people: [...people, { 
         services: selectedServices, 
         options: selectedOptions, 
         slots: currentPersonSlots,
-        fullName: currentFullName // ✅ これを次の画面に送る
+        fullName: currentFullName 
       }],
-      totalSlotsNeeded,
+      totalSlotsNeeded, // 🆕 カレンダー側で終了時間の計算（△判定）に使用
       lineUser,
       customShopName: displayBranding.name,
       staffId: adminStaffId || staffIdFromUrl,
@@ -275,18 +275,18 @@ function ReservationForm() {
     };
 
     if (isAdminMode) {
-      // 🆕 管理者モード：日時選択をスキップして直接確定（Confirm）画面へ
+      // 👑 管理者ねじ込み：カレンダーをスキップして直接「確認画面」へ
       const confirmUrl = `/shop/${shopId}/confirm${adminStaffId ? `?staff=${adminStaffId}` : ''}`;
       navigate(confirmUrl, { 
         state: { ...commonState, date: adminDate, time: adminTime, adminDate, adminTime } 
       });
     } else {
-      // 🆕 一般予約：通常通り日時選択へ移動
+      // 📅 一般予約：カレンダー版日時選択（TimeSelectionCalendar）へ移動
+      // ※App.jsxでパスを切り替えているため、URLはこのままでOKです
       const nextUrl = `/shop/${shopId}/reserve/time${staffIdFromUrl ? `?staff=${staffIdFromUrl}` : ''}`;
       navigate(nextUrl, { state: commonState });
     }
   };
-
   const getGroupedOptions = (serviceId) => {
     return options.filter(o => o.service_id === serviceId).reduce((acc, opt) => {
       if (!acc[opt.group_name]) acc[opt.group_name] = [];

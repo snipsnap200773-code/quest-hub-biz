@@ -9,6 +9,16 @@ import {
 const StaffSettings = () => {
   const { shopId } = useParams();
   const navigate = useNavigate();
+
+  // 🆕 画面サイズ管理を追加（ボタンをレスポンシブにするため）
+  const [windowWidth, setWindowWidth] = useState(window.innerWidth);
+  useEffect(() => {
+    const handleResize = () => setWindowWidth(window.innerWidth);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+  const isPC = windowWidth > 900; 
+
   const [staffs, setStaffs] = useState([]);
   const [newStaffName, setNewStaffName] = useState('');
   const [loading, setLoading] = useState(true);
@@ -116,11 +126,32 @@ const StaffSettings = () => {
   if (loading) return <div style={{ textAlign: 'center', padding: '50px' }}>読み込み中...</div>;
 
   return (
-    <div style={{ maxWidth: '700px', margin: '40px auto', padding: '20px', fontFamily: 'sans-serif' }}>
-      <button onClick={() => navigate(-1)} style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', marginBottom: '20px' }}>
-        <ArrowLeft size={20} /> ダッシュボードに戻る
-      </button>
-
+<div style={{ maxWidth: '700px', margin: isPC ? '40px auto' : '20px auto', padding: '20px', fontFamily: 'sans-serif' }}>
+      
+      {/* 🚀 ナビゲーションヘッダー（オシャレ＆レスポンシブ版） */}
+      <div style={{ marginBottom: '30px' }}>
+        <button 
+          onClick={() => navigate(`/admin/${shopId}/dashboard`)} 
+          style={{ 
+            background: '#fff', 
+            border: '1px solid #e2e8f0', 
+            padding: isPC ? '10px 20px' : '10px 12px', 
+            borderRadius: '30px', 
+            fontWeight: 'bold', 
+            color: '#64748b', 
+            cursor: 'pointer', 
+            display: 'flex', 
+            alignItems: 'center', 
+            gap: '8px', 
+            fontSize: isPC ? '1rem' : '0.8rem',
+            boxShadow: '0 2px 4px rgba(0,0,0,0.05)',
+            whiteSpace: 'nowrap'
+          }}
+        >
+          <ArrowLeft size={18} /> {isPC ? 'ダッシュボードへ' : '戻る'}
+        </button>
+      </div>
+      
       <div style={{ background: '#fff', padding: '30px', borderRadius: '24px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)', border: '1px solid #e2e8f0' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '24px' }}>
           <div style={{ background: '#f43f5e10', padding: '10px', borderRadius: '12px', color: '#f43f5e' }}>

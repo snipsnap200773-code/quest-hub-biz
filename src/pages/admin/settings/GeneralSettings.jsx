@@ -13,6 +13,15 @@ const GeneralSettings = () => {
   const [message, setMessage] = useState('');
   const [shopData, setShopData] = useState(null);
 
+  // 🆕 画面サイズ管理を追加（ボタンをレスポンシブにするため）
+  const [windowWidth, setWindowWidth] = useState(window.innerWidth);
+  useEffect(() => {
+    const handleResize = () => setWindowWidth(window.innerWidth);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+  const isPC = windowWidth > 900; 
+
   // --- 1. State 管理 (外観、同期、表示拡張、セキュリティを完全維持) ---
   const [themeColor, setThemeColor] = useState('#2563eb');
   const [scheduleSyncId, setScheduleSyncId] = useState('');
@@ -80,9 +89,23 @@ const GeneralSettings = () => {
       <div style={{ display: 'flex', justifyContent: 'flex-start', alignItems: 'center', marginBottom: '30px' }}>
         <button 
           onClick={() => navigate(`/admin/${shopId}/dashboard`)}
-          style={{ background: '#fff', border: '1px solid #e2e8f0', padding: '10px 16px', borderRadius: '30px', fontSize: '0.85rem', fontWeight: 'bold', color: '#64748b', display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', boxShadow: '0 2px 4px rgba(0,0,0,0.05)' }}
+          style={{ 
+            background: '#fff', 
+            border: '1px solid #e2e8f0', 
+            padding: isPC ? '10px 20px' : '10px 12px', 
+            borderRadius: '30px', 
+            fontWeight: 'bold', 
+            color: '#64748b', 
+            cursor: 'pointer', 
+            display: 'flex', 
+            alignItems: 'center', 
+            gap: '8px', 
+            fontSize: isPC ? '1rem' : '0.8rem',
+            boxShadow: '0 2px 4px rgba(0,0,0,0.05)',
+            whiteSpace: 'nowrap'
+          }}
         >
-          <ArrowLeft size={16} /> ダッシュボードへ
+          <ArrowLeft size={18} /> {isPC ? 'ダッシュボードへ' : '戻る'}
         </button>
       </div>
 

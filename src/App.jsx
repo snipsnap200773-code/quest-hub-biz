@@ -8,6 +8,8 @@ import ReservationForm from './pages/ReservationForm';
 import AdminDashboard from './pages/AdminDashboard';
 import SuperAdmin from './pages/SuperAdmin'; 
 import TimeSelection from './pages/TimeSelection'; 
+// 🆕 新しいカレンダー版をインポート
+import TimeSelectionCalendar from './pages/TimeSelectionCalendar'; 
 import ConfirmReservation from './pages/ConfirmReservation';
 import AdminReservations from './pages/AdminReservations';
 import TrialRegistration from './pages/TrialRegistration';
@@ -15,7 +17,7 @@ import CancelReservation from './pages/CancelReservation';
 import ShopList from './pages/ShopList';
 import AdminManagement from './pages/AdminManagement';
 import ShopDetail from './pages/ShopDetail';
-import AdminTimeline from './pages/AdminTimeline'; // 🆕 これを追加
+import AdminTimeline from './pages/AdminTimeline';
 
 // 🆕 QUEST HUB 個別設定ページ
 import BasicSettings from './pages/admin/settings/BasicSettings';
@@ -31,8 +33,8 @@ import BasicSettingsGuide from './pages/admin/settings/BasicSettingsGuide';
 import MenuSettingsGuide from './pages/admin/settings/MenuSettingsGuide';
 import ScheduleSettingsGuide from './pages/admin/settings/ScheduleSettingsGuide';
 
-// 🔝 自動スクロール装置（今作ったやつ）
-import ScrollToTop from './components/ScrollToTop'; // ✅ 追加
+// 🔝 自動スクロール装置
+import ScrollToTop from './components/ScrollToTop';
 
 function App() {
   const [isOnline, setIsOnline] = useState(navigator.onLine);
@@ -50,7 +52,7 @@ function App() {
 
   return (
     <Router>
-      <ScrollToTop /> {/* ✅ ここに設置！これで全ページ「常に一番上」から始まります */}
+      <ScrollToTop />
 
       {!isOnline && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, zIndex: 9999, background: '#ef4444', color: 'white', textAlign: 'center', padding: '8px', fontSize: '14px', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
@@ -90,7 +92,10 @@ function App() {
               <Route path="/shop/:shopId/detail" element={<ShopDetail />} />
               <Route path="/shop/:shopId" element={<ReservationForm />} /> 
               <Route path="/shop/:shopId/reserve" element={<ReservationForm />} />
-              <Route path="/shop/:shopId/reserve/time" element={<TimeSelection />} />
+              
+              {/* 🆕 ここを Calendar版に差し替え！ (旧: TimeSelection → 新: TimeSelectionCalendar) */}
+              <Route path="/shop/:shopId/reserve/time" element={<TimeSelectionCalendar />} />
+              
               <Route path="/shop/:shopId/confirm" element={<ConfirmReservation />} />
               <Route path="/cancel" element={<CancelReservation />} />
               <Route path="/shop/:shopId/admin" element={<AdminDashboard />} />
