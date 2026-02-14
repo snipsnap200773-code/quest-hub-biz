@@ -220,12 +220,36 @@ const { data: resList, error: resError } = await supabaseAdmin
           const body = applyPlaceholders(profile.mail_body_customer_cancel || `${customerName} 様\n\nご予約のキャンセル手続きが完了いたしました。`, placeholderData).replace(/\n/g, '<br>');
           finalHtml = `<div lang="ja" style="font-family: sans-serif; ...">${body}</div>`;
         }
-      } else {
+} else {
         if (isOwner) {
-          // 💡 パターン(5): 店舗宛予約
+          // 💡 パターン(5): 店舗宛予約（担当者名 ＆ 豪華カード復活ロジック）
           finalSubject = applyPlaceholders(profile.mail_sub_shop_booking || `【新着予約】${customerName} 様`, placeholderData);
-          const body = applyPlaceholders(profile.mail_body_shop_booking || `${shopName} 管理者様\n\n新着予約通知...`, placeholderData).replace(/\n/g, '<br>');
-          finalHtml = `<div lang="ja" style="font-family: sans-serif; ...">${body}</div>`;
+          
+          if (profile.mail_body_shop_booking) {
+            // カスタム文章が設定されていればそれを使う
+            const body = applyPlaceholders(profile.mail_body_shop_booking, placeholderData).replace(/\n/g, '<br>');
+            finalHtml = `<div lang="ja" style="font-family: sans-serif; color: #333; line-height: 1.6;">${body}</div>`;
+          } else {
+            // 🆕 設定が空（EMPTY）の場合、以前の豪華な「店舗控え」カードを自動生成
+            finalHtml = `
+              <div lang="ja" style="font-family: sans-serif; color: #333; line-height: 1.6; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; padding: 25px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.05);">
+                <h2 style="color: #2563eb; margin-top: 0; font-size: 1.3rem; border-bottom: 2px solid #2563eb; padding-bottom: 10px;">新着予約のお知らせ（店舗控え）</h2>
+                <p style="margin: 20px 0 10px 0;">${shopName} 管理者様</p>
+                <p style="margin-bottom: 20px;">以下の通り、新しい予約が入りました。</p>
+                
+                <div style="background: #f8fafc; padding: 20px; border-radius: 10px; border: 1px solid #e2e8f0;">
+                  <p style="margin: 5px 0;">👤 <strong>お客様:</strong> ${customerName} 様</p>
+                  <p style="margin: 5px 0;">📅 <strong>日時:</strong> ${startTime}</p>
+                  <p style="margin: 5px 0;">👤 <strong>担当:</strong> ${staffName || '指名なし'}</p>
+                  <p style="margin: 5px 0;">📋 <strong>メニュー:</strong> ${services}</p>
+                </div>
+                
+                <p style="margin-top: 25px; font-size: 0.9rem; color: #64748b;">ご確認のほど、よろしくお願いいたします。</p>
+                <div style="margin-top: 20px; text-align: center;">
+                  <a href="https://snipsnap-reserve.vercel.app/admin/${shopId}/reservations" style="display: inline-block; background: #2563eb; color: #fff; padding: 12px 25px; border-radius: 8px; text-decoration: none; font-weight: bold; font-size: 0.9rem;">予約台帳で確認する</a>
+                </div>
+              </div>`;
+          }
         } else {
           // 💡 パターン(1): お客様宛予約
           if (profile.mail_sub_customer_booking && profile.mail_body_customer_booking) {

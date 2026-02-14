@@ -8,6 +8,15 @@ const EmailSettings = () => {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('customer_booking');
   const [loading, setLoading] = useState(true);
+  // 🆕 画面サイズ管理を追加
+  const [windowWidth, setWindowWidth] = useState(window.innerWidth);
+  useEffect(() => {
+    const handleResize = () => setWindowWidth(window.innerWidth);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  const isPC = windowWidth > 1024; // 1024px以上をPCと判定
   const [message, setMessage] = useState('');
   const [shopData, setShopData] = useState(null);
 
@@ -81,14 +90,21 @@ const EmailSettings = () => {
     <div style={{ maxWidth: '1000px', margin: '0 auto', padding: '20px', paddingBottom: '120px', fontFamily: 'sans-serif' }}>
       
       {/* ナビゲーション */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '30px' }}>
-        <button onClick={() => navigate(`/admin/${shopId}/dashboard`)} style={{ background: '#fff', border: '1px solid #e2e8f0', padding: '10px 20px', borderRadius: '30px', fontWeight: 'bold', color: '#64748b', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <ArrowLeft size={18} /> ダッシュボードへ
-        </button>
-        <button onClick={handleSave} style={{ background: themeColor, color: '#fff', border: 'none', padding: '12px 30px', borderRadius: '30px', fontWeight: 'bold', boxShadow: `0 4px 15px ${themeColor}44`, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <Save size={18} /> 設定を保存する
-        </button>
-      </div>
+{/* 🆕 スマホではボタンを上下、または左右に小さく配置 */}
+<div style={{ 
+  display: 'flex', 
+  justifyContent: 'space-between', 
+  alignItems: 'center', 
+  marginBottom: '30px',
+  gap: '10px'
+}}>
+  <button onClick={() => navigate(`/admin/${shopId}/dashboard`)} style={{ background: '#fff', border: '1px solid #e2e8f0', padding: isPC ? '10px 20px' : '10px 12px', borderRadius: '30px', fontWeight: 'bold', color: '#64748b', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', fontSize: isPC ? '1rem' : '0.75rem' }}>
+    <ArrowLeft size={18} /> {isPC ? 'ダッシュボードへ' : '戻る'}
+  </button>
+  <button onClick={handleSave} style={{ background: themeColor, color: '#fff', border: 'none', padding: isPC ? '12px 30px' : '10px 16px', borderRadius: '30px', fontWeight: 'bold', boxShadow: `0 4px 15px ${themeColor}44`, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', fontSize: isPC ? '1rem' : '0.85rem' }}>
+    <Save size={18} /> {isPC ? '設定を保存する' : '保存'}
+  </button>
+</div>
 
       <h2 style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#1e293b', marginBottom: '24px' }}>✉️ 通知メールのカスタマイズ</h2>
 
@@ -107,8 +123,13 @@ const EmailSettings = () => {
         ))}
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '30px' }}>
-        
+{/* 🆕 スマホでは 1fr（1列）、PCでは 1fr 1fr（2列）に切り替え */}
+<div style={{ 
+  display: 'grid', 
+  gridTemplateColumns: isPC ? '1fr 1fr' : '1fr', 
+  gap: isPC ? '30px' : '20px' 
+}}>
+
         {/* 左側：エディタ */}
         <div>
           <section style={{ background: '#fff', padding: '24px', borderRadius: '24px', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)' }}>
@@ -156,8 +177,9 @@ const EmailSettings = () => {
 
         {/* 右側：ライブプレビュー */}
         <div>
-          <div style={{ position: 'sticky', top: '20px' }}>
-            <h3 style={{ fontSize: '0.9rem', fontWeight: 'bold', color: '#10b981', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+{/* 🆕 PCの時だけスクロールに追従させる */}
+<div style={{ position: isPC ? 'sticky' : 'relative', top: isPC ? '20px' : '0' }}>
+              <h3 style={{ fontSize: '0.9rem', fontWeight: 'bold', color: '#10b981', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}>
               <MessageSquare size={18} /> リアルタイム・プレビュー
             </h3>
             <div style={{ background: '#fff', borderRadius: '24px', border: '8px solid #1e293b', overflow: 'hidden', boxShadow: '0 20px 40px rgba(0,0,0,0.2)' }}>
