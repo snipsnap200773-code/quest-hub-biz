@@ -684,11 +684,11 @@ const insertData = {
               <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed', minWidth: isPC ? '900px' : '100%' }}>
                 <thead style={{ position: 'sticky', top: 0, zIndex: 10, background: '#fff' }}>
                   <tr>
-                    <th style={{ width: isPC ? '80px' : '32px', borderBottom: '1px solid #ddd' }}></th>
+                    <th style={{ width: isPC ? '80px' : '32px', borderBottom: '1.5px solid #ddd' }}></th>
                     {weekDays.map(date => {
                       const isToday = getJapanDateStr(new Date()) === getJapanDateStr(date);
                       return (
-                        <th key={date.toString()} style={{ padding: '4px 0', borderBottom: '1px solid #ddd' }}>
+                        <th key={date.toString()} style={{ padding: '4px 0', borderBottom: '2px solid #cbd5e1' }}>
                           <div style={{ fontSize: '0.6rem', color: isToday ? themeColor : '#666' }}>{['日','月','火','水','木','金','土'][date.getDay()]}</div>
                           <div style={{ fontSize: isPC ? '1.5rem' : '0.9rem', fontWeight: 'bold', color: isToday ? '#fff' : '#333', background: isToday ? themeColor : 'none', width: isPC ? '40px' : '22px', height: isPC ? '40px' : '22px', borderRadius: '50%', margin: '2px auto', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{date.getDate()}</div>
                         </th>
@@ -699,8 +699,8 @@ const insertData = {
                 <tbody>
                   {timeSlots.map(time => (
                     <tr key={time} style={{ height: '60px' }}>
-                      <td style={{ borderRight: '1px solid #eee', borderBottom: '1px solid #f1f5f9', textAlign: 'center' }}>
-                        <span style={{ fontSize: '0.75rem', color: '#94a3b8', fontWeight: 'bold' }}>{time}</span>
+                       <td style={{ borderRight: '2px solid #cbd5e1', borderBottom: '1.5px solid #cbd5e1', textAlign: 'center' }}>
+                    <span style={{ fontSize: '0.75rem', color: '#94a3b8', fontWeight: 'bold' }}>{time}</span>
                       </td>
                       {weekDays.map(date => {
                         const dStr = getJapanDateStr(date);
@@ -737,8 +737,8 @@ const insertData = {
                                 setShowMenuModal(true); 
                               } 
                             }}
-                            style={{ borderRight: '1px solid #f1f5f9', borderBottom: '1px solid #f1f5f9', position: 'relative', cursor: 'pointer' }}
-                          >
+                            style={{ borderRight: '1.5px solid #cbd5e1', borderBottom: '1.5px solid #cbd5e1', position: 'relative', cursor: 'pointer' }}
+>
                             {res && (
                               <div style={{ position: 'absolute', inset: '1px', background: bgColor, color: textColor, padding: '4px 8px', borderRadius: '2px', zIndex: 5, overflow: 'hidden', borderLeft: `2px solid ${borderColor}`, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', textAlign: 'center' }}>
                                 {(!isArray && res.res_type === 'blocked') ? (
