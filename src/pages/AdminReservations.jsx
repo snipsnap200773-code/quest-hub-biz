@@ -535,26 +535,31 @@ const insertData = {
 
   return (
     <div style={{ display: 'flex', width: '100vw', height: '100dvh', background: '#fff', overflow: 'hidden', position: 'fixed', inset: 0 }}>
-      {isPC && (
-        /* widthを260pxにスリム化し、境界線を2px・濃いグレー(#cbd5e1)に変更 */
-        <div style={{ width: '260px', flexShrink: 0, borderRight: '2px solid #cbd5e1', padding: '20px', display: 'flex', flexDirection: 'column', gap: '25px', background: '#fff', zIndex: 100 }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <div style={{ width: '35px', height: '35px', background: themeColor, borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 'bold' }}>S</div>
-              <h1 style={{ fontSize: '1.2rem', fontWeight: '900', margin: 0 }}>SnipSnap Admin</h1>
+{isPC && (
+        <div style={{ width: '260px', flexShrink: 0, borderRight: '2.5px solid #cbd5e1', padding: '18px', display: 'flex', flexDirection: 'column', gap: '20px', background: '#fff', zIndex: 100 }}>
 
-            {/* 🆕 画面切り替えスイッチ（PC版） */}
-  <div style={{ display: 'flex', background: '#f1f5f9', padding: '3px', borderRadius: '8px', marginLeft: '10px' }}>
-    <button style={switchBtnStyle(true)}>カレンダー</button>
-    <button onClick={() => navigate(`/admin/${shopId}/timeline?date=${selectedDate}`)} style={switchBtnStyle(false)}>タイムライン</button>
-  </div>
-</div>
+{/* --- 1段目：タイトルと設定 --- */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', marginBottom: '10px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <div style={{ width: '32px', height: '32px', background: themeColor, borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 'bold', fontSize: '0.9rem' }}>S</div>
+              <h1 style={{ fontSize: '1.1rem', fontWeight: '900', margin: 0, color: '#1e293b' }}>SnipSnap Admin</h1>
+            </div>
             <button 
-              onClick={() => navigate(`/admin/${shopId}`)} 
-              style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '1.2rem', padding: '5px', display: 'flex', alignItems: 'center', color: '#64748b' }}
-              title="店舗設定"
+              onClick={() => navigate(`/admin/${shopId}/settings/general`)} 
+              style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', cursor: 'pointer', fontSize: '1.1rem', padding: '6px', display: 'flex', alignItems: 'center', color: '#64748b' }}
             >
               ⚙️
+            </button>
+          </div>
+
+          {/* --- 2段目：切り替えスイッチ（カレンダーも維持！） --- */}
+          <div style={{ display: 'flex', background: '#f1f5f9', padding: '3px', borderRadius: '10px', width: '100%', boxSizing: 'border-box' }}>
+            <button style={{ ...switchBtnStyle(true), flex: 1 }}>カレンダー</button>
+            <button 
+              onClick={() => navigate(`/admin/${shopId}/timeline?date=${selectedDate}`)} 
+              style={{ ...switchBtnStyle(false), flex: 1 }}
+            >
+              タイムライン
             </button>
           </div>
 
@@ -572,7 +577,8 @@ const insertData = {
             </div>
           </div>
 
-          <div style={{ marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+<div style={{ marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+
             <button 
               onClick={() => isManagementEnabled && navigate(`/admin/${shopId}/management`)} 
               style={{ 
@@ -589,11 +595,11 @@ const insertData = {
                 gap: '8px'
               }}
               disabled={!isManagementEnabled}
-            >              
+            >               
               {isManagementEnabled ? '📊 顧客・売上管理へ' : '🔒 顧客・売上管理 (未解放)'}
             </button>
           </div>
-        </div>
+                  </div>
       )}
 
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
@@ -661,10 +667,11 @@ const insertData = {
       opacity: { duration: 0.1 } // 透明度の変化だけは一瞬で終わらせる
     }}
 
-    drag="x" 
+drag="x" 
+    dragDirectionLock={true} // 🆕 縦にスクロール中は横スワイプをロックする（iPad対策）
     dragConstraints={{ left: 0, right: 0 }}
-    dragElastic={0.05} // ✅ ゴムのような伸びを小さくして、ピタッと止まるように変更
-    // ...あとの設定はそのまま...              
+    dragElastic={0} // 🆕 縦スクロールを邪魔しないよう弾力を0に
+
               onDragEnd={(e, { offset }) => {
                 const swipeThreshold = 50;
                 if (offset.x > swipeThreshold) goPrev(); // 右スワイプで前週
