@@ -725,26 +725,31 @@ drag="x"
 <tbody>
                   {timeSlots.map(time => (
                     <tr key={time} style={{ height: '60px' }}>
-                      {/* 左端の時間軸：背景を少しグレーにして固定 */}
+                      {/* 左端の時間軸 */}
                       <td style={{ borderRight: '2.5px solid #cbd5e1', borderBottom: '2px solid #cbd5e1', textAlign: 'center', background: '#f8fafc' }}>
                         <span style={{ fontSize: '0.75rem', color: '#64748b', fontWeight: 'bold' }}>{time}</span>
                       </td>
 
-{weekDays.map(date => {
+                      {weekDays.map(date => {
                         const dStr = getJapanDateStr(date);
-                        const resAt = getStatusAt(dStr, time); // このマスの全予約を取得
+                        const resAt = getStatusAt(dStr, time);
                         const isArray = Array.isArray(resAt);
                         const hasRes = resAt !== null;
                         const firstRes = isArray ? resAt[0] : resAt;
                         const reservationCount = isArray ? resAt.length : 0;
 
-                        // 1. この枠で「ちょうど開始（ねじ込み含）」する人を抽出
+                        // 🆕 営業時間内かどうかの判定（既存のロジックから流用）
+                        const dayName = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'][date.getDay()];
+                        const hours = shop?.business_hours?.[dayName];
+                        const isStandardTime = hours && !hours.is_closed && time >= hours.open && time < hours.close;
+
+                        // 1. この枠で「ちょうど開始」する人を抽出
                         const startingHere = isArray ? resAt.filter(r => 
                           new Date(r.start_time).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', hour12: false }) === time
                         ) : [];
                         const isStart = startingHere.length > 0;
 
-                        // 2. 状態・デザインフラグ
+                        // 2. デザインフラグ
                         const colors = getCustomerColor(firstRes?.customer_name);
                         const isOtherShop = isArray && resAt.some(r => r.shop_id !== shopId);
                         const isBlocked = (isArray && resAt.some(r => r.res_type === 'blocked')) || (firstRes?.res_type === 'blocked');
@@ -765,15 +770,22 @@ drag="x"
                                 setShowMenuModal(true); 
                               } 
                             }}
-                            style={{ borderRight: '2.5px solid #cbd5e1', borderBottom: '2px solid #cbd5e1', position: 'relative', cursor: 'pointer', background: '#fff' }}
+                            style={{ 
+                              /* 🆕 営業時間外(拡張枠)は背景を少し暗く(#f8fafc)、線を薄く(#e2e8f0)設定 */
+                              borderRight: `${isStandardTime ? '2px' : '2px'} solid ${isStandardTime ? '#cbd5e1' : '#cbd5e1'}`, 
+                              borderBottom: `${isStandardTime ? '2px' : '2px'} solid ${isStandardTime ? '#cbd5e1' : '#cbd5e1'}`, 
+                              position: 'relative', 
+                              cursor: 'pointer', 
+                              background: isStandardTime ? '#fff' : '#fffff3' 
+                            }}
                           >
                             {hasRes && !isSystemBlocked && (
                               <div style={{ 
                                 position: 'absolute', inset: 0, zIndex: 5, overflow: 'hidden',
                                 display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                /* 🆕 拡張枠内にある予約は、少しだけ透明度を下げる(0.9)などの工夫も可能です */
                                 background: (isRegularHoliday || isBlocked) ? '#f1f5f9' : (isOtherShop ? '#f8fafc' : (isStart ? colors.bg : '#fff')),
-                                /* 左側の縦棒（4px設定。数字を変えれば太さが変わります） */
-                                borderLeft: (isRegularHoliday || isBlocked) ? 'none' : `2px solid ${isOtherShop ? '#cbd5e1' : colors.line}`
+                                borderLeft: (isRegularHoliday || isBlocked) ? 'none' : `4px solid ${isOtherShop ? '#cbd5e1' : colors.line}`
                               }}>
                                 {(isRegularHoliday || isBlocked) ? (
                                   isStart && <span style={{fontSize:'0.65rem', fontWeight:'bold', color:'#94a3b8'}}>{firstRes.customer_name}</span>
@@ -781,12 +793,9 @@ drag="x"
                                   isStart ? (
                                     <div style={{ fontWeight: 'bold', fontSize: isPC ? '0.85rem' : '0.7rem', color: isOtherShop ? '#94a3b8' : colors.text, textAlign: 'center', whiteSpace: 'nowrap', padding: '0 4px' }}>
                                       {(() => {
-                                        // 💡 ロジックの核：この枠で開始する人が1人なら、その人の名前を優先
                                         if (startingHere.length === 1) {
                                           const name = startingHere[0].customer_name.split(/[\s　]+/)[0];
-                                          // 他の予約（継続中の人など）と重なっていれば人数を表示
                                           const countSuffix = reservationCount > 1 ? ` (${reservationCount}名)` : " 様";
-                                          
                                           return isPC ? (`${name}${countSuffix}`) : (
                                             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', lineHeight: 1 }}>
                                               <span style={{ writingMode: 'vertical-rl', textOrientation: 'upright' }}>{name}</span>
@@ -794,21 +803,20 @@ drag="x"
                                             </div>
                                           );
                                         }
-                                        // 💡 同時に2人以上が開始する場合は、従来通りアイコン表示
                                         return `👥 ${reservationCount}名`;
                                       })()}
                                     </div>
-                                  ) : null /* 継続枠は中身なし(左棒のみ)でスッキリ */
+                                  ) : null
                                 )}
                               </div>
                             )}
                           </td>
                         );
                       })}
-                                          </tr>
+                    </tr>
                   ))}
                 </tbody>
-                                              </table>
+                                                              </table>
             </motion.div>
           </AnimatePresence>
         </div>
