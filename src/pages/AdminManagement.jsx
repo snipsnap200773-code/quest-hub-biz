@@ -285,7 +285,6 @@ const applyMenuChangeToLedger = () => {
     ));
     setIsMenuPopupOpen(false);
   };
-  
 const openCheckout = (res) => {
     const info = parseReservationDetails(res);
     setSelectedRes(res);
@@ -632,7 +631,24 @@ const completePayment = async () => {
             })}
           </div>
         </div>
-        <div style={{ marginTop: 'auto', paddingTop: '20px' }}><button style={navBtnStyle(false, '#ff1493')} onClick={() => navigate(`/admin/${cleanShopId}/reservations`)}>業 務 終 了</button></div>
+        
+        <div style={{ marginTop: 'auto', paddingTop: '20px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          {/* 🆕 カレンダー画面へ戻るボタン */}
+          <button 
+            style={navBtnStyle(false, '#4285f4')} 
+            onClick={() => navigate(`/admin/${cleanShopId}/reservations`)}
+          >
+            カレンダー
+          </button>
+
+          {/* 🆕 タイムライン画面へ戻るボタン */}
+          <button 
+            style={navBtnStyle(false, '#4b2c85')} 
+            onClick={() => navigate(`/admin/${cleanShopId}/timeline`)}
+          >
+            タイムライン
+          </button>
+        </div>
       </div>
 
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>

@@ -272,14 +272,38 @@ const handleCellClick = (slotMatches, time, staffId) => { // ✅ 引数を変更
       
       {/* ヘッダー */}
       <div style={{ padding: '8px 15px', borderBottom: '2px solid #94a3b8', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#fff', zIndex: 1000 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
+<div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
           <h1 style={{ fontSize: '1rem', fontWeight: '900', margin: 0, color: themeColor }}>Timeline</h1>
-          <div style={{ display: 'flex', background: '#f1f5f9', padding: '3px', borderRadius: '8px' }}>
-            <button onClick={() => navigate(`/admin/${shopId}/reservations`)} style={switchBtnStyle(false)}>カレンダー</button>
-            <button style={switchBtnStyle(true)}>タイムライン</button>
+          
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <div style={{ display: 'flex', background: '#f1f5f9', padding: '3px', borderRadius: '8px' }}>
+              <button onClick={() => navigate(`/admin/${shopId}/reservations`)} style={switchBtnStyle(false)}>カレンダー</button>
+              <button style={switchBtnStyle(true)}>タイムライン</button>
+            </div>
+
+            {/* 🆕 顧客・売上管理へのショートカットボタン */}
+            <button 
+              onClick={() => shop?.is_management_enabled && navigate(`/admin/${shopId}/management`)}
+              style={{
+                padding: '6px 15px',
+                borderRadius: '8px',
+                border: '1px solid #e2e8f0',
+                background: shop?.is_management_enabled ? '#fff' : '#f1f5f9',
+                fontSize: '0.75rem',
+                fontWeight: 'bold',
+                cursor: shop?.is_management_enabled ? 'pointer' : 'not-allowed',
+                color: shop?.is_management_enabled ? '#008000' : '#94a3b8',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '5px',
+                boxShadow: '0 2px 4px rgba(0,0,0,0.05)',
+                transition: 'all 0.2s'
+              }}
+            >
+              {shop?.is_management_enabled ? '📊 顧客・売上管理' : '🔒 売上管理'}
+            </button>
           </div>
         </div>
-
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <div style={{ position: 'relative', display: 'flex', alignItems: 'center', cursor: 'pointer', padding: '5px' }}>
             <CalendarIcon size={22} color={themeColor} />
