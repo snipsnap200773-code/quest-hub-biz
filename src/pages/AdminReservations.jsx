@@ -3,6 +3,23 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
 
+// 🆕 予約者名から固有のパステルカラーを生成するロジック
+const getCustomerColor = (name) => {
+  if (!name || name === '定休日' || name === '臨時休業' || name === 'ｲﾝﾀｰﾊﾞﾙ') 
+    return { bg: '#f1f5f9', border: '#cbd5e1', line: '#94a3b8', text: '#64748b' };
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) {
+    hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  const h = Math.abs(hash % 360);
+  return {
+    bg: `hsl(${h}, 85%, 94%)`,
+    border: `hsl(${h}, 60%, 80%)`,
+    line: `hsl(${h}, 60%, 60%)`,
+    text: `hsl(${h}, 70%, 25%)`
+  };
+};
+
 function AdminReservations() {
   const { shopId } = useParams();
   const navigate = useNavigate();
@@ -705,97 +722,83 @@ drag="x"
                     })}
                   </tr>
                 </thead>
-                <tbody>
+<tbody>
                   {timeSlots.map(time => (
                     <tr key={time} style={{ height: '60px' }}>
-                       <td style={{ borderRight: '2px solid #cbd5e1', borderBottom: '2px solid #cbd5e1', textAlign: 'center' }}>
-                    <span style={{ fontSize: '0.75rem', color: '#94a3b8', fontWeight: 'bold' }}>{time}</span>
+                      {/* 左端の時間軸：背景を少しグレーにして固定 */}
+                      <td style={{ borderRight: '2.5px solid #cbd5e1', borderBottom: '2px solid #cbd5e1', textAlign: 'center', background: '#f8fafc' }}>
+                        <span style={{ fontSize: '0.75rem', color: '#64748b', fontWeight: 'bold' }}>{time}</span>
                       </td>
+
                       {weekDays.map(date => {
                         const dStr = getJapanDateStr(date);
-                        const res = getStatusAt(dStr, time);
-                        const isArray = Array.isArray(res);
-                        const reservationCount = isArray ? res.length : 0;
-                        const isStart = isArray && res.some(r => 
+                        const resAt = getStatusAt(dStr, time); // このマスのデータを取得
+                        const isArray = Array.isArray(resAt);
+                        const hasRes = resAt !== null;
+                        const firstRes = isArray ? resAt[0] : resAt;
+                        const reservationCount = isArray ? resAt.length : 0;
+
+                        // 1. このマスが「予約の開始時間」か判定
+                        const isStart = isArray && resAt.some(r => 
                           new Date(r.start_time).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', hour12: false }) === time
                         );
-                        const isOtherShop = isArray && res.some(r => r.shop_id !== shopId && r.res_type !== 'system_blocked' && !r.isRegularHoliday);
 
-                        let bgColor = '#fff'; let borderColor = '#f1f5f9'; let textColor = '#cbd5e1';
-                        if (res) {
-                          if (!isArray && res.isRegularHoliday) { bgColor = '#f3f4f6'; textColor = '#94a3b8'; }
-                          else if (isOtherShop) { bgColor = '#f1f5f9'; textColor = '#94a3b8'; borderColor = '#cbd5e1'; }
-                          else if (isArray && res.some(r => r.res_type === 'blocked')) { bgColor = '#fee2e2'; textColor = '#ef4444'; borderColor = '#ef4444'; }
-                          else if (!isArray && res.res_type === 'system_blocked') { bgColor = '#f8fafc'; textColor = '#cbd5e1'; }
-                          else if (isStart) { bgColor = reservationCount > 1 ? '#e0e7ff' : themeColorLight; textColor = '#1e293b'; borderColor = themeColor; }
-                          else { bgColor = '#fdfdfd'; textColor = '#cbd5e1'; }
-                        }
+                        // 2. 状態・デザイン用フラグの準備
+                        const colors = getCustomerColor(firstRes?.customer_name);
+                        const isOtherShop = isArray && resAt.some(r => r.shop_id !== shopId);
+                        const isBlocked = (isArray && resAt.some(r => r.res_type === 'blocked')) || (firstRes?.res_type === 'blocked');
+                        const isRegularHoliday = !isArray && firstRes?.isRegularHoliday;
+                        const isSystemBlocked = !isArray && firstRes?.res_type === 'system_blocked';
 
                         return (
                           <td 
                             key={`${dStr}-${time}`} 
                             onClick={() => { 
-                              setSelectedDate(dStr); 
-                              setTargetTime(time); 
+                              setSelectedDate(dStr); setTargetTime(time); 
                               if (isArray) {
-                                if (reservationCount > 1) { setSelectedSlotReservations(res); setShowSlotListModal(true); }
-                                else { openDetail(res[0]); }
-                              } else if (res && res.res_type === 'blocked' && !res.isRegularHoliday) {
-                                openDetail(res);
+                                if (reservationCount > 1) { setSelectedSlotReservations(resAt); setShowSlotListModal(true); }
+                                else { openDetail(resAt[0]); }
+                              } else if (resAt && resAt.res_type === 'blocked' && !resAt.isRegularHoliday) {
+                                openDetail(resAt);
                               } else {
                                 setShowMenuModal(true); 
                               } 
                             }}
-                            /* 縦横すべての線を2pxの濃いグレーに変更 */
-                            style={{ borderRight: '2px solid #cbd5e1', borderBottom: '2px solid #cbd5e1', position: 'relative', cursor: 'pointer' }}
->
-                            {res && (
-                              <div style={{ position: 'absolute', inset: '1px', background: bgColor, color: textColor, padding: '4px 8px', borderRadius: '2px', zIndex: 5, overflow: 'hidden', borderLeft: `2px solid ${borderColor}`, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', textAlign: 'center' }}>
-                                {(!isArray && res.res_type === 'blocked') ? (
-                                  res.isRegularHoliday ? (isStart ? <span style={{fontSize:'0.6rem', fontWeight:'bold'}}>定休日</span> : '') : 
-                                  (res.customer_name === '臨時休業' && isStart ? <span style={{fontSize:'0.7rem', fontWeight:'bold'}}>臨時休業</span> : 
-                                    (isStart ? (res.customer_name === '管理者ブロック' ? '✕' : <div style={{fontWeight:'bold', fontSize:'0.7rem', lineHeight:'1.1', overflow:'hidden'}}>{res.customer_name}</div>) : '✕')
-                                  )
+                            style={{ borderRight: '2px solid #cbd5e1', borderBottom: '2px solid #cbd5e1', position: 'relative', cursor: 'pointer', background: '#fff' }}
+                          >
+                            {/* システム制限枠（自動詰め等）ではない場合のみ描画 */}
+                            {hasRes && !isSystemBlocked && (
+                              <div style={{ 
+                                position: 'absolute', 
+                                inset: 0, // 🆕 枠いっぱいに広げる
+                                zIndex: 5,
+                                display: 'flex', 
+                                alignItems: 'center', 
+                                justifyContent: 'center',
+                                overflow: 'hidden',
+                                /* 🆕 背景色の設定：休みはグレー、開始は顧客色、継続は白 */
+                                background: (isRegularHoliday || isBlocked) ? '#f1f5f9' : 
+                                            (isOtherShop ? '#f8fafc' : 
+                                            (isStart ? (reservationCount > 1 ? '#e0e7ff' : colors.bg) : '#fff')),
+                                /* 🆕 左端に縦棒を配置（セルの左線と重なるデザイン） */
+                                borderLeft: (isRegularHoliday || isBlocked) ? 'none' : 
+                                            `2px solid ${isOtherShop ? '#cbd5e1' : (reservationCount > 1 ? themeColor : colors.line)}`
+                              }}>
+                                {/* 内部コンテンツ */}
+                                {(isRegularHoliday || isBlocked) ? (
+                                  /* 🆕 休み枠：開始枠のみ名前（定休日など）を表示し、継続枠は空にする（線を消すため） */
+                                  isStart && <span style={{fontSize:'0.65rem', fontWeight:'bold', color:'#94a3b8'}}>{firstRes.customer_name}</span>
                                 ) : (
-                                  (!isArray && res.res_type === 'system_blocked') ? <span style={{fontSize:'0.6rem'}}>{res.customer_name}</span> : 
-                                  (isStart ? (
-                                    <div style={{ fontWeight: 'bold', fontSize: isPC ? '0.9rem' : 'calc(0.7rem + 0.2vw)', lineHeight: '1.1', height: '100%', width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-{(() => {
-  // 1. この時間枠（time）に「ちょうど開始する」予約だけを抜き出す
-  const startingHere = res.filter(r => 
-    new Date(r.start_time).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', hour12: false }) === time
-  );
-
-  // 2. この枠で新しく始まる人が1人なら、その人の名前を最優先で表示！
-  if (startingHere.length === 1) {
-    const target = startingHere[0];
-    return isPC ? (
-      `${target.customer_name} 様`
-    ) : (
-      <div style={{ 
-        writingMode: 'vertical-rl', 
-        textOrientation: 'upright', 
-        fontSize: '0.85rem', 
-        fontWeight: 'bold', 
-        lineHeight: '1',
-        maxHeight: '55px',
-        overflow: 'hidden'
-      }}>
-        {getFamilyName(target.customer_name)}
-      </div>
-    );
-  }
-
-  // 3. もし同じ時間に2人以上同時にスタートする場合は「👥 ◯名」と表示
-  if (startingHere.length > 1) {
-    return <span style={{ fontSize: '1.1rem' }}>👥 {startingHere.length}名</span>;
-  }
-
-  // 4. 開始枠ではない（前の時間から続いている施術）の場合は、ドットなどで「埋まってる感」を出す
-  return <span style={{ fontSize: '0.6rem', opacity: 0.4 }}>✕</span>;
-})()}
+                                  /* 通常予約 */
+                                  isStart ? (
+                                    /* 開始枠：苗字を表示 */
+                                    <div style={{ fontWeight: 'bold', fontSize: isPC ? '0.85rem' : '0.7rem', color: isOtherShop ? '#94a3b8' : (reservationCount > 1 ? themeColor : colors.text), textAlign: 'center', whiteSpace: 'nowrap', padding: '0 4px' }}>
+                                      {reservationCount > 1 ? `👥 ${reservationCount}名` : `${firstRes.customer_name.split(/[\s　]+/)[0]} 様`}
                                     </div>
-                                  ) : isArray ? '✕' : '')
+                                  ) : (
+                                    /* 🆕 継続枠：中身は空（borderLeftの縦棒だけが見える状態） */
+                                    null
+                                  )
                                 )}
                               </div>
                             )}
@@ -805,7 +808,7 @@ drag="x"
                     </tr>
                   ))}
                 </tbody>
-              </table>
+                                              </table>
             </motion.div>
           </AnimatePresence>
         </div>

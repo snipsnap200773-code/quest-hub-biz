@@ -269,19 +269,23 @@ const [pastVisits, setPastVisits] = useState([]);
     calculateFinalTotal(newSelection, checkoutAdjustments, checkoutProducts);
   };
 
-  const applyMenuChangeToLedger = () => {
+const applyMenuChangeToLedger = () => {
     if (!selectedRes) return;
     const newBaseName = checkoutServices.map(s => s.name).join(', ');
+    // 🆕 合計コマ数も計算
+    const newTotalSlots = checkoutServices.reduce((sum, s) => sum + (s.slots ?? 1), 0);
+    
     const info = parseReservationDetails(selectedRes);
     const branchNames = info.subItems.map(o => o.option_name).filter(Boolean);
     const fullDisplayName = branchNames.length > 0 ? `${newBaseName}（${branchNames.join(', ')}）` : newBaseName;
 
     setAllReservations(prev => prev.map(res => 
-      res.id === selectedRes.id ? { ...res, menu_name: fullDisplayName, total_price: finalPrice } : res
+      // 🆕 total_slots も更新対象に含める
+      res.id === selectedRes.id ? { ...res, menu_name: fullDisplayName, total_price: finalPrice, total_slots: newTotalSlots } : res
     ));
     setIsMenuPopupOpen(false);
   };
-
+  
 const openCheckout = (res) => {
     const info = parseReservationDetails(res);
     setSelectedRes(res);
@@ -324,7 +328,7 @@ const openCheckout = (res) => {
 
 const completePayment = async () => {
     try {
-      const totalSlots = checkoutServices.reduce((sum, s) => sum + (Number(s.slots) || 1), 0);
+      const totalSlots = checkoutServices.reduce((sum, s) => sum + (s.slots ?? 1), 0);
       const endTime = new Date(new Date(selectedRes.start_time).getTime() + totalSlots * (shop.slot_interval_min || 15) * 60000);
       
       const currentBaseName = checkoutServices.map(s => s.name).join(', ');
@@ -1079,7 +1083,7 @@ const completePayment = async () => {
   </div>
 
   <div style={{ fontSize: '0.8rem', display: 'flex', justifyContent: 'space-between', borderTop: '1px solid #eee', paddingTop: '8px' }}>
-    <span>合計コマ数: {selectedRes?.total_slots || 0} コマ</span>
+    <span>合計コマ数: {checkoutServices.reduce((sum, s) => sum + (s.slots ?? 1), 0)} コマ</span>
     <span style={{ fontWeight: 'bold', color: '#d34817', fontSize: '1rem' }}>
       施術合計: ¥ {selectedRes ? parseReservationDetails(selectedRes).totalPrice.toLocaleString() : '0'}
     </span>
