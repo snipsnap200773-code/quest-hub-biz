@@ -6,6 +6,22 @@ import {
   X, Clipboard, User, FileText, History, CheckCircle, Trash2 
 } from 'lucide-react';
 
+// 🆕 予約者名から固有のパステルカラーを生成するロジック
+const getCustomerColor = (name) => {
+  if (!name || name === '定休日' || name === '臨時休業') return { bg: '#f1f5f9', border: '#cbd5e1', line: '#94a3b8', text: '#64748b' };
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) {
+    hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  const h = Math.abs(hash % 360);
+  return {
+    bg: `hsl(${h}, 85%, 94%)`,
+    border: `hsl(${h}, 60%, 80%)`,
+    line: `hsl(${h}, 60%, 60%)`,
+    text: `hsl(${h}, 70%, 25%)`
+  };
+};
+
 function AdminTimeline() {
   const { shopId } = useParams();
   const navigate = useNavigate();
@@ -295,56 +311,81 @@ const handleCellClick = (slotMatches, time, staffId) => { // ✅ 引数を変更
 {timeSlots.map(time => {
   const currentSlotStart = new Date(`${selectedDate}T${time}:00`).getTime();
   const staffIdVal = staff.id === 'free' ? null : staff.id;
-  const matches = reservations.filter(r => (r.staff_id === staffIdVal) && currentSlotStart >= new Date(r.start_time).getTime() && currentSlotStart < new Date(r.end_time).getTime());
   
-  // 🆕 「このスロットで描画すべきか？」の判定
-  // 1名の時はその人の開始時間、複数名の時は「その時間帯にいる誰か」の開始時間と一致するかチェック
-  const isSegmentStart = matches.length > 0 && matches.some(r => 
+  // 1. このスタッフ・この時間に予約が入っているか（配列で取得）
+  const matches = reservations.filter(r => 
+    (r.staff_id === staffIdVal) && 
+    currentSlotStart >= new Date(r.start_time).getTime() && 
+    currentSlotStart < new Date(r.end_time).getTime()
+  );
+  
+  const hasRes = matches.length > 0;
+  const isMultiple = matches.length > 1;
+  const firstRes = matches[0];
+  
+  // 2. 「この枠の時間」が「予約の開始時間」とちょうど一致するか判定
+  const isStart = hasRes && matches.some(r => 
     new Date(r.start_time).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', hour12: false }) === time
   );
 
-  if (isSegmentStart) {
-    const intervalMin = shop?.slot_interval_min || 15;
-    // 🆕 この枠にいる予約の中で、一番「終了が早い人」に合わせてバーの長さを決める（重なりが解消されるポイント）
-    const soonestEnd = Math.min(...matches.map(r => new Date(r.end_time).getTime()));
-    const slotCount = Math.max(1, (soonestEnd - currentSlotStart) / (1000 * 60 * intervalMin));
-    
-    const isMultiple = matches.length > 1;
-    const firstRes = matches[0]; // 代表として1つ取得
+  // 3. カラー設定の取得
+  const colors = getCustomerColor(firstRes?.customer_name);
 
-    return (
-      <td key={time} onClick={() => handleCellClick(matches, time, staffIdVal)} style={{ borderRight: '1px solid #cbd5e1', borderBottom: '1px solid #cbd5e1', position: 'relative', padding: 0 }}>
-        <div style={{ 
-          position: 'absolute', top: '1px', bottom: '1px', left: '1px', 
-          width: `calc(100% * ${slotCount} - 2px)`, zIndex: 10, 
-          background: isMultiple ? '#e0e7ff' : (firstRes.res_type === 'blocked' ? '#fee2e2' : themeColor),
-          color: isMultiple ? themeColor : (firstRes.res_type === 'blocked' ? '#ef4444' : '#fff'),
-          borderLeft: isMultiple ? `4px solid ${themeColor}` : 'none',
-          padding: '4px 8px', borderRadius: '2px', boxShadow: '0 2px 5px rgba(0,0,0,0.2)', fontSize: '0.75rem', display: 'flex', flexDirection: 'column', justifyContent: 'center', cursor: 'pointer' 
-        }}>
-          {isMultiple ? (
-            <div style={{ fontWeight: 'bold', textAlign: 'center' }}>👥 {matches.length}名</div>
-          ) : (
-            <>
-              <div style={{ fontWeight: 'bold', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{firstRes.customer_name} 様</div>
-              {slotCount >= 1.5 && <div style={{ fontSize: '0.6rem', opacity: 0.9 }}>{firstRes.menu_name}</div>}
-            </>
-          )}
-        </div>
-      </td>
-    );
-  }
-
-  // 描画開始時間じゃない場合は空のセル（ただし背景は塗る）
   return (
     <td 
       key={time} 
+      // 💡 ここで time (例: 09:30) を直接渡すので、ねじ込みが正確に動く！
       onClick={() => handleCellClick(matches, time, staffIdVal)} 
-      style={{ borderRight: '1px solid #cbd5e1', borderBottom: '1px solid #cbd5e1', background: matches.length > 0 ? `${themeColor}10` : 'transparent' }}
-    ></td>
+      style={{ 
+        minWidth: '120px', // 🆕 名前が入りやすいように幅を確保
+        borderRight: '1.5px solid #cbd5e1', // 🆕 カレンダー同様のクッキリ線
+        borderBottom: '1px solid #cbd5e1', 
+        position: 'relative',
+        background: '#fff',
+        padding: 0,
+        cursor: 'pointer'
+      }}
+    >
+      {hasRes && (
+        <div style={{
+          position: 'absolute',
+          inset: '6px 0', // 上下に少し隙間、左右は隣と密着させて「繋がり」を出す
+          background: isMultiple ? '#e0e7ff' : colors.bg,
+          borderTop: `1.5px solid ${isMultiple ? themeColor : colors.border}`,
+          borderBottom: `1.5px solid ${isMultiple ? themeColor : colors.border}`,
+          borderLeft: isStart ? `1.5px solid ${isMultiple ? themeColor : colors.border}` : 'none',
+          borderRadius: isStart ? '8px 0 0 8px' : '0',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: isStart ? 'flex-start' : 'center',
+          padding: isStart ? '0 10px' : '0',
+          zIndex: 5,
+          overflow: 'hidden'
+        }}>
+          {isStart ? (
+            /* 🆕 開始枠：お名前を表示（苗字のみ） */
+            <span style={{ 
+              fontSize: '0.8rem', 
+              fontWeight: 'bold', 
+              color: isMultiple ? themeColor : colors.text,
+              whiteSpace: 'nowrap'
+            }}>
+              {isMultiple ? `👥 ${matches.length}名` : `${firstRes.customer_name.split(/[\s　]+/)[0]} 様`}
+            </span>
+          ) : (
+            /* 🆕 継続枠：中央にラインを表示 */
+            <div style={{ 
+              width: '100%', 
+              height: '3px', 
+              background: isMultiple ? themeColor : colors.line, 
+              opacity: isMultiple ? 0.5 : 0.4 
+            }} />
+          )}
+        </div>
+      )}
+    </td>
   );
-})}
-              </tr>
+})}              </tr>
             ))}
           </tbody>
         </table>
