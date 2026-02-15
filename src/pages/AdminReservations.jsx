@@ -730,20 +730,21 @@ drag="x"
                         <span style={{ fontSize: '0.75rem', color: '#64748b', fontWeight: 'bold' }}>{time}</span>
                       </td>
 
-                      {weekDays.map(date => {
+{weekDays.map(date => {
                         const dStr = getJapanDateStr(date);
-                        const resAt = getStatusAt(dStr, time); // このマスのデータを取得
+                        const resAt = getStatusAt(dStr, time); // このマスの全予約を取得
                         const isArray = Array.isArray(resAt);
                         const hasRes = resAt !== null;
                         const firstRes = isArray ? resAt[0] : resAt;
                         const reservationCount = isArray ? resAt.length : 0;
 
-                        // 1. このマスが「予約の開始時間」か判定
-                        const isStart = isArray && resAt.some(r => 
+                        // 1. この枠で「ちょうど開始（ねじ込み含）」する人を抽出
+                        const startingHere = isArray ? resAt.filter(r => 
                           new Date(r.start_time).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', hour12: false }) === time
-                        );
+                        ) : [];
+                        const isStart = startingHere.length > 0;
 
-                        // 2. 状態・デザイン用フラグの準備
+                        // 2. 状態・デザインフラグ
                         const colors = getCustomerColor(firstRes?.customer_name);
                         const isOtherShop = isArray && resAt.some(r => r.shop_id !== shopId);
                         const isBlocked = (isArray && resAt.some(r => r.res_type === 'blocked')) || (firstRes?.res_type === 'blocked');
@@ -764,48 +765,47 @@ drag="x"
                                 setShowMenuModal(true); 
                               } 
                             }}
-                            style={{ borderRight: '2px solid #cbd5e1', borderBottom: '2px solid #cbd5e1', position: 'relative', cursor: 'pointer', background: '#fff' }}
+                            style={{ borderRight: '2.5px solid #cbd5e1', borderBottom: '2px solid #cbd5e1', position: 'relative', cursor: 'pointer', background: '#fff' }}
                           >
-                            {/* システム制限枠（自動詰め等）ではない場合のみ描画 */}
                             {hasRes && !isSystemBlocked && (
                               <div style={{ 
-                                position: 'absolute', 
-                                inset: 0, // 🆕 枠いっぱいに広げる
-                                zIndex: 5,
-                                display: 'flex', 
-                                alignItems: 'center', 
-                                justifyContent: 'center',
-                                overflow: 'hidden',
-                                /* 🆕 背景色の設定：休みはグレー、開始は顧客色、継続は白 */
-                                background: (isRegularHoliday || isBlocked) ? '#f1f5f9' : 
-                                            (isOtherShop ? '#f8fafc' : 
-                                            (isStart ? (reservationCount > 1 ? '#e0e7ff' : colors.bg) : '#fff')),
-                                /* 🆕 左端に縦棒を配置（セルの左線と重なるデザイン） */
-                                borderLeft: (isRegularHoliday || isBlocked) ? 'none' : 
-                                            `2px solid ${isOtherShop ? '#cbd5e1' : (reservationCount > 1 ? themeColor : colors.line)}`
+                                position: 'absolute', inset: 0, zIndex: 5, overflow: 'hidden',
+                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                background: (isRegularHoliday || isBlocked) ? '#f1f5f9' : (isOtherShop ? '#f8fafc' : (isStart ? colors.bg : '#fff')),
+                                /* 左側の縦棒（4px設定。数字を変えれば太さが変わります） */
+                                borderLeft: (isRegularHoliday || isBlocked) ? 'none' : `4px solid ${isOtherShop ? '#cbd5e1' : colors.line}`
                               }}>
-                                {/* 内部コンテンツ */}
                                 {(isRegularHoliday || isBlocked) ? (
-                                  /* 🆕 休み枠：開始枠のみ名前（定休日など）を表示し、継続枠は空にする（線を消すため） */
                                   isStart && <span style={{fontSize:'0.65rem', fontWeight:'bold', color:'#94a3b8'}}>{firstRes.customer_name}</span>
                                 ) : (
-                                  /* 通常予約 */
                                   isStart ? (
-                                    /* 開始枠：苗字を表示 */
-                                    <div style={{ fontWeight: 'bold', fontSize: isPC ? '0.85rem' : '0.7rem', color: isOtherShop ? '#94a3b8' : (reservationCount > 1 ? themeColor : colors.text), textAlign: 'center', whiteSpace: 'nowrap', padding: '0 4px' }}>
-                                      {reservationCount > 1 ? `👥 ${reservationCount}名` : `${firstRes.customer_name.split(/[\s　]+/)[0]} 様`}
+                                    <div style={{ fontWeight: 'bold', fontSize: isPC ? '0.85rem' : '0.7rem', color: isOtherShop ? '#94a3b8' : colors.text, textAlign: 'center', whiteSpace: 'nowrap', padding: '0 4px' }}>
+                                      {(() => {
+                                        // 💡 ロジックの核：この枠で開始する人が1人なら、その人の名前を優先
+                                        if (startingHere.length === 1) {
+                                          const name = startingHere[0].customer_name.split(/[\s　]+/)[0];
+                                          // 他の予約（継続中の人など）と重なっていれば人数を表示
+                                          const countSuffix = reservationCount > 1 ? ` (${reservationCount}名)` : " 様";
+                                          
+                                          return isPC ? (`${name}${countSuffix}`) : (
+                                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', lineHeight: 1 }}>
+                                              <span style={{ writingMode: 'vertical-rl', textOrientation: 'upright' }}>{name}</span>
+                                              {reservationCount > 1 && <span style={{ fontSize: '0.6rem', marginTop: '2px' }}>({reservationCount})</span>}
+                                            </div>
+                                          );
+                                        }
+                                        // 💡 同時に2人以上が開始する場合は、従来通りアイコン表示
+                                        return `👥 ${reservationCount}名`;
+                                      })()}
                                     </div>
-                                  ) : (
-                                    /* 🆕 継続枠：中身は空（borderLeftの縦棒だけが見える状態） */
-                                    null
-                                  )
+                                  ) : null /* 継続枠は中身なし(左棒のみ)でスッキリ */
                                 )}
                               </div>
                             )}
                           </td>
                         );
                       })}
-                    </tr>
+                                          </tr>
                   ))}
                 </tbody>
                                               </table>

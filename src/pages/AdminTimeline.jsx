@@ -333,14 +333,22 @@ const handleCellClick = (slotMatches, time, staffId) => { // ✅ 引数を変更
         position: 'sticky', left: 0, zIndex: 90, background: idx % 2 === 0 ? '#fff' : '#f8fafc', 
         padding: '8px', borderRight: '3px solid #94a3b8', borderBottom: '1px solid #cbd5e1', fontWeight: 'bold' 
       }}><div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><Users size={14} color={staff.id === 'free' ? '#94a3b8' : themeColor} /><span style={{ fontSize: '0.85rem', color: '#1e293b' }}>{staff.name}</span></div></td>{/* 👈 閉じタグの直後に中括弧を繋げる */}
-      {timeSlots.map(time => {
+{timeSlots.map(time => {
         const currentSlotStart = new Date(`${selectedDate}T${time}:00`).getTime();
         const staffIdVal = staff.id === 'free' ? null : staff.id;
+        
+        // 1. この枠に重なっている全予約を取得
         const matches = reservations.filter(r => (r.staff_id === staffIdVal) && currentSlotStart >= new Date(r.start_time).getTime() && currentSlotStart < new Date(r.end_time).getTime());
         const hasRes = matches.length > 0;
+        
+        // 🆕 2. この枠で「ちょうど開始」する予約を特定
+        const startingHere = matches.filter(r => 
+          new Date(r.start_time).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', hour12: false }) === time
+        );
+        const isStart = startingHere.length > 0;
+
         const isMultiple = matches.length > 1;
         const firstRes = matches[0];
-        const isStart = hasRes && matches.some(r => new Date(r.start_time).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', hour12: false }) === time);
         const intervalMin = shop?.slot_interval_min || 15;
         const isEnd = hasRes && matches.some(r => new Date(r.end_time).getTime() === (currentSlotStart + intervalMin * 60000));
         const colors = getCustomerColor(firstRes?.customer_name);
@@ -350,10 +358,21 @@ const handleCellClick = (slotMatches, time, staffId) => { // ✅ 引数を変更
             {hasRes && (
               <div style={{ position: 'absolute', inset: '6px 0', background: isMultiple ? '#e0e7ff' : colors.bg, borderTop: `1.5px solid ${isMultiple ? themeColor : colors.border}`, borderBottom: `1.5px solid ${isMultiple ? themeColor : colors.border}`, borderLeft: isStart ? `1.5px solid ${isMultiple ? themeColor : colors.border}` : 'none', borderRight: isEnd ? `1.5px solid ${isMultiple ? themeColor : colors.border}` : 'none', borderRadius: `${isStart ? '8px' : '0'} ${isEnd ? '8px' : '0'} ${isEnd ? '8px' : '0'} ${isStart ? '8px' : '0'}`, display: 'flex', alignItems: 'center', justifyContent: isStart ? 'flex-start' : 'center', padding: isStart ? '0 10px' : '0', zIndex: 5, overflow: 'hidden' }}>
                 {isStart ? (
+                  /* 🆕 表示ロジックを強化 */
                   <span style={{ fontSize: '0.8rem', fontWeight: 'bold', color: isMultiple ? themeColor : colors.text, whiteSpace: 'nowrap' }}>
-                    {isMultiple ? `👥 ${matches.length}名` : `${firstRes.customer_name.split(/[\s　]+/)[0]} 様`}
+                    {(() => {
+                      // この枠で開始する人が1人だけなら名前を優先
+                      if (startingHere.length === 1) {
+                        const name = startingHere[0].customer_name.split(/[\s　]+/)[0];
+                        // 他の人と重なっていれば (人数) を追加
+                        return isMultiple ? `${name} (${matches.length}名)` : `${name} 様`;
+                      }
+                      // 同時に2人以上が開始する場合はアイコン表示
+                      return `👥 ${matches.length}名`;
+                    })()}
                   </span>
                 ) : (
+                  /* 続きの枠は中央ライン */
                   <div style={{ width: '100%', height: '3px', background: isMultiple ? themeColor : colors.line, opacity: 0.4 }} />
                 )}
               </div>
@@ -361,7 +380,7 @@ const handleCellClick = (slotMatches, time, staffId) => { // ✅ 引数を変更
           </td>
         );
       })}
-    </tr>
+          </tr>
   ))}
 </tbody>
         </table>
