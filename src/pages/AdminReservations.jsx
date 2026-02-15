@@ -773,7 +773,7 @@ drag="x"
                                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                                 background: (isRegularHoliday || isBlocked) ? '#f1f5f9' : (isOtherShop ? '#f8fafc' : (isStart ? colors.bg : '#fff')),
                                 /* 左側の縦棒（4px設定。数字を変えれば太さが変わります） */
-                                borderLeft: (isRegularHoliday || isBlocked) ? 'none' : `4px solid ${isOtherShop ? '#cbd5e1' : colors.line}`
+                                borderLeft: (isRegularHoliday || isBlocked) ? 'none' : `1px solid ${isOtherShop ? '#cbd5e1' : colors.line}`
                               }}>
                                 {(isRegularHoliday || isBlocked) ? (
                                   isStart && <span style={{fontSize:'0.65rem', fontWeight:'bold', color:'#94a3b8'}}>{firstRes.customer_name}</span>
