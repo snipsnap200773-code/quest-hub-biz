@@ -553,7 +553,7 @@ const insertData = {
   return (
     <div style={{ display: 'flex', width: '100vw', height: '100dvh', background: '#fff', overflow: 'hidden', position: 'fixed', inset: 0 }}>
 {isPC && (
-        <div style={{ width: '260px', flexShrink: 0, borderRight: '2.5px solid #cbd5e1', padding: '18px', display: 'flex', flexDirection: 'column', gap: '20px', background: '#fff', zIndex: 100 }}>
+        <div style={{ width: '260px', flexShrink: 0, borderRight: '0.5px solid #cbd5e1', padding: '18px', display: 'flex', flexDirection: 'column', gap: '20px', background: '#fff', zIndex: 100 }}>
 
 {/* --- 1段目：タイトルと設定 --- */}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', marginBottom: '10px' }}>
@@ -620,7 +620,7 @@ const insertData = {
       )}
 
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
-        <div style={{ padding: isPC ? '15px 25px' : '15px 10px', borderBottom: '2.5px solid #cbd5e1', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#fff' }}>
+        <div style={{ padding: isPC ? '15px 25px' : '15px 10px', borderBottom: '0.5px solid #cbd5e1', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#fff' }}>
           {isPC ? (
             <div style={{ display: 'flex', alignItems: 'center', gap: '15px', flex: 1 }}>
               <div style={{ display: 'flex', gap: '8px' }}>
@@ -709,12 +709,12 @@ drag="x"
               <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed', minWidth: isPC ? '900px' : '100%' }}>
                 <thead style={{ position: 'sticky', top: 0, zIndex: 10, background: '#fff' }}>
                   <tr>
-                    <th style={{ width: isPC ? '80px' : '32px', borderBottom: '2.5px solid #cbd5e1' }}></th>
+                    <th style={{ width: isPC ? '80px' : '32px', borderBottom: '0.5px solid #cbd5e1' }}></th>
                     {weekDays.map(date => {
                       const isToday = getJapanDateStr(new Date()) === getJapanDateStr(date);
                       return (
-                        /* 曜日の下の線を2.5pxに */
-                        <th key={date.toString()} style={{ padding: '4px 0', borderBottom: '2.5px solid #cbd5e1' }}>
+                        /* 曜日の下の線を0.5pxに */
+                        <th key={date.toString()} style={{ padding: '4px 0', borderBottom: '0.5px solid #cbd5e1' }}>
                           <div style={{ fontSize: '0.6rem', color: isToday ? themeColor : '#666' }}>{['日','月','火','水','木','金','土'][date.getDay()]}</div>
                           <div style={{ fontSize: isPC ? '1.5rem' : '0.9rem', fontWeight: 'bold', color: isToday ? '#fff' : '#333', background: isToday ? themeColor : 'none', width: isPC ? '40px' : '22px', height: isPC ? '40px' : '22px', borderRadius: '50%', margin: '2px auto', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{date.getDate()}</div>
                         </th>
@@ -726,7 +726,7 @@ drag="x"
                   {timeSlots.map(time => (
                     <tr key={time} style={{ height: '60px' }}>
                       {/* 左端の時間軸 */}
-                      <td style={{ borderRight: '2.5px solid #cbd5e1', borderBottom: '2px solid #cbd5e1', textAlign: 'center', background: '#f8fafc' }}>
+                      <td style={{ borderRight: '0.5px solid #cbd5e1', borderBottom: '0.5px solid #cbd5e1', textAlign: 'center', background: '#f8fafc' }}>
                         <span style={{ fontSize: '0.75rem', color: '#64748b', fontWeight: 'bold' }}>{time}</span>
                       </td>
 
@@ -772,8 +772,8 @@ drag="x"
                             }}
                             style={{ 
                               /* 🆕 営業時間外(拡張枠)は背景を少し暗く(#f8fafc)、線を薄く(#e2e8f0)設定 */
-                              borderRight: `${isStandardTime ? '2px' : '2px'} solid ${isStandardTime ? '#cbd5e1' : '#cbd5e1'}`, 
-                              borderBottom: `${isStandardTime ? '2px' : '2px'} solid ${isStandardTime ? '#cbd5e1' : '#cbd5e1'}`, 
+                              borderRight: `${isStandardTime ? '0.1px' : '0.1px'} solid ${isStandardTime ? '#cbd5e1' : '#cbd5e1'}`, 
+                              borderBottom: `${isStandardTime ? '0.1px' : '0.1px'} solid ${isStandardTime ? '#cbd5e1' : '#cbd5e1'}`, 
                               position: 'relative', 
                               cursor: 'pointer', 
                               background: isStandardTime ? '#fff' : '#fffff3' 
@@ -785,7 +785,7 @@ drag="x"
                                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                                 /* 🆕 拡張枠内にある予約は、少しだけ透明度を下げる(0.9)などの工夫も可能です */
                                 background: (isRegularHoliday || isBlocked) ? '#f1f5f9' : (isOtherShop ? '#f8fafc' : (isStart ? colors.bg : '#fff')),
-                                borderLeft: (isRegularHoliday || isBlocked) ? 'none' : `4px solid ${isOtherShop ? '#cbd5e1' : colors.line}`
+                                borderLeft: (isRegularHoliday || isBlocked) ? 'none' : `2px solid ${isOtherShop ? '#cbd5e1' : colors.line}`
                               }}>
                                 {(isRegularHoliday || isBlocked) ? (
                                   isStart && <span style={{fontSize:'0.65rem', fontWeight:'bold', color:'#94a3b8'}}>{firstRes.customer_name}</span>
