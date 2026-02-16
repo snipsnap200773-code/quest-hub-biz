@@ -102,7 +102,7 @@ function TimeSelectionCalendar() {
     return slots;
   }, [shop]);
 
-  // ✅ 拡張版：空き状況チェック（残り枠数を返すように少しだけ進化）
+// ✅ 拡張版：空き状況チェック
   const checkAvailability = (date, timeStr) => {
     if (!shop?.business_hours) return { status: 'none', remaining: 0 };
     if (checkIsRegularHoliday(date)) return { status: 'closed', label: '休', remaining: 0 };
@@ -122,6 +122,17 @@ function TimeSelectionCalendar() {
     const buffer = shop.buffer_preparation_min || 0;
     const interval = shop.slot_interval_min || 15;
 
+    // --- 🆕 修正ポイント：終了時間の判定と変数の定義 ---
+    const totalMinRequired = (totalSlotsNeeded * interval);
+    // ループで使用するため、Dateオブジェクトとして定義し直します
+    const potentialEndTime = new Date(targetDateTime.getTime() + totalMinRequired * 60 * 1000);
+
+    const [closeH, closeM] = closeTime.split(':').map(Number);
+    const closeDateTime = new Date(`${dateStr}T${String(closeH).padStart(2,'0')}:${String(closeM).padStart(2,'0')}:00`);
+
+    // サービス終了時間が1分でも営業終了時間を過ぎたら「△（表示制限）」
+    if (potentialEndTime > closeDateTime) return { status: 'short', label: '△', remaining: 0 };
+
     const limitDays = Math.floor((shop.min_lead_time_hours || 0) / 24);
     const limitDate = new Date(now);
     limitDate.setHours(0,0,0,0);
@@ -129,12 +140,6 @@ function TimeSelectionCalendar() {
 
     if (dateStr === todayStr && targetDateTime < now) return { status: 'past', label: '－', remaining: 0 };
     if (new Date(dateStr) < limitDate) return { status: 'past', label: '－', remaining: 0 };
-
-    const totalMinRequired = (totalSlotsNeeded * interval);
-    const potentialEndTime = new Date(targetDateTime.getTime() + totalMinRequired * 60 * 1000);
-    const [closeH, closeM] = closeTime.split(':').map(Number);
-    const closeDateTime = new Date(`${dateStr}T${String(closeH).padStart(2,'0')}:${String(closeM).padStart(2,'0')}:00`);
-    if (potentialEndTime > closeDateTime) return { status: 'short', label: '△', remaining: 0 };
 
     const storeMax = shop?.max_capacity || 1;
     const activeStaffs = allStaffs.filter(s => {
@@ -145,11 +150,14 @@ function TimeSelectionCalendar() {
 
     let minRemaining = storeMax;
 
+    // --- 🆕 修正ポイント：153行目のループ ---
+    // potentialEndTime が定義されたので、ここでの ReferenceError は解消されます
     for (let t = targetDateTime.getTime(); t < potentialEndTime.getTime(); t += interval * 60 * 1000) {
       const globalCount = existingReservations.filter(res => {
         const resStart = new Date(res.start_time).getTime();
         const resEnd = new Date(res.end_time).getTime();
-        return t >= resStart && t < resEnd + (buffer * 60 * 1000);
+        // 🆕 buffer を足さない判定（DBにバッファ込のend_timeが入っているため）
+        return t >= resStart && t < resEnd;
       }).length;
 
       if (globalCount >= storeMax) return { status: 'booked', label: '×', remaining: 0 };
@@ -158,7 +166,8 @@ function TimeSelectionCalendar() {
       const anyStaffAvailable = activeStaffs.some(staff => {
         const staffCurrentLoad = existingReservations.filter(res => {
           if (res.staff_id !== staff.id) return false;
-          return t >= new Date(res.start_time).getTime() && t < new Date(res.end_time).getTime() + (buffer * 60 * 1000);
+          // 🆕 ここも同様に buffer を足さない
+          return t >= new Date(res.start_time).getTime() && t < new Date(res.end_time).getTime();
         }).length;
         return staffCurrentLoad < (staff.concurrent_capacity || 1);
       });
@@ -272,10 +281,11 @@ function TimeSelectionCalendar() {
           <CalendarIcon size={16} /> {selectedDate.getMonth()+1}月{selectedDate.getDate()}日の空き時間
         </h4>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-          {timeSlots.map(time => {
+{timeSlots.map(time => {
             const res = checkAvailability(selectedDate, time);
-            if (['none', 'closed', 'rest', 'past', 'booked', 'gap'].includes(res.status)) return null;
-            
+            // 🆕 'short'（時間不足）も null を返して表示しないようにする
+            if (['none', 'closed', 'rest', 'past', 'booked', 'gap', 'short'].includes(res.status)) return null;
+                        
             const isSelected = selectedTime === time;
             // 🆕 マンツーマンか複数人かで表示を分ける
             const isSolo = (shop?.max_capacity || 1) === 1;
