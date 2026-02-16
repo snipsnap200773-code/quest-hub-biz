@@ -7,6 +7,13 @@ function ConfirmReservation() {
   const location = useLocation();
   const navigate = useNavigate();
 
+  // 🆕 修正1：Stateの追加（ここに4つのStateを定義します）
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [suggestedCustomers, setSuggestedCustomers] = useState([]);
+  const [selectedCustomerId, setSelectedCustomerId] = useState(null);
+  const [selectedIndex, setSelectedIndex] = useState(-1);
+  const [staffName, setStaffName] = useState('');
+
   const { 
     people, 
     totalSlotsNeeded, 
@@ -20,72 +27,109 @@ function ConfirmReservation() {
     fromView 
   } = location.state || {};
   
-  const isAdminEntry = !!adminDate; 
+const isAdminEntry = !!adminDate; 
+
 
   const [shop, setShop] = useState(null);
-  const [customerName, setCustomerName] = useState('');
-  const [customerPhone, setCustomerPhone] = useState('');
-  const [customerEmail, setCustomerEmail] = useState('');
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [suggestedCustomers, setSuggestedCustomers] = useState([]);
-  const [selectedCustomerId, setSelectedCustomerId] = useState(null);
-  const [selectedIndex, setSelectedIndex] = useState(-1);
-  const [staffName, setStaffName] = useState('');
 
-  useEffect(() => {
-    if (!date && !adminDate) {
-      navigate(`/shop/${shopId}/reserve`); 
-      return;
-    }
+  // 🆕 一括管理用のStateに変更
+  const [customerData, setCustomerData] = useState({
+    name: '', email: '', phone: '', address: '', 
+    parking: '', building_type: '', care_notes: '', notes: ''
+  });
+  const [formConfig, setFormConfig] = useState(null); // 🆕 フォーム設定用
 
-    const checkLineCustomer = async () => {
-      if (lineUser?.userId) {
-        const { data: cust } = await supabase
-          .from('customers')
-          .select('*')
-          .eq('shop_id', shopId)
-          .eq('line_user_id', lineUser.userId)
-          .maybeSingle();
-
-        if (cust) {
-          setCustomerName(cust.name);
-          setCustomerPhone(cust.phone || '');
-          setCustomerEmail(cust.email || '');
-          setSelectedCustomerId(cust.id);
-          return; 
-        }
-      }
+// 🆕 46行目付近：fetchShop
+  const fetchShop = async () => {
+    try {
+      console.log("🔍 クエストデータ取得開始... shopId:", shopId);
+      const { data, error } = await supabase.from('profiles').select('*').eq('id', shopId).single();
       
-      if (lineUser && lineUser.displayName) {
-        setCustomerName(lineUser.displayName);
+      if (error) {
+        console.error("❌ Supabaseエラー:", error.message);
+        return;
       }
-    };
 
-    // 🆕 担当スタッフ名を取得する関数を追加
-    const fetchStaffName = async () => {
+      if (data) {
+        console.log("✅ クエストデータ取得成功:", data.business_name);
+        setShop(data);
+        setFormConfig(data.form_config || {});
+      } else {
+        console.warn("⚠️ データが空です。IDが間違っている可能性があります。");
+      }
+    } catch (err) {
+      console.error("🔥 通信エラー:", err);
+    }
+  };
+
+  // 🆕 修正：fetchStaffName をここに定義します！
+  const fetchStaffName = async () => {
+    try {
       if (staffId) {
-        const { data } = await supabase
+        console.log("🔍 スタッフデータ取得開始... staffId:", staffId);
+        const { data, error } = await supabase
           .from('staffs')
           .select('name')
           .eq('id', staffId)
           .single();
-        if (data) setStaffName(data.name);
+          
+        if (error) {
+          console.error("❌ スタッフ取得エラー:", error.message);
+          return;
+        }
+
+        if (data) {
+          console.log("✅ スタッフ名取得成功:", data.name);
+          setStaffName(data.name);
+        }
+      }
+    } catch (err) {
+      console.error("🔥 スタッフ取得通信エラー:", err);
+    }
+  };
+  
+  // 🆕 LINE連携チェック ＋ 店舗データ取得を一元化
+  useEffect(() => {
+    // 1. LINEユーザー情報から顧客を特定する関数
+    const checkLineCustomer = async () => {
+      if (!lineUser?.userId) {
+        // LINEアプリ内からのアクセスで名前だけある場合
+        if (lineUser?.displayName) {
+          setCustomerData(prev => ({ ...prev, name: lineUser.displayName }));
+        }
+        return;
+      }
+
+      const { data: cust, error } = await supabase
+        .from('customers')
+        .select('*')
+        .eq('shop_id', shopId)
+        .eq('line_user_id', lineUser.userId)
+        .maybeSingle();
+
+      if (cust) {
+        // ✅ 関数型アップデートを使って、最新のStateをベースに更新する
+        setCustomerData(prev => ({
+          ...prev,
+          name: cust.name || '',
+          phone: cust.phone || '',
+          email: cust.email || '',
+          address: cust.address || ''
+        }));
+        setSelectedCustomerId(cust.id);
       }
     };
 
+    // 2. 実行エリア
     checkLineCustomer();
-    fetchShop();
-    fetchStaffName(); // 🆕 ここで実行！
-  }, [lineUser, shopId, date, adminDate, navigate]);
+    fetchShop();      // 🆕 これを呼ぶことで「読み込み中」が解除されます！
+    fetchStaffName(); // 🆕 スタッフ名取得もここで行うのがスムーズです
+  }, [lineUser, shopId]);
 
-  const fetchShop = async () => {
-    const { data } = await supabase.from('profiles').select('*').eq('id', shopId).single();
-    if (data) setShop(data);
-  };
-
+// 🆕 顧客検索ロジックを一括State（customerData.name）に対応
   useEffect(() => {
     const searchCustomers = async () => {
-      if (!isAdminEntry || !customerName || customerName.length < 1 || selectedCustomerId) {
+      if (!isAdminEntry || !customerData.name || customerData.name.length < 1 || selectedCustomerId) {
         setSuggestedCustomers([]);
         setSelectedIndex(-1);
         return;
@@ -94,7 +138,7 @@ function ConfirmReservation() {
         .from('customers')
         .select('*')
         .eq('shop_id', shopId)
-        .ilike('name', `%${customerName}%`)
+        .ilike('name', `%${customerData.name}%`)
         .limit(5);
       
       setSuggestedCustomers(data || []);
@@ -102,12 +146,17 @@ function ConfirmReservation() {
     };
     const timer = setTimeout(searchCustomers, 300);
     return () => clearTimeout(timer);
-  }, [customerName, selectedCustomerId, isAdminEntry, shopId]);
+  }, [customerData.name, selectedCustomerId, isAdminEntry, shopId]);
 
+// 🆕 候補から選んだ際、一括State（customerData）を更新
   const handleSelectCustomer = (c) => {
-    setCustomerName(c.name);
-    setCustomerPhone(c.phone || '');
-    setCustomerEmail(c.email || '');
+    setCustomerData({
+      ...customerData,
+      name: c.name,
+      phone: c.phone || '',
+      email: c.email || '',
+      address: c.address || '' // 住所データがあればそれもセット
+    });
     setSelectedCustomerId(c.id);
     setSuggestedCustomers([]);
     setSelectedIndex(-1);
@@ -132,10 +181,42 @@ function ConfirmReservation() {
     }
   };
 
-const handleReserve = async () => {
-    if (!customerName) { alert('お客様名を入力してください'); return; }
-    if (!isAdminEntry) {
-      if (!customerPhone || !customerEmail) { alert('電話番号とメールアドレスを入力してください'); return; }
+  // 🆕 2. 入力ハンドラとスタイルの追加
+  // 様々な入力項目（名前、住所、備考など）を一つのStateで管理するための関数
+  const handleInputChange = (e) => {
+    const { name, value } = e.target;
+    setCustomerData(prev => ({ ...prev, [name]: value }));
+    
+    // 名前入力欄（name="name"）が変更された場合のみ、検索候補からの選択状態を解除する
+    if (name === 'name') setSelectedCustomerId(null);
+  };
+
+  // 動的に生成される入力フォーム（input/select/textarea）で共通利用するスタイル定義
+  const inputStyle = { 
+    width: '100%', 
+    padding: '14px', 
+    borderRadius: '10px', 
+    border: '1px solid #ddd', 
+    boxSizing: 'border-box', 
+    fontSize: '1rem' 
+  };
+
+// 🆕 4. 保存ロジック（handleReserve）の修正
+  const handleReserve = async () => {
+    // 1. 動的なバリデーション（店主が「必須」とした項目をチェック）
+    // 管理者ねじ込み時は「名前」のみチェックするように既存の挙動を維持
+// 1. 動的なバリデーション（店主が「必須」とした項目をチェック）
+    for (const [key, config] of Object.entries(formConfig)) {
+      // 🆕 判定ロジック：LINE経由なら line_enabled、そうでなければ enabled を参照する
+      const isEnabled = lineUser ? config.line_enabled : config.enabled;
+
+      if (isEnabled && config.required) {
+        if (isAdminEntry && key !== 'name') continue; 
+        if (!customerData[key]) {
+                    alert(`${config.label}を入力してください`);
+          return;
+        }
+      }
     }
 
     setIsSubmitting(true);
@@ -152,41 +233,31 @@ const handleReserve = async () => {
     const cancelUrl = `${window.location.origin}/cancel?token=${cancelToken}`;
 
     try {
-      // 🆕 1. スタッフの自動判別ロジックを最初に追加
       let finalStaffId = staffId;
       let finalStaffName = staffName;
 
-      // スタッフIDが指定されていない場合（LINE等からの予約）のみ、スタッフ数をチェック
       if (!finalStaffId) {
-        const { data: staffs } = await supabase
-          .from('staffs')
-          .select('id, name')
-          .eq('shop_id', shopId);
-
-        // 店舗に1人しかスタッフが登録されていない場合（一人営業）
+        const { data: staffs } = await supabase.from('staffs').select('id, name').eq('shop_id', shopId);
         if (staffs && staffs.length === 1) {
-          finalStaffId = staffs[0].id;      // その人のIDをセット
-          finalStaffName = staffs[0].name;  // その人の名前をセット
+          finalStaffId = staffs[0].id;
+          finalStaffName = staffs[0].name;
         }
       }
 
-// ==========================================
-      // ✅ 1. 顧客の特定（名寄せロジック強化）
-      // ==========================================
-      let finalCustomerId = selectedCustomerId; // 管理者が候補から選んだIDがあれば最優先
+      // --- 顧客の特定ロジック (customerDataを使用) ---
+      let finalCustomerId = selectedCustomerId;
       let existingCust = null;
 
       if (!finalCustomerId) {
-        // LINE ID または 電話番号で「絶対にこの人！」という既存客を検索
         let identifierFilter = `shop_id.eq.${shopId}`;
         const orConditions = [];
         if (lineUser?.userId) orConditions.push(`line_user_id.eq.${lineUser.userId}`);
-        if (customerPhone && customerPhone !== '---') orConditions.push(`phone.eq.${customerPhone}`);
+        if (customerData.phone && customerData.phone !== '---') orConditions.push(`phone.eq.${customerData.phone}`);
         
         const { data: matchedByContact } = await supabase
           .from('customers')
           .select('id, total_visits')
-          .or(orConditions.length > 0 ? orConditions.join(',') : `name.eq.${customerName}`)
+          .or(orConditions.length > 0 ? orConditions.join(',') : `name.eq.${customerData.name}`)
           .eq('shop_id', shopId)
           .maybeSingle();
 
@@ -194,33 +265,24 @@ const handleReserve = async () => {
           finalCustomerId = matchedByContact.id;
           existingCust = matchedByContact;
         } else {
-          // 連絡先で見つからない場合のみ、名前で最終チェック
-          const { data: matchedByName } = await supabase
-            .from('customers')
-            .select('id, total_visits')
-            .eq('shop_id', shopId)
-            .eq('name', customerName)
-            .maybeSingle();
-          
+          const { data: matchedByName } = await supabase.from('customers').select('id, total_visits').eq('shop_id', shopId).eq('name', customerData.name).maybeSingle();
           if (matchedByName) {
             finalCustomerId = matchedByName.id;
             existingCust = matchedByName;
           }
         }
       } else {
-        // すでにIDがある（候補から選んだ）場合、来店回数などの情報を取得
         const { data } = await supabase.from('customers').select('id, total_visits').eq('id', finalCustomerId).single();
         existingCust = data;
       }
 
-      // ==========================================
-      // ✅ 2. 名簿データの保存・更新 (upsert)
-      // ==========================================
+      // ✅ 2. 名簿データの保存・更新 (住所なども保存対象に)
       const customerPayload = {
         shop_id: shopId,
-        name: customerName,
-        phone: customerPhone || null,
-        email: customerEmail || null,
+        name: customerData.name,
+        phone: customerData.phone || null,
+        email: customerData.email || null,
+        address: customerData.address || null, // 🆕 住所を名簿に反映
         line_user_id: lineUser?.userId || null,
         total_visits: (existingCust?.total_visits || 0) + 1,
         last_arrival_at: startDateTime.toISOString(),
@@ -228,18 +290,14 @@ const handleReserve = async () => {
       };
 
       if (finalCustomerId) {
-        // 既存客の情報を最新に更新
         await supabase.from('customers').update(customerPayload).eq('id', finalCustomerId);
       } else {
-        // まったくの新規客を登録
         const { data: newCust, error: insError } = await supabase.from('customers').insert([customerPayload]).select().single();
         if (insError) throw insError;
         finalCustomerId = newCust.id;
       }
 
-      // ==========================================
-      // ✅ 3. 予約データの挿入 (customer_id を確実に紐付け)
-      // ==========================================
+      // ✅ 3. 予約データの挿入 (追加情報を visit_info として集約)
       const menuLabel = people.length > 1
         ? people.map((p, i) => `${i + 1}人目: ${p.fullName}`).join(' / ')
         : (people[0]?.fullName || 'メニューなし');
@@ -247,12 +305,12 @@ const handleReserve = async () => {
       const { error: dbError } = await supabase.from('reservations').insert([
         {
           shop_id: shopId,
-          customer_id: finalCustomerId, // 🆕 ここが重要！IDを紐付けることで分身を防ぐ
+          customer_id: finalCustomerId,
           staff_id: finalStaffId,
           reservation_date: targetDate, 
-          customer_name: customerName,
-          customer_phone: customerPhone || '---',
-          customer_email: customerEmail || 'admin@example.com',
+          customer_name: customerData.name,
+          customer_phone: customerData.phone || '---',
+          customer_email: customerData.email || 'admin@example.com',
           start_at: startDateTime.toISOString(),
           end_at: endDateTime.toISOString(),
           start_time: startDateTime.toISOString(),
@@ -264,22 +322,29 @@ const handleReserve = async () => {
           menu_name: menuLabel,
           options: { 
             people: people,
-            applied_shop_name: customShopName || shop.business_name 
+            applied_shop_name: customShopName || shop.business_name,
+            // 🆕 訪問特化データや備考をここに集約して保存
+            visit_info: {
+              address: customerData.address,
+              parking: customerData.parking,
+              building_type: customerData.building_type,
+              care_notes: customerData.care_notes,
+              notes: customerData.notes
+            }
           }
         }
       ]);
       
       if (dbError) throw dbError;
-
       // ✅ 通知メール送信 (resend 関数を呼び出し)
       if (!isAdminEntry) {
         await supabaseAnon.functions.invoke('resend', {
           body: {
             type: 'booking', 
-            shopId, 
-            customerEmail, 
-            customerName, 
-            shopName: customShopName || shop.business_name,
+            shopId,
+  customerEmail: customerData.email, // ✅ キー名を指定
+  customerName: customerData.name,   // ✅ キー名を指定
+  shopName: customShopName || shop.business_name,
             staffName: finalStaffName || '店舗スタッフ', // 🆕 判定後のスタッフ名（三土手さん等）を使用
             shopEmail: shop.email_contact, 
             startTime: `${targetDate.replace(/-/g, '/')} ${targetTime}`,
@@ -307,8 +372,17 @@ const handleReserve = async () => {
     }
   };
   
-  if (!shop) return null;
-  const themeColor = shop?.theme_color || '#2563eb';
+// 🆕 読み込み中であることを視覚化する
+  if (!shop) {
+    return (
+      <div style={{ padding: '100px 20px', textAlign: 'center', color: '#64748b' }}>
+        <div style={{ marginBottom: '20px', fontSize: '2rem', animation: 'spin 2s linear infinite' }}>⌛</div>
+        <p style={{ fontWeight: 'bold' }}>クエスト情報を読み込み中...</p>
+        <p style={{ fontSize: '0.8rem', marginTop: '10px' }}>画面が変わらない場合は、DB接続を確認してください。</p>
+      </div>
+    );
+  }
+    const themeColor = shop?.theme_color || '#2563eb';
   const displayDate = (adminDate || date).replace(/-/g, '/');
   const displayTime = adminTime || time;
 
@@ -351,50 +425,89 @@ const handleReserve = async () => {
         </div>
       </div>
 
+{/* 🆕 3. 表示部分（JSX）の動的化 */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-        <div style={{ position: 'relative' }}>
-          <label style={{ fontSize: '0.8rem', fontWeight: 'bold', display: 'block', marginBottom: '8px' }}>お客様名 (必須)</label>
-          <input 
-            type="text" 
-            value={customerName} 
-            onChange={(e) => { setCustomerName(e.target.value); setSelectedCustomerId(null); }} 
-            onKeyDown={handleKeyDown}
-            placeholder="お名前を入力" 
-            style={{ width: '100%', padding: '14px', borderRadius: '10px', border: '1px solid #ddd', boxSizing: 'border-box', fontSize: '1rem' }} 
-          />
-          {isAdminEntry && suggestedCustomers.length > 0 && (
-            <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: '#fff', boxShadow: '0 10px 25px rgba(0,0,0,0.1)', borderRadius: '10px', zIndex: 100, border: '1px solid #eee', overflow: 'hidden' }}>
-              {suggestedCustomers.map((c, index) => (
-                <div 
-                  key={c.id} 
-                  onClick={() => handleSelectCustomer(c)} 
-                  style={{ 
-                    padding: '12px', 
-                    borderBottom: '1px solid #f8fafc', 
-                    cursor: 'pointer', 
-                    fontSize: '0.9rem',
-                    background: index === selectedIndex ? `${themeColor}15` : 'transparent'
-                  }}
-                >
-                  <b>{c.name} 様</b> <span style={{ color: '#94a3b8', fontSize: '0.75rem' }}>({c.phone || '電話なし'})</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+        {formConfig && Object.entries(formConfig).map(([key, config]) => {
+          // 🆕 判定ロジック：LINE経由かWeb経由かで表示スイッチを切り替える
+          const isEnabled = lineUser ? config.line_enabled : config.enabled;
 
-        {!isAdminEntry && (
-          <>
-            <div>
-              <label style={{ fontSize: '0.8rem', fontWeight: 'bold', display: 'block', marginBottom: '8px' }}>メールアドレス</label>
-              <input type="email" value={customerEmail} onChange={(e) => setCustomerEmail(e.target.value)} style={{ width: '100%', padding: '14px', borderRadius: '10px', border: '1px solid #ddd', boxSizing: 'border-box' }} />
+          // 店主がその入り口に対して「表示」をオフにしている、または管理者ねじ込みかつ名前以外の場合はスキップ
+          if (!isEnabled) return null;
+          if (isAdminEntry && key !== 'name') return null;
+          
+          return (
+            <div key={key} style={{ position: 'relative' }}>
+              <label style={{ fontSize: '0.8rem', fontWeight: 'bold', display: 'block', marginBottom: '8px' }}>
+                {config.label} {config.required && <span style={{ color: '#ef4444' }}>*</span>}
+              </label>
+
+              {/* 1. お名前（検索候補機能付き） */}
+              {key === 'name' ? (
+                <>
+<input 
+  name="name"
+  type="text" 
+  autoComplete="off" // 🆕 ブラウザの余計な推測を止める
+  value={customerData.name} 
+  onChange={handleInputChange} 
+  onKeyDown={handleKeyDown}
+  placeholder={`${config.label}を入力`} 
+  style={inputStyle} 
+/>
+                  {isAdminEntry && suggestedCustomers.length > 0 && (
+                    <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: '#fff', boxShadow: '0 10px 25px rgba(0,0,0,0.1)', borderRadius: '10px', zIndex: 100, border: '1px solid #eee', overflow: 'hidden' }}>
+                      {suggestedCustomers.map((c, index) => (
+                        <div 
+                          key={c.id} 
+                          onClick={() => handleSelectCustomer(c)} 
+                          style={{ 
+                            padding: '12px', 
+                            borderBottom: '1px solid #f8fafc', 
+                            cursor: 'pointer', 
+                            fontSize: '0.9rem',
+                            background: index === selectedIndex ? `${themeColor}15` : 'transparent'
+                          }}
+                        >
+                          <b>{c.name} 様</b> <span style={{ color: '#94a3b8', fontSize: '0.75rem' }}>({c.phone || '電話なし'})</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              ) 
+              // 2. 駐車場の有無（選択式）
+              : key === 'parking' ? (
+                <select name={key} value={customerData[key]} onChange={handleInputChange} style={inputStyle} required={config.required}>
+                  <option value="">選択してください</option>
+                  <option value="あり">あり</option>
+                  <option value="なし">なし</option>
+                </select>
+              ) 
+              // 3. 備考・介助状況（複数行入力）
+              : key === 'notes' || key === 'care_notes' ? (
+                <textarea 
+                  name={key} 
+                  value={customerData[key]} 
+                  onChange={handleInputChange} 
+                  style={{ ...inputStyle, minHeight: '80px', resize: 'none' }} 
+                  required={config.required} 
+                />
+              ) 
+              // 4. その他一般（メール、電話、住所、建物の種類など）
+              : (
+                <input 
+                  name={key}
+                  type={key === 'email' ? 'email' : key === 'phone' ? 'tel' : 'text'} 
+                  value={customerData[key]} 
+                  onChange={handleInputChange} 
+                  style={inputStyle} 
+                  placeholder={`${config.label}を入力`}
+                  required={config.required} 
+                />
+              )}
             </div>
-            <div>
-              <label style={{ fontSize: '0.8rem', fontWeight: 'bold', display: 'block', marginBottom: '8px' }}>電話番号</label>
-              <input type="tel" value={customerPhone} onChange={(e) => setCustomerPhone(e.target.value)} style={{ width: '100%', padding: '14px', borderRadius: '10px', border: '1px solid #ddd', boxSizing: 'border-box' }} />
-            </div>
-          </>
-        )}
+          );
+        })}
 
         <button 
           onClick={handleReserve} 
