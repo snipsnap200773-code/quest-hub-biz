@@ -1,6 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from "../../../supabaseClient";
+// 🆕 共通設定ファイルをインポート（BasicSettingsと同じ階層を想定）
+import { INDUSTRY_LABELS } from '../../../constants/industryMaster';
+
 import { 
   ChevronRight, ChevronLeft, Check, Store, User, MapPin, 
   MessageSquare, Globe, Phone, Mail, FileText, Camera, SkipForward, ListChecks 
@@ -124,13 +127,28 @@ const BasicSettingsGuide = () => {
       case 0: return (
         <div style={cardStyle}>
           <Store size={60} color="#3b82f6" style={{marginBottom:'32px', alignSelf: 'center'}} />
-          <h2 style={{fontSize: '1.8rem', marginBottom: '32px'}}>業種を教えてください。</h2>
-          {['美容室・理容室', 'ネイル・アイラッシュ', '飲食店・カフェ'].map(type => (
-            <button key={type} onClick={() => { updateFieldAndSave('business_type', type); handleNext(); }} style={{ ...inputStyle, textAlign: 'left', border: formData.business_type === type ? '2px solid #3b82f6' : '2px solid #334155', display: 'flex', justifyContent: 'space-between', padding: '20px' }}>
-              {type} {formData.business_type === type && <Check size={24} color="#3b82f6" />}
-            </button>
-          ))}
-        </div>
+<h2 style={{fontSize: '1.8rem', marginBottom: '32px'}}>業種を教えてください。</h2>
+          <div style={{ maxHeight: '400px', overflowY: 'auto', paddingRight: '10px' }}>
+            {/* 🆕 共通マスタから動的にボタンを生成 */}
+            {INDUSTRY_LABELS.map(type => (
+              <button 
+                key={type} 
+                onClick={() => { updateFieldAndSave('business_type', type); handleNext(); }} 
+                style={{ 
+                  ...inputStyle, 
+                  textAlign: 'left', 
+                  border: formData.business_type === type ? '2px solid #3b82f6' : '2px solid #334155', 
+                  display: 'flex', 
+                  justifyContent: 'space-between', 
+                  padding: '20px',
+                  fontSize: '1rem' 
+                }}
+              >
+                {type} {formData.business_type === type && <Check size={24} color="#3b82f6" />}
+              </button>
+            ))}
+          </div>
+                  </div>
       );
       case 1: return (
         <div style={cardStyle}>

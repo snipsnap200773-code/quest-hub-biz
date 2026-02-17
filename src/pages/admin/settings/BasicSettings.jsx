@@ -1,5 +1,10 @@
 import React, { useEffect, useState } from 'react';
+// 🆕 共通設定ファイルをインポート（FormCustomizerと同じく3階層上を想定）
+import { INDUSTRY_LABELS } from '../../../constants/industryMaster';
+
 import { useParams, useNavigate, Link } from 'react-router-dom';
+// ... (lucide-reactのインポートは維持)
+
 import { supabase } from "../../../supabaseClient";
 import { 
   ArrowLeft, Sparkles, Save, Camera, MapPin, 
@@ -240,19 +245,21 @@ const BasicSettings = () => {
           </div>
         </div>
 
-        {/* 業種・URL */}
-        <div style={{ marginBottom: '20px' }}>
+<div style={{ marginBottom: '20px' }}>
           <label style={labelStyle}>業種</label>
-          <select value={businessType} onChange={(e) => setBusinessType(e.target.value)} style={inputStyle}>
-            <option value="美容室・理容室">美容室・理容室</option>
-            <option value="ネイル・アイラッシュ">ネイル・アイラッシュ</option>
-            <option value="エステ・リラク">エステ・リラク</option>
-            <option value="整体・接骨院・針灸">整体・接骨院・針灸</option>
-            <option value="飲食店・カフェ">飲食店・カフェ</option>
-            <option value="その他・ライフ">その他・ライフ</option>
-          </select>
+          <select 
+            value={businessType} 
+            onChange={(e) => setBusinessType(e.target.value)} 
+            style={{ ...inputStyle, fontWeight: 'bold', color: themeColor }}
+          >
+            <option value="">-- 業種を選択してください --</option>
+{/* 🆕 共通マスター（INDUSTRY_LABELS）から動的に生成 */}
+            {INDUSTRY_LABELS.map(label => (
+              <option key={label} value={label}>{label}</option>
+            ))}
+                      </select>
         </div>
-        
+
         <div style={{ marginBottom: '20px' }}>
           <label style={labelStyle}><Globe size={14} /> 公式サイトURL</label>
           <input value={officialUrl} onChange={(e) => setOfficialUrl(e.target.value)} style={inputStyle} placeholder="https://..." />

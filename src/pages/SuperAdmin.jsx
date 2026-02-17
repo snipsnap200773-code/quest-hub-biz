@@ -1,13 +1,21 @@
 import React, { useState, useEffect, useMemo } from 'react';
+// 🆕 共通設定ファイルをインポート（パスが合っているか確認してください）
+import { INDUSTRY_LABELS } from '../constants/industryMaster';
+
+// ✅ supabase のインポートはここ1回だけにします
 import { supabase } from '../supabaseClient';
+
 import { 
   MapPin, Plus, Trash2, Save, Image as ImageIcon, Bell, Search, 
   Filter, Store, UserCheck, ShieldAlert, Copy, ExternalLink, 
   Edit2, PlusSquare, Settings, List, LayoutDashboard, CheckCircle2, XCircle, Send
 } from 'lucide-react';
 
+// 🗑️ ここにあった「const INDUSTRY_OPTIONS = [...]」は削除しました
+// (今後は INDUSTRY_LABELS を使用します)
+
 function SuperAdmin() {
-  const [isAuthorized, setIsAuthorized] = useState(false);
+    const [isAuthorized, setIsAuthorized] = useState(false);
   const [inputPass, setInputPass] = useState('');
 
   const MASTER_PASSWORD = import.meta.env.VITE_SUPER_MASTER_PASSWORD; 
@@ -241,12 +249,29 @@ function SuperAdmin() {
           <Search size={18} style={{ position: 'absolute', left: '12px', top: '12px', opacity: 0.4 }} />
           <input type="text" placeholder="店舗・代表者・電話で検索" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} style={{ ...smallInput, paddingLeft: '40px' }} />
         </div>
-        <div style={{ display: 'flex', gap: '8px', overflowX: 'auto', paddingBottom: '5px', WebkitOverflowScrolling: 'touch' }}>
-          {['すべて', ...categoriesList.map(c => c.name)].map(cat => (
-            <button key={cat} onClick={() => setActiveCategory(cat)} style={{ padding: '6px 12px', borderRadius: '20px', border: 'none', fontSize: '0.75rem', fontWeight: 'bold', cursor: 'pointer', whiteSpace: 'nowrap', background: activeCategory === cat ? '#1e293b' : '#f1f5f9', color: activeCategory === cat ? '#fff' : '#64748b' }}>{cat}</button>
+<div style={{ display: 'flex', gap: '8px', overflowX: 'auto', paddingBottom: '5px', WebkitOverflowScrolling: 'touch' }}>
+          {/* 🆕 データベースのカテゴリではなく、最新の INDUSTRY_LABELS を表示 */}
+          {['すべて', ...INDUSTRY_LABELS].map(cat => (
+            <button 
+              key={cat} 
+              onClick={() => setActiveCategory(cat)} 
+              style={{ 
+                padding: '6px 12px', 
+                borderRadius: '20px', 
+                border: 'none', 
+                fontSize: '0.75rem', 
+                fontWeight: 'bold', 
+                cursor: 'pointer', 
+                whiteSpace: 'nowrap', 
+                background: activeCategory === cat ? '#1e293b' : '#f1f5f9', 
+                color: activeCategory === cat ? '#fff' : '#64748b' 
+              }}
+            >
+              {cat}
+            </button>
           ))}
         </div>
-      </div>
+                      </div>
       {filteredShops.map((shop, index) => (
         <ShopCard key={shop.id} shop={shop} index={createdShops.length - createdShops.findIndex(s => s.id === shop.id)} editingShopId={editingShopId} setEditingShopId={setEditingShopId} editState={{ editName, setEditName, editKana, setEditKana, editOwnerName, setEditOwnerName, editOwnerNameKana, setEditOwnerNameKana, editBusinessType, setEditBusinessType, editEmail, setEditEmail, editPhone, setEditPhone, editPassword, setEditPassword }} onUpdate={updateShopInfo} onDelete={deleteShop} onToggleSuspension={toggleSuspension} onToggleManagement={toggleManagementAccess} onCopy={copyToClipboard} categories={categoriesList} />
       ))}
@@ -266,11 +291,15 @@ function SuperAdmin() {
           <input value={newShopName} onChange={(e) => setNewShopName(e.target.value)} placeholder="店舗名" style={{...smallInput, flex:1}} />
           <input value={newShopKana} onChange={(e) => setNewShopKana(e.target.value)} placeholder="かな" style={{...smallInput, flex:1}} />
         </div>
-        <select value={newBusinessType} onChange={(e) => setNewBusinessType(e.target.value)} style={smallInput}>
+<select value={newBusinessType} onChange={(e) => setNewBusinessType(e.target.value)} style={smallInput}>
           <option value="">-- 業種を選択 --</option>
-          {categoriesList.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+          {/* 🆕 共通マスターの INDUSTRY_LABELS を使用 */}
+          {INDUSTRY_LABELS.map(opt => (
+            <option key={opt} value={opt}>{opt}</option>
+          ))}
         </select>
-        <input value={newEmail} onChange={(e) => setNewEmail(e.target.value)} placeholder="店主様メールアドレス（必須）" style={smallInput} />
+
+                <input value={newEmail} onChange={(e) => setNewEmail(e.target.value)} placeholder="店主様メールアドレス（必須）" style={smallInput} />
         <input value={newPhone} onChange={(e) => setNewPhone(e.target.value)} placeholder="電話" style={smallInput} />
         
         <button 
@@ -392,11 +421,15 @@ function ShopCard({ shop, index, editingShopId, setEditingShopId, editState, onU
             <input value={editState.editName} onChange={(e) => editState.setEditName(e.target.value)} style={smallInput} placeholder="店舗名" />
             <input value={editState.editKana} onChange={(e) => editState.setEditKana(e.target.value)} style={smallInput} placeholder="かな" />
           </div>
-          <select value={editState.editBusinessType} onChange={(e) => editState.setEditBusinessType(e.target.value)} style={smallInput}>
+<select value={editState.editBusinessType} onChange={(e) => editState.setEditBusinessType(e.target.value)} style={smallInput}>
             <option value="">-- 業種を選択 --</option>
-            {categories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+            {/* 🆕 最新の業種マスターを使用 */}
+            {INDUSTRY_OPTIONS.map(opt => (
+              <option key={opt} value={opt}>{opt}</option>
+            ))}
           </select>
-          <input value={editState.editEmail} onChange={(e) => editState.setEditEmail(e.target.value)} style={smallInput} placeholder="メールアドレス" />
+          
+                    <input value={editState.editEmail} onChange={(e) => editState.setEditEmail(e.target.value)} style={smallInput} placeholder="メールアドレス" />
           <input value={editState.editPhone} onChange={(e) => editState.setEditPhone(e.target.value)} style={smallInput} placeholder="電話番号" />
           <input value={editState.editPassword} onChange={(e) => editState.setEditPassword(e.target.value)} style={smallInput} placeholder="PW" />
           

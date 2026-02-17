@@ -1,10 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from "../../../supabaseClient";
+// ✅ 共通設定ファイルをインポート
+import { INDUSTRY_PRESETS } from '../../../constants/industryMaster';
+
 import { 
   ClipboardList, ArrowLeft, Save, CheckCircle2, 
   MapPin, Car, Building2, HeartPulse, MessageSquare, 
-  Eye, ToggleLeft, ToggleRight,
+  ToggleLeft, ToggleRight,
   User, Mail, Phone, GraduationCap, Stethoscope, Utensils,
   Scissors, Palette, Sparkles
 } from 'lucide-react';
@@ -15,42 +18,6 @@ const FormCustomizer = () => {
   const [message, setMessage] = useState('');
   const [themeColor, setThemeColor] = useState('#2563eb');
 
-  // 業種プリセットの定義
-  const industryPresets = {
-    visiting: {
-      label: "🏠 訪問美容・訪問サービス",
-      fields: ['name', 'furigana', 'phone', 'address', 'parking', 'building_type', 'care_notes']
-    },
-    beauty: {
-      label: "✂️ 美容室・ヘアサロン",
-      fields: ['name', 'furigana', 'phone', 'email', 'request_details']
-    },
-    nail: {
-      label: "💅 ネイル・アイラッシュ",
-      fields: ['name', 'furigana', 'phone', 'email', 'request_details']
-    },
-    esthetic: {
-      label: "💆 エステ・リラクゼーション",
-      fields: ['name', 'furigana', 'phone', 'email', 'symptoms', 'request_details']
-    },
-    clinic: {
-      label: "🏥 病院・クリニック・接骨院",
-      fields: ['name', 'furigana', 'phone', 'email', 'symptoms', 'request_details']
-    },
-    school: {
-      label: "🎓 教室・スクール・習い事",
-      fields: ['name', 'furigana', 'email', 'phone', 'symptoms']
-    },
-    event: {
-      label: "🏢 イベント・ビジネス・セミナー",
-      fields: ['name', 'email', 'company_name', 'request_details']
-    },
-    hospitality: {
-      label: "🍴 飲食・ホテル・おもてなし",
-      fields: ['name', 'phone', 'email', 'request_details']
-    }
-  };
-  
   const [formConfig, setFormConfig] = useState({
     name: { enabled: true, line_enabled: true, label: "お名前（漢字）", required: true },
     furigana: { enabled: false, line_enabled: false, label: "ふりがな", required: false },
@@ -89,17 +56,16 @@ const FormCustomizer = () => {
   const showMsg = (txt) => { setMessage(txt); setTimeout(() => setMessage(''), 3000); };
 
   const handleSave = async () => {
-    const { error } = await supabase.from('profiles').update({
-      form_config: formConfig
-    }).eq('id', shopId);
-
+    const { error } = await supabase.from('profiles').update({ form_config: formConfig }).eq('id', shopId);
     if (!error) showMsg('予約項目の設定を保存しました！');
     else alert('保存に失敗しました。');
   };
 
+  // ✅ 修正：大文字の INDUSTRY_PRESETS を正しく参照するように修正
   const applyPreset = (presetKey) => {
-    if (!presetKey) return;
-    const selectedFields = industryPresets[presetKey].fields;
+    if (!presetKey || !INDUSTRY_PRESETS[presetKey]) return;
+    
+    const selectedFields = INDUSTRY_PRESETS[presetKey].fields;
     const newConfig = { ...formConfig };
     
     Object.keys(newConfig).forEach(key => {
@@ -115,7 +81,7 @@ const FormCustomizer = () => {
     }
 
     setFormConfig(newConfig);
-    showMsg(`${industryPresets[presetKey].label}向けに最適化しました！`);
+    showMsg(`${INDUSTRY_PRESETS[presetKey].label}向けに最適化しました！`);
   };
 
   const toggleField = (key, type = 'normal') => {
@@ -175,19 +141,14 @@ const FormCustomizer = () => {
 
   return (
     <div style={containerStyle}>
-      {/* 🆕 修正：保存メッセージを最前面（zIndex: 2000）に表示 */}
       {message && (
         <div style={{ position: 'fixed', top: 20, left: '50%', transform: 'translateX(-50%)', width: '90%', maxWidth: '400px', padding: '15px', background: '#dcfce7', color: '#166534', borderRadius: '12px', zIndex: 2000, textAlign: 'center', fontWeight: 'bold', boxShadow: '0 10px 25px rgba(0,0,0,0.1)' }}>
           <CheckCircle2 size={20} style={{ verticalAlign: 'middle', marginRight: '8px' }} /> {message}
         </div>
       )}
 
-      {/* 🆕 修正：ダッシュボードへの戻るボタンを再配置 */}
       <div style={{ display: 'flex', justifyContent: 'flex-start', marginBottom: '30px' }}>
-        <button 
-          onClick={() => navigate(`/admin/${shopId}/dashboard`)} 
-          style={{ background: '#fff', border: '1px solid #e2e8f0', padding: '10px 20px', borderRadius: '30px', fontWeight: 'bold', color: '#64748b', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', boxShadow: '0 2px 4px rgba(0,0,0,0.05)' }}
-        >
+        <button onClick={() => navigate(`/admin/${shopId}/dashboard`)} style={{ background: '#fff', border: '1px solid #e2e8f0', padding: '10px 20px', borderRadius: '30px', fontWeight: 'bold', color: '#64748b', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', boxShadow: '0 2px 4px rgba(0,0,0,0.05)' }}>
           <ArrowLeft size={18} /> {isPC ? 'ダッシュボードへ戻る' : '戻る'}
         </button>
       </div>
@@ -202,7 +163,7 @@ const FormCustomizer = () => {
         </label>
         <select onChange={(e) => applyPreset(e.target.value)} style={{ ...inputStyle, background: '#fff', fontWeight: 'bold', color: themeColor }}>
           <option value="">業種を選択して自動設定...</option>
-          {Object.entries(industryPresets).map(([key, val]) => (
+          {Object.entries(INDUSTRY_PRESETS).map(([key, val]) => (
             <option key={key} value={key}>{val.label}</option>
           ))}
         </select>
@@ -228,11 +189,7 @@ const FormCustomizer = () => {
         <ConfigItem id="notes" icon={MessageSquare} title="自由備考欄" description="その他メッセージ。" />
       </section>
 
-      {/* 保存ボタン */}
-      <button 
-        onClick={handleSave} 
-        style={{ position: 'fixed', bottom: '24px', right: '24px', padding: '18px 40px', background: themeColor, color: '#fff', border: 'none', borderRadius: '50px', fontWeight: 'bold', boxShadow: `0 10px 25px ${themeColor}66`, zIndex: 1000, display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', fontSize: '1.1rem' }}
-      >
+      <button onClick={handleSave} style={{ position: 'fixed', bottom: '24px', right: '24px', padding: '18px 40px', background: themeColor, color: '#fff', border: 'none', borderRadius: '50px', fontWeight: 'bold', boxShadow: `0 10px 25px ${themeColor}66`, zIndex: 1000, display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', fontSize: '1.1rem' }}>
         <Save size={22} /> 設定を保存する 💾
       </button>
     </div>
