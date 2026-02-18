@@ -146,10 +146,10 @@ const { data: resData } = await supabase.from('reservations').select('start_time
     const interval = shop.slot_interval_min || 15;
 
 // --- ✅ 訪問移動時間を加味した合計拘束時間の計算 ---
-// ✅ 修正ポイント：メニュー時間 ＋ 準備時間(buffer) ＋ 移動時間をすべて合計する
+    // 施術時間 ＋ 準備時間(buffer) ＋ 移動時間(travelTimeMinutes) をすべて合計する
     const totalMinRequired = (totalSlotsNeeded * interval) + buffer + (travelTimeMinutes || 0);
     const potentialEndTime = new Date(targetDateTime.getTime() + totalMinRequired * 60 * 1000);
-    
+        
     const [closeH, closeM] = closeTime.split(':').map(Number);
     const closeDateTime = new Date(`${dateStr}T${String(closeH).padStart(2,'0')}:${String(closeM).padStart(2,'0')}:00`);
 
