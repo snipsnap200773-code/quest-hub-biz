@@ -4,6 +4,8 @@ import { useParams, Link, useNavigate, useLocation } from 'react-router-dom';
 import { supabase, supabaseAnon } from '../supabaseClient';
 // 💡 重要：LINEログイン（LIFF）を操作するためのSDK
 import liff from '@line/liff';
+// ✅ アイコンとボタン部品を追加
+import { MapPin, CheckCircle2, ChevronRight } from 'lucide-react';
 
 function ReservationForm() {
   const { shopId } = useParams();
@@ -32,8 +34,18 @@ function ReservationForm() {
   const [categories, setCategories] = useState([]);
   const [services, setServices] = useState([]);
   const [options, setOptions] = useState([]);
-  const [targetStaffName, setTargetStaffName] = useState(''); // 🆕 担当者名表示用
+  const [targetStaffName, setTargetStaffName] = useState(''); 
 
+  // ✅ 1. 訪問型とみなす業種リスト（BasicSettingsの選択肢と合わせる）
+const VISIT_KEYWORDS = ['訪問', '出張', '代行', 'デリバリー', '清掃'];
+
+  // ✅ 2. 新しいState
+  const [visitorZip, setVisitorZip] = useState(''); // 🆕 追加：郵便番号用
+  const [visitorAddress, setVisitorAddress] = useState('');
+  const [isAddressFixed, setIsAddressFixed] = useState(false);
+  const [isVisitService, setIsVisitService] = useState(false);
+
+  // --- 複数名予約用のState ---
   // --- 複数名予約用のState ---
   const [people, setPeople] = useState([]); 
   const [selectedServices, setSelectedServices] = useState([]); 
@@ -77,14 +89,25 @@ function ReservationForm() {
     setLoading(true);
     const shopRes = await supabase.from('profiles').select('*').eq('id', shopId).single();
     
-    if (shopRes.data) {
+if (shopRes.data) {
       setShop(shopRes.data);
+      
+      // ✅ 1. キーワードが含まれているか判定（キーワード方式）
+      const businessTypeName = shopRes.data.business_type || '';
+      const isVisit = VISIT_KEYWORDS.some(keyword => businessTypeName.includes(keyword));
+      
+      setIsVisitService(isVisit);
 
-      // ✅ 🆕 データベースから取得した liff_id を使って初期化を開始
+      // 来店型（isVisitがfalse）なら、最初から住所入力をスキップ（確定状態）にする
+      if (!isVisit) {
+        setIsAddressFixed(true);
+      }
+
+      // ✅ 2. LINEログイン（LIFF）の初期化（これは絶対に消さない！）
       if (shopRes.data.liff_id && (isLineSource || isLineApp)) {
         initLiff(shopRes.data.liff_id);
       }
-      
+            
       // ✅ 1. まずは初期値として本来の店名と説明文をセット
       setDisplayBranding({ 
         name: shopRes.data.business_name, 
@@ -130,7 +153,57 @@ function ReservationForm() {
         if (optRes.data) setOptions(optRes.data);
       }
     }
-    setLoading(false);
+setLoading(false);
+  };
+
+  // ✅ 追加：リピーター対応（LINEログイン後に名簿から前回の住所を自動セット）
+  useEffect(() => {
+    const fetchPreviousAddress = async () => {
+      // 訪問型サービス かつ LINEユーザーが判明している かつ 住所がまだ空 の場合
+      if (isVisitService && lineUser?.userId && !visitorAddress) {
+        const { data: cust } = await supabase
+          .from('customers')
+          .select('address')
+          .eq('shop_id', shopId)
+          .eq('line_user_id', lineUser.userId)
+          .maybeSingle();
+
+        if (cust?.address) {
+          console.log("🏠 前回の住所を自動セットしました:", cust.address);
+          setVisitorAddress(cust.address);
+          setIsAddressFixed(true); // 住所があれば最初からメニューを表示状態にする
+        }
+      }
+    };
+fetchPreviousAddress();
+  }, [lineUser, isVisitService, shopId]);
+
+  // 🆕 【ここに追加！】郵便番号から住所を自動取得する関数
+  const handleZipSearch = async () => {
+    // 1. 入力チェック（7桁あるか）
+    if (visitorZip.length < 7) {
+      alert("郵便番号を7桁で入力してください（ハイフンなし）");
+      return;
+    }
+
+    try {
+      // 2. 無料のAPI（zipcloud）に問い合わせ
+      const res = await fetch(`https://zipcloud.ibsnet.co.jp/api/search?zipcode=${visitorZip}`);
+      const data = await res.json();
+
+      if (data.results) {
+        // 3. 成功したら住所をセット
+        const { address1, address2, address3 } = data.results[0];
+        const fullAddress = `${address1}${address2}${address3}`;
+        setVisitorAddress(fullAddress);
+        console.log("📮 郵便番号から住所を取得しました:", fullAddress);
+      } else {
+        alert("住所が見つかりませんでした。正しい郵便番号を入力してください。");
+      }
+    } catch (err) {
+      console.error("❌ 郵便番号検索エラー:", err);
+      alert("一時的に住所検索が利用できません。手動で入力してください。");
+    }
   };
 
   // --- 複数名対応の計算ロジック（維持） ---
@@ -269,6 +342,8 @@ const handleNextStep = () => {
       }],
       totalSlotsNeeded, // 🆕 カレンダー側で終了時間の計算（△判定）に使用
       lineUser,
+      visitorZip,
+      visitorAddress, // ✅ 4. 次のページ（カレンダー）に住所を渡す
       customShopName: displayBranding.name,
       staffId: adminStaffId || staffIdFromUrl,
       fromView: fromView
@@ -313,8 +388,66 @@ const handleNextStep = () => {
       
       <div style={{ marginTop: '30px', marginBottom: '30px', borderBottom: '1px solid #eee', paddingBottom: '20px' }}>
         {/* ✅ 着せ替え後の店名を表示 */}
-        <h2 style={{ margin: '0 0 10px 0', fontSize: '1.4rem' }}>{displayBranding.name}</h2>
-        
+<h2 style={{ margin: '0 0 10px 0', fontSize: '1.4rem' }}>{displayBranding.name}</h2>
+
+        {/* ✅ 5. 訪問型の場合のみ、最上部に住所入力欄を表示 */}
+        {isVisitService && (
+          <div style={{ marginBottom: '25px', padding: '20px', background: isAddressFixed ? '#f8fafc' : '#fff', borderRadius: '16px', border: isAddressFixed ? '1px solid #e2e8f0' : `2px solid ${themeColor}`, boxShadow: '0 4px 12px rgba(0,0,0,0.08)' }}>
+            <h3 style={{ marginTop: 0, fontSize: '1rem', marginBottom: '15px', color: themeColor, display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <MapPin size={20} /> 1. 訪問先の住所を入力
+            </h3>
+{!isAddressFixed ? (
+              <>
+                <p style={{ fontSize: '0.8rem', color: '#64748b', marginBottom: '10px' }}>郵便番号を入力すると住所が自動入力されます。</p>
+
+                {/* 🆕 ここに郵便番号入力と「住所検索」ボタンを横並びで配置 */}
+                <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
+                  <input 
+                    type="tel" 
+                    value={visitorZip} 
+                    onChange={(e) => setVisitorZip(e.target.value.replace(/[^0-9]/g, '').slice(0, 7))} 
+                    placeholder="郵便番号(7桁)" 
+                    style={{ flex: 1, padding: '14px', borderRadius: '10px', border: '1px solid #ddd', fontSize: '1rem' }} 
+                  />
+                  <button 
+                    onClick={handleZipSearch} 
+                    type="button"
+                    style={{ padding: '0 20px', background: '#f1f5f9', border: '1px solid #cbd5e1', borderRadius: '10px', fontSize: '0.85rem', fontWeight: 'bold', cursor: 'pointer', color: '#475569' }}
+                  >
+                    住所検索
+                  </button>
+                </div>
+
+                {/* 住所入力欄（自動で文字が入る！） */}
+                <input 
+                  type="text" 
+                  value={visitorAddress} 
+                  onChange={(e) => setVisitorAddress(e.target.value)} 
+                  placeholder="市区町村・番地・建物名まで入力してください" 
+                  style={{ width: '100%', padding: '14px', borderRadius: '10px', border: '1px solid #ddd', fontSize: '1rem', marginBottom: '12px', boxSizing: 'border-box' }} 
+                />
+
+                <button 
+                  disabled={!visitorAddress} 
+                  onClick={() => setIsAddressFixed(true)} 
+                  style={{ width: '100%', padding: '14px', background: visitorAddress ? themeColor : '#cbd5e1', color: '#fff', border: 'none', borderRadius: '10px', fontWeight: 'bold', cursor: 'pointer' }}
+                >
+                  この場所で空き枠を探す
+                </button>
+              </>
+                            ) : (
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                  {/* 🆕 リピーター向けに「いつもの場所」感を出します */}
+                  <p style={{ fontSize: '0.75rem', color: themeColor, fontWeight: 'bold', marginBottom: '4px' }}>📍 訪問先（前回と同じ場所を表示中）</p>
+                  <div style={{ fontSize: '0.9rem', fontWeight: 'bold' }}>{visitorAddress}</div>
+                </div>
+                <button onClick={() => setIsAddressFixed(false)} style={{ background: 'none', border: `2px solid ${themeColor}`, color: themeColor, padding: '5px 15px', borderRadius: '20px', fontSize: '0.75rem', fontWeight: 'bold', cursor: 'pointer' }}>変更</button>
+              </div>
+            )}
+                      </div>
+        )}
+
         {lineUser && (
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '15px', padding: '10px', background: '#f0fdf4', borderRadius: '10px', border: '1px solid #bbf7d0' }}>
             <img src={lineUser.pictureUrl} style={{ width: '30px', height: '30px', borderRadius: '50%' }} alt="LINE" />

@@ -23,22 +23,24 @@ function TimeSelectionCalendar() {
   const [viewDate, setViewDate] = useState(new Date()); // 表示中の月
   const [selectedDate, setSelectedDate] = useState(new Date()); // 選択した日
   const [selectedTime, setSelectedTime] = useState(null); // 選択した時間
+// 🆕 追加：計算された移動時間を保持（分）
+  const [travelTimeMinutes, setTravelTimeMinutes] = useState(0);
+const visitorAddress = location.state?.visitorAddress; 
 
-  useEffect(() => { fetchInitialData(); }, [shopId, effectiveStaffId]);
-
+  // 🆕 1. 関数の入り口を復活させます
   const fetchInitialData = async () => {
     setLoading(true);
+
+    // 🆕 2. データベースからショップ情報を取得（これが無いと profile が使えません）
     const { data: profile } = await supabase.from('profiles').select('*').eq('id', shopId).single();
     if (!profile) { setLoading(false); return; }
     setShop(profile);
 
+    // 🆕 3. スタッフと予約情報の取得
     const { data: staffsData } = await supabase.from('staffs').select('*').eq('shop_id', shopId);
-    const staffs = staffsData || [];
-    setAllStaffs(staffs);
-
+    setAllStaffs(staffsData || []);
     if (effectiveStaffId) {
-      const found = staffs.find(s => s.id === effectiveStaffId);
-      setTargetStaff(found || null);
+      setTargetStaff(staffsData?.find(s => s.id === effectiveStaffId) || null);
     }
 
     let targetShopIds = [shopId];
@@ -46,12 +48,26 @@ function TimeSelectionCalendar() {
       const { data: siblingShops } = await supabase.from('profiles').select('id').eq('schedule_sync_id', profile.schedule_sync_id);
       if (siblingShops) targetShopIds = siblingShops.map(s => s.id);
     }
-
     const { data: resData } = await supabase.from('reservations').select('start_time, end_time, staff_id').in('shop_id', targetShopIds);
     setExistingReservations(resData || []);
-    setLoading(false);
-  };
 
+    // ✅ 4. シンプル版：ショップの設定値から移動時間を算出
+    if (profile.minutes_per_km) {
+      const speed = profile.minutes_per_km; 
+      const averageDistance = 7; 
+      const calculatedBuffer = averageDistance * speed; 
+      setTravelTimeMinutes(calculatedBuffer);
+      console.log(`🚗 移動バッファを確定: ${calculatedBuffer}分`);
+    } else {
+      setTravelTimeMinutes(30);
+    }
+    
+    setLoading(false);
+  }; // ✅ これで fetchInitialData を正しく閉じます
+
+  // 🆕 5. 関数を動かす命令（これも必要です）
+  useEffect(() => { fetchInitialData(); }, [shopId, effectiveStaffId]);
+  
   // --- ⚙️ 三土手さんの本家エンジン（完全継承） ---
   const checkIsRegularHoliday = (date) => {
     if (!shop?.business_hours?.regular_holidays) return false;
@@ -122,9 +138,9 @@ function TimeSelectionCalendar() {
     const buffer = shop.buffer_preparation_min || 0;
     const interval = shop.slot_interval_min || 15;
 
-    // --- 🆕 修正ポイント：終了時間の判定と変数の定義 ---
-    const totalMinRequired = (totalSlotsNeeded * interval);
-    // ループで使用するため、Dateオブジェクトとして定義し直します
+// --- ✅ 訪問移動時間を加味した合計拘束時間の計算 ---
+    // 施術時間 ＋ 移動時間（travelTimeMinutes）を合計して、次の予約を入れられるまでの時間を出す
+    const totalMinRequired = (totalSlotsNeeded * interval) + travelTimeMinutes;
     const potentialEndTime = new Date(targetDateTime.getTime() + totalMinRequired * 60 * 1000);
 
     const [closeH, closeM] = closeTime.split(':').map(Number);
@@ -150,14 +166,19 @@ function TimeSelectionCalendar() {
 
     let minRemaining = storeMax;
 
-    // --- 🆕 修正ポイント：153行目のループ ---
-    // potentialEndTime が定義されたので、ここでの ReferenceError は解消されます
+// --- ✅ 修正後：移動時間を考慮した重複チェック ---
     for (let t = targetDateTime.getTime(); t < potentialEndTime.getTime(); t += interval * 60 * 1000) {
+      // 🆕 ミリ秒単位の移動バッファを計算
+      const travelBufferMs = travelTimeMinutes * 60 * 1000;
+
       const globalCount = existingReservations.filter(res => {
         const resStart = new Date(res.start_time).getTime();
         const resEnd = new Date(res.end_time).getTime();
-        // 🆕 buffer を足さない判定（DBにバッファ込のend_timeが入っているため）
-        return t >= resStart && t < resEnd;
+        
+        // 🆕 既存予約の終了時間に移動時間を足して、その間も「埋まっている」とみなす
+        const blockedUntil = resEnd + travelBufferMs;
+        
+        return t >= resStart && t < blockedUntil;
       }).length;
 
       if (globalCount >= storeMax) return { status: 'booked', label: '×', remaining: 0 };
@@ -166,8 +187,13 @@ function TimeSelectionCalendar() {
       const anyStaffAvailable = activeStaffs.some(staff => {
         const staffCurrentLoad = existingReservations.filter(res => {
           if (res.staff_id !== staff.id) return false;
-          // 🆕 ここも同様に buffer を足さない
-          return t >= new Date(res.start_time).getTime() && t < new Date(res.end_time).getTime();
+          
+          const resStart = new Date(res.start_time).getTime();
+          const resEnd = new Date(res.end_time).getTime();
+          const blockedUntil = resEnd + travelBufferMs;
+
+          // 🆕 スタッフごとの判定にも移動バッファを適用
+          return t >= resStart && t < blockedUntil;
         }).length;
         return staffCurrentLoad < (staff.concurrent_capacity || 1);
       });

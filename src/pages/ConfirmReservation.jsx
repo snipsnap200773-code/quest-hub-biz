@@ -25,7 +25,8 @@ function ConfirmReservation() {
     lineUser, 
     customShopName,
     staffId,
-    fromView 
+    fromView,
+    visitorAddress
   } = location.state || {};
   
 const isAdminEntry = !!adminDate; 
@@ -33,13 +34,24 @@ const isAdminEntry = !!adminDate;
 
   const [shop, setShop] = useState(null);
 
+  
+
   // 🆕 一括管理用のStateに変更
-  const [customerData, setCustomerData] = useState({
-    name: '', furigana: '', email: '', phone: '', address: '', 
-    parking: '', building_type: '', care_notes: '', 
-    company_name: '', symptoms: '', request_details: '', notes: ''
+const [customerData, setCustomerData] = useState({
+    name: '', 
+    furigana: '', 
+    email: '', 
+    phone: '', 
+    address: visitorAddress || '', // 🆕 届いた住所があればそれをセット、なければ空
+    parking: '', 
+    building_type: '', 
+    care_notes: '', 
+    company_name: '', 
+    symptoms: '', 
+    request_details: '', 
+    notes: ''
   });
-  const [formConfig, setFormConfig] = useState(null); // 🆕 フォーム設定用
+    const [formConfig, setFormConfig] = useState(null); // 🆕 フォーム設定用
 
 // 🆕 46行目付近：fetchShop
   const fetchShop = async () => {
@@ -129,19 +141,19 @@ if (data) {
       if (cust) {
         console.log("✅ 過去の顧客データを反映:", cust.name);
         // 過去データがある場合は、LINE名よりもDBの登録名を優先して上書き
-        setCustomerData(prev => ({
+setCustomerData(prev => ({
           ...prev,
           name: cust.name || lineUser.displayName || '',
-          furigana: cust.furigana || '', // 🆕 追加
+          furigana: cust.furigana || '',
           phone: cust.phone || '',
           email: cust.email || '',
-          address: cust.address || '',
-          company_name: cust.company_name || '', // 🆕 追加
-          // 症状や詳細要望は予約ごとに変わる可能性があるため、あえて自動入力させない（またはさせる）か選べますが、一旦名簿から引き継ぐ設定にします
+          // 🆕 今回入力した住所（visitorAddress）があればそれを使い、なければDBの住所を使う
+          address: visitorAddress || cust.address || '', 
+          company_name: cust.company_name || '',
           symptoms: cust.symptoms || '', 
           request_details: cust.request_details || ''
         }));
-        setSelectedCustomerId(cust.id);
+                setSelectedCustomerId(cust.id);
       }
     };
     
@@ -301,14 +313,15 @@ if (data) {
         existingCust = data;
       }
 
-      // ✅ 2. 名簿データの保存・更新 (住所なども保存対象に)
+// ✅ 2. 名簿データの保存・更新
       const customerPayload = {
         shop_id: shopId,
         name: customerData.name,
         furigana: customerData.furigana || null,
         phone: customerData.phone || null,
         email: customerData.email || null,
-        address: customerData.address || null, // 🆕 住所を名簿に反映
+        zip_code: visitorZip || null, // 🆕 郵便番号を名簿に保存
+        address: customerData.address || null,
         company_name: customerData.company_name || null,
         line_user_id: lineUser?.userId || null,
         total_visits: (existingCust?.total_visits || 0) + 1,
@@ -324,11 +337,7 @@ if (data) {
         finalCustomerId = newCust.id;
       }
 
-      // ✅ 3. 予約データの挿入 (追加情報を visit_info として集約)
-      const menuLabel = people.length > 1
-        ? people.map((p, i) => `${i + 1}人目: ${p.fullName}`).join(' / ')
-        : (people[0]?.fullName || 'メニューなし');
-
+      // ✅ 3. 予約データの挿入
       const { error: dbError } = await supabase.from('reservations').insert([
         {
           shop_id: shopId,
@@ -338,9 +347,9 @@ if (data) {
           customer_name: customerData.name,
           customer_phone: customerData.phone || '---',
           customer_email: customerData.email || 'admin@example.com',
+          zip_code: visitorZip || null, // 🆕 予約データにも郵便番号を紐付け
           start_at: startDateTime.toISOString(),
-          end_at: endDateTime.toISOString(),
-          start_time: startDateTime.toISOString(),
+          end_at: endDateTime.toISOString(),          start_time: startDateTime.toISOString(),
           end_time: endDateTime.toISOString(), 
           total_slots: totalSlotsNeeded,
           res_type: 'normal',

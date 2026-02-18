@@ -57,8 +57,9 @@ const BasicSettings = () => {
       setBusinessType(data.business_type || '');
       setPhone(data.phone || '');
       setEmailContact(data.email_contact || '');
+// ✅ 住所に加え、拠点住所と移動スピードも取得する
       setAddress(data.address || '');
-      setBaseAddress(data.base_address || data.address || '');
+      setBaseAddress(data.base_address || data.address || ''); // 拠点住所が空なら店舗住所を初期値に
       setMinutesPerKm(data.minutes_per_km || 3);
       setDescription(data.description || '');
       setIntroText(data.intro_text || '');
@@ -314,7 +315,7 @@ const { error } = await supabase.from('profiles').update({
             </p>
           </div>
         </div>
-        
+
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px', marginBottom: '20px' }}>
           <div>
             <label style={labelStyle}><Phone size={14} /> 電話番号</label>
