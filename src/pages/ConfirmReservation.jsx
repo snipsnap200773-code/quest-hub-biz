@@ -13,6 +13,7 @@ function ConfirmReservation() {
   const [selectedCustomerId, setSelectedCustomerId] = useState(null);
   const [selectedIndex, setSelectedIndex] = useState(-1);
   const [staffName, setStaffName] = useState('');
+  const [customAnswers, setCustomAnswers] = useState({});
 
   const { 
     people, 
@@ -51,11 +52,22 @@ const isAdminEntry = !!adminDate;
         return;
       }
 
-      if (data) {
+if (data) {
         console.log("✅ クエストデータ取得成功:", data.business_name);
         setShop(data);
-        setFormConfig(data.form_config || {});
-      } else {
+        const config = data.form_config || {};
+        setFormConfig(config);
+        
+        // 🆕 カスタム質問があれば、回答Stateの初期値をセット
+        if (config.custom_questions) {
+          const initialAnswers = {};
+          config.custom_questions.forEach(q => {
+            initialAnswers[q.id] = ''; // 最初は未選択
+          });
+          setCustomAnswers(initialAnswers);
+        }
+      }
+            else {
         console.warn("⚠️ データが空です。IDが間違っている可能性があります。");
       }
     } catch (err) {
@@ -339,18 +351,20 @@ const isAdminEntry = !!adminDate;
             people: people,
             applied_shop_name: customShopName || shop.business_name,
             // 🆕 訪問特化データや備考をここに集約して保存
-            visit_info: {
+visit_info: {
               address: customerData.address,
               parking: customerData.parking,
               building_type: customerData.building_type,
               care_notes: customerData.care_notes,
-              furigana: customerData.furigana, // 🆕 追加
-              company_name: customerData.company_name, // 🆕 追加
-              symptoms: customerData.symptoms, // 🆕 追加
-              request_details: customerData.request_details, // 🆕 追加
-              notes: customerData.notes
+              furigana: customerData.furigana,
+              company_name: customerData.company_name,
+              symptoms: customerData.symptoms,
+              request_details: customerData.request_details,
+              notes: customerData.notes,
+              // 🆕 カスタム質問の回答をここに追加！
+              custom_answers: customAnswers 
             }
-          }
+                    }
         }
       ]);
       
@@ -417,7 +431,7 @@ const isAdminEntry = !!adminDate;
   const displayDate = (adminDate || date).replace(/-/g, '/');
   const displayTime = adminTime || time;
 
-  return (
+return (
     <div style={{ padding: '20px', maxWidth: '500px', margin: '0 auto', fontFamily: 'sans-serif', color: '#333' }}>
       <button onClick={() => navigate(-1)} style={{ marginBottom: '20px', border: 'none', background: 'none', color: '#666', cursor: 'pointer', fontWeight: 'bold' }}>← 戻る</button>
       
@@ -433,17 +447,16 @@ const isAdminEntry = !!adminDate;
       )}
 
       <div style={{ background: '#f8fafc', padding: '20px', borderRadius: '15px', marginBottom: '25px', border: '1px solid #e2e8f0' }}>
-  <p style={{ margin: '0 0 12px 0', fontSize: '1.1rem', fontWeight: 'bold', color: themeColor }}>
-    🏨 {customShopName || shop.business_name}
-  </p>
-  <p style={{ margin: '0 0 12px 0' }}>📅 <b>日時：</b> {displayDate} {displayTime} 〜</p>
-  
-  {/* 🆕 ここに担当者名を追加！ */}
-  {staffName && (
-    <p style={{ margin: '0 0 12px 0' }}>👤 <b>担当：</b> {staffName}</p>
-  )}
+        <p style={{ margin: '0 0 12px 0', fontSize: '1.1rem', fontWeight: 'bold', color: themeColor }}>
+          🏨 {customShopName || shop.business_name}
+        </p>
+        <p style={{ margin: '0 0 12px 0' }}>📅 <b>日時：</b> {displayDate} {displayTime} 〜</p>
+        
+        {staffName && (
+          <p style={{ margin: '0 0 12px 0' }}>👤 <b>担当：</b> {staffName}</p>
+        )}
 
-  <p style={{ margin: '0 0 8px 0' }}>📋 <b>選択メニュー：</b></p>
+        <p style={{ margin: '0 0 8px 0' }}>📋 <b>選択メニュー：</b></p>
         <div style={{ background: '#fff', padding: '10px', borderRadius: '8px', border: '1px solid #eee', fontSize: '0.85rem' }}>
           {people && people.map((person, idx) => (
             <div key={idx} style={{ marginBottom: idx < people.length - 1 ? '10px' : 0, paddingBottom: idx < people.length - 1 ? '10px' : 0, borderBottom: idx < people.length - 1 ? '1px dashed #eee' : 'none' }}>
@@ -456,98 +469,168 @@ const isAdminEntry = !!adminDate;
         </div>
       </div>
 
-{/* 🆕 3. 表示部分（JSX）の動的化 */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+        {/* --- 1. 基本項目 & 業種別項目のループ --- */}
         {formConfig && Object.entries(formConfig).map(([key, config]) => {
-          // 🆕 判定ロジック：LINE経由かWeb経由かで表示スイッチを切り替える
           const isEnabled = lineUser ? config.line_enabled : config.enabled;
-
-          // 店主がその入り口に対して「表示」をオフにしている、または管理者ねじ込みかつ名前以外の場合はスキップ
+          
+          // 表示しない条件
           if (!isEnabled) return null;
           if (isAdminEntry && key !== 'name') return null;
+          
+          // ⚠️ ふりがな と 備考欄 はこのループ内では直接描画しない（位置を固定するため）
+          if (key === 'furigana' || key === 'notes') return null;
 
           return (
-            <div key={key} style={{ position: 'relative' }}>
-              <label style={{ fontSize: '0.8rem', fontWeight: 'bold', display: 'block', marginBottom: '8px' }}>
-                {config.label} {config.required && <span style={{ color: '#ef4444' }}>*</span>}
-              </label>
+            <React.Fragment key={key}>
+              {/* 各入力項目の div */}
+              <div style={{ position: 'relative' }}>
+                <label style={{ fontSize: '0.8rem', fontWeight: 'bold', display: 'block', marginBottom: '8px' }}>
+                  {config.label} {config.required && <span style={{ color: '#ef4444' }}>*</span>}
+                </label>
 
-              {/* 1. お名前（検索候補機能付き） */}
-              {key === 'name' ? (
-                <>
-<input 
-  name="name"
-  type="text" 
-  autoComplete="off" // 🆕 ブラウザの余計な推測を止める
-  value={customerData.name} 
-  onChange={handleInputChange} 
-  onKeyDown={handleKeyDown}
-  placeholder={`${config.label}を入力`} 
-  style={inputStyle} 
-/>
-                  {isAdminEntry && suggestedCustomers.length > 0 && (
-                    <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: '#fff', boxShadow: '0 10px 25px rgba(0,0,0,0.1)', borderRadius: '10px', zIndex: 100, border: '1px solid #eee', overflow: 'hidden' }}>
-                      {suggestedCustomers.map((c, index) => (
-                        <div 
-                          key={c.id} 
-                          onClick={() => handleSelectCustomer(c)} 
-                          style={{ 
-                            padding: '12px', 
-                            borderBottom: '1px solid #f8fafc', 
-                            cursor: 'pointer', 
-                            fontSize: '0.9rem',
-                            background: index === selectedIndex ? `${themeColor}15` : 'transparent'
-                          }}
-                        >
-                          <b>{c.name} 様</b> <span style={{ color: '#94a3b8', fontSize: '0.75rem' }}>({c.phone || '電話なし'})</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </>
-              ) 
-              // 2. 駐車場の有無（選択式）
-              : key === 'parking' ? (
-                <select name={key} value={customerData[key]} onChange={handleInputChange} style={inputStyle} required={config.required}>
-                  <option value="">選択してください</option>
-                  <option value="あり">あり</option>
-                  <option value="なし">なし</option>
-                </select>
-              ) 
-// 3. 備考・介助状況・症状・詳細要望（複数行入力）
-              : ['notes', 'care_notes', 'symptoms', 'request_details'].includes(key) ? (
-                <textarea 
-                  name={key} 
-                  value={customerData[key]} 
-                  onChange={handleInputChange} 
-                  style={{ ...inputStyle, minHeight: '80px', resize: 'none' }} 
-                  placeholder={`${config.label}を入力`}
-                  required={config.required} 
-                />
-              )
-                            // 4. その他一般（メール、電話、住所、建物の種類など）
-              : (
-                <input 
-                  name={key}
-                  type={key === 'email' ? 'email' : key === 'phone' ? 'tel' : 'text'} 
-                  value={customerData[key]} 
-                  onChange={handleInputChange} 
-                  style={inputStyle} 
-                  placeholder={`${config.label}を入力`}
-                  required={config.required} 
-                />
+                {key === 'name' ? (
+                  <>
+                    <input 
+                      name="name"
+                      type="text" 
+                      autoComplete="off"
+                      value={customerData.name} 
+                      onChange={handleInputChange} 
+                      onKeyDown={handleKeyDown}
+                      placeholder={`${config.label}を入力`} 
+                      style={inputStyle} 
+                    />
+                    {isAdminEntry && suggestedCustomers.length > 0 && (
+                      <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: '#fff', boxShadow: '0 10px 25px rgba(0,0,0,0.1)', borderRadius: '10px', zIndex: 100, border: '1px solid #eee', overflow: 'hidden' }}>
+                        {suggestedCustomers.map((c, index) => (
+                          <div 
+                            key={c.id} 
+                            onClick={() => handleSelectCustomer(c)} 
+                            style={{ 
+                              padding: '12px', 
+                              borderBottom: '1px solid #f8fafc', 
+                              cursor: 'pointer', 
+                              fontSize: '0.9rem',
+                              background: index === selectedIndex ? `${themeColor}15` : 'transparent'
+                            }}
+                          >
+                            <b>{c.name} 様</b> <span style={{ color: '#94a3b8', fontSize: '0.75rem' }}>({c.phone || '電話なし'})</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                ) : key === 'parking' ? (
+                  <select name={key} value={customerData[key]} onChange={handleInputChange} style={inputStyle} required={config.required}>
+                    <option value="">選択してください</option>
+                    <option value="あり">あり</option>
+                    <option value="なし">なし</option>
+                  </select>
+                ) : ['care_notes', 'symptoms', 'request_details'].includes(key) ? (
+                  <textarea 
+                    name={key} 
+                    value={customerData[key]} 
+                    onChange={handleInputChange} 
+                    style={{ ...inputStyle, minHeight: '80px', resize: 'none' }} 
+                    placeholder={`${config.label}を入力`}
+                    required={config.required} 
+                  />
+                ) : (
+                  <input 
+                    name={key}
+                    type={key === 'email' ? 'email' : key === 'phone' ? 'tel' : 'text'} 
+                    value={customerData[key]} 
+                    onChange={handleInputChange} 
+                    style={inputStyle} 
+                    placeholder={`${config.label}を入力`}
+                    required={config.required} 
+                  />
+                )}
+              </div>
+
+              {/* 🏆 お名前の直後に強制的に「ふりがな」を挿入 */}
+              {key === 'name' && formConfig.furigana && (lineUser ? formConfig.furigana.line_enabled : formConfig.furigana.enabled) && (
+                <div style={{ marginTop: '20px' }}>
+                  <label style={{ fontSize: '0.8rem', fontWeight: 'bold', display: 'block', marginBottom: '8px' }}>
+                    {formConfig.furigana.label} {formConfig.furigana.required && <span style={{ color: '#ef4444' }}>*</span>}
+                  </label>
+                  <input 
+                    name="furigana"
+                    type="text" 
+                    value={customerData.furigana} 
+                    onChange={handleInputChange} 
+                    style={inputStyle} 
+                    placeholder={`${formConfig.furigana.label}を入力`}
+                    required={formConfig.furigana.required} 
+                  />
+                </div>
               )}
+            </React.Fragment>
+          );
+})}
+
+        {/* 🆕 【新設】カスタム質問（ラジオボタン）の表示エリア */}
+        {formConfig?.custom_questions?.map((q) => {
+          const isEnabled = lineUser ? q.line_enabled : q.enabled;
+          if (!isEnabled || isAdminEntry) return null; // 管理者ねじ込み時は表示しない
+
+          return (
+            <div key={q.id} style={{ marginBottom: '20px', padding: '15px', background: '#fff', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
+              <label style={{ fontSize: '0.85rem', fontWeight: 'bold', display: 'block', marginBottom: '12px', color: '#1e293b' }}>
+                {q.label} {q.required && <span style={{ color: '#ef4444' }}>*</span>}
+              </label>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
+                {q.options.split(',').map((opt) => (
+                  <label key={opt} style={{ 
+                    flex: '1', minWidth: '100px', padding: '10px', borderRadius: '10px', border: '2px solid',
+                    borderColor: customAnswers[q.id] === opt ? themeColor : '#e2e8f0',
+                    background: customAnswers[q.id] === opt ? `${themeColor}05` : '#fff',
+                    textAlign: 'center', cursor: 'pointer', fontSize: '0.9rem', transition: '0.2s'
+                  }}>
+                    <input 
+                      type="radio" 
+                      name={q.id} 
+                      value={opt} 
+                      checked={customAnswers[q.id] === opt}
+                      onChange={(e) => setCustomAnswers({ ...customAnswers, [q.id]: e.target.value })}
+                      style={{ display: 'none' }} 
+                    />
+                    <span style={{ color: customAnswers[q.id] === opt ? themeColor : '#64748b', fontWeight: customAnswers[q.id] === opt ? 'bold' : 'normal' }}>
+                      {opt}
+                    </span>
+                  </label>
+                ))}
+              </div>
             </div>
           );
         })}
+
+        {/* --- 2. 備考欄を一番最後に固定 --- */}
+                {!isAdminEntry && formConfig.notes && (lineUser ? formConfig.notes.line_enabled : formConfig.notes.enabled) && (
+          <div style={{ marginTop: '10px' }}>
+            <label style={{ fontSize: '0.8rem', fontWeight: 'bold', display: 'block', marginBottom: '8px' }}>
+              {formConfig.notes.label} {formConfig.notes.required && <span style={{ color: '#ef4444' }}>*</span>}
+            </label>
+            <textarea 
+              name="notes" 
+              value={customerData.notes} 
+              onChange={handleInputChange} 
+              style={{ ...inputStyle, minHeight: '100px', resize: 'none' }} 
+              placeholder={`${formConfig.notes.label}があれば入力してください`}
+              required={formConfig.notes.required} 
+            />
+          </div>
+        )}
 
         <button 
           onClick={handleReserve} 
           disabled={isSubmitting} 
           style={{ 
-            marginTop: '10px', padding: '18px', 
+            marginTop: '20px', padding: '18px', 
             background: isSubmitting ? '#94a3b8' : (isAdminEntry ? '#e11d48' : themeColor), 
-            color: '#fff', border: 'none', borderRadius: '12px', fontWeight: 'bold', fontSize: '1.1rem', cursor: 'pointer' 
+            color: '#fff', border: 'none', borderRadius: '12px', fontWeight: 'bold', fontSize: '1.1rem', cursor: 'pointer',
+            boxShadow: `0 4px 12px ${themeColor}33`
           }}
         >
           {isSubmitting ? '処理中...' : (isAdminEntry ? '🚀 ねじ込んで名簿登録' : '予約を確定する')}

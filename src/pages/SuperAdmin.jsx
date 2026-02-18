@@ -422,12 +422,12 @@ function ShopCard({ shop, index, editingShopId, setEditingShopId, editState, onU
             <input value={editState.editKana} onChange={(e) => editState.setEditKana(e.target.value)} style={smallInput} placeholder="かな" />
           </div>
 <select value={editState.editBusinessType} onChange={(e) => editState.setEditBusinessType(e.target.value)} style={smallInput}>
-            <option value="">-- 業種を選択 --</option>
-            {/* 🆕 最新の業種マスターを使用 */}
-            {INDUSTRY_OPTIONS.map(opt => (
-              <option key={opt} value={opt}>{opt}</option>
-            ))}
-          </select>
+  <option value="">-- 業種を選択 --</option>
+  {/* ✅ INDUSTRY_LABELS に修正 */}
+  {INDUSTRY_LABELS.map(opt => (
+    <option key={opt} value={opt}>{opt}</option>
+  ))}
+</select>
           
                     <input value={editState.editEmail} onChange={(e) => editState.setEditEmail(e.target.value)} style={smallInput} placeholder="メールアドレス" />
           <input value={editState.editPhone} onChange={(e) => editState.setEditPhone(e.target.value)} style={smallInput} placeholder="電話番号" />

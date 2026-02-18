@@ -34,6 +34,8 @@ const BasicSettings = () => {
   const [phone, setPhone] = useState('');
   const [emailContact, setEmailContact] = useState('');
   const [address, setAddress] = useState('');
+  const [baseAddress, setBaseAddress] = useState('');
+  const [minutesPerKm, setMinutesPerKm] = useState(3);
   const [description, setDescription] = useState('');
   const [introText, setIntroText] = useState('');
   const [notes, setNotes] = useState('');
@@ -56,6 +58,8 @@ const BasicSettings = () => {
       setPhone(data.phone || '');
       setEmailContact(data.email_contact || '');
       setAddress(data.address || '');
+      setBaseAddress(data.base_address || data.address || '');
+      setMinutesPerKm(data.minutes_per_km || 3);
       setDescription(data.description || '');
       setIntroText(data.intro_text || '');
       setNotes(data.notes || '');
@@ -111,11 +115,14 @@ const BasicSettings = () => {
   
   // --- 保存処理 ---
   const handleSave = async () => {
-    const { error } = await supabase.from('profiles').update({
+const { error } = await supabase.from('profiles').update({
       business_name: businessName, business_name_kana: businessNameKana,
       owner_name: ownerName, owner_name_kana: ownerNameKana,
       business_type: businessType, phone, email_contact: emailContact, address,
-      description, intro_text: introText, notes, image_url: imageUrl, official_url: officialUrl
+      description, intro_text: introText, notes, image_url: imageUrl, official_url: officialUrl,
+      // 🆕 保存対象に追加
+      base_address: baseAddress,
+      minutes_per_km: minutesPerKm
     }).eq('id', shopId);
 
     if (!error) showMsg('店舗プロフィールを保存しました！');
@@ -269,6 +276,43 @@ const BasicSettings = () => {
         <div style={{ marginBottom: '20px' }}>
           <label style={labelStyle}><MapPin size={14} /> 住所</label>
           <input value={address} onChange={(e) => setAddress(e.target.value)} style={inputStyle} placeholder="店舗の所在地" />
+        </div>
+        
+        {/* 🆕 訪問サービス専用設定セクション */}
+        <div style={{ marginTop: '30px', padding: '20px', background: '#f0f9ff', borderRadius: '16px', border: '1px solid #bae6fd' }}>
+          <h4 style={{ marginTop: 0, fontSize: '0.9rem', color: '#0369a1', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <MapPin size={18} /> 訪問サービス・移動時間設定
+          </h4>
+          <p style={{ fontSize: '0.75rem', color: '#0c4a6e', marginBottom: '15px' }}>
+            ※訪問先までの移動時間を自動計算するために使用します。
+          </p>
+
+          <div style={{ marginBottom: '15px' }}>
+            <label style={labelStyle}>出発・帰還の拠点住所</label>
+            <input 
+              value={baseAddress} 
+              onChange={(e) => setBaseAddress(e.target.value)} 
+              style={inputStyle} 
+              placeholder="事務所や自宅の住所" 
+            />
+          </div>
+
+          <div>
+            <label style={labelStyle}>移動スピード目安</label>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <span style={{ fontSize: '0.85rem' }}>1km あたり</span>
+              <input 
+                type="number" 
+                value={minutesPerKm} 
+                onChange={(e) => setMinutesPerKm(e.target.value)} 
+                style={{ ...inputStyle, width: '80px', textAlign: 'center' }} 
+              />
+              <span style={{ fontSize: '0.85rem' }}>分で移動</span>
+            </div>
+            <p style={{ fontSize: '0.7rem', color: '#64748b', marginTop: '5px' }}>
+              （例：車なら3分、自転車なら5分程度が目安です）
+            </p>
+          </div>
         </div>
         
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px', marginBottom: '20px' }}>
