@@ -26,6 +26,7 @@ function ConfirmReservation() {
     customShopName,
     staffId,
     fromView,
+    visitorZip,
     visitorAddress
   } = location.state || {};
   
