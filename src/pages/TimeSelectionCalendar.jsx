@@ -48,22 +48,29 @@ const visitorAddress = location.state?.visitorAddress;
       const { data: siblingShops } = await supabase.from('profiles').select('id').eq('schedule_sync_id', profile.schedule_sync_id);
       if (siblingShops) targetShopIds = siblingShops.map(s => s.id);
     }
-    const { data: resData } = await supabase.from('reservations').select('start_time, end_time, staff_id').in('shop_id', targetShopIds);
-    setExistingReservations(resData || []);
+const { data: resData } = await supabase.from('reservations').select('start_time, end_time, staff_id').in('shop_id', targetShopIds);
+      setExistingReservations(resData || []);
 
-    // ✅ 4. シンプル版：ショップの設定値から移動時間を算出
-    if (profile.minutes_per_km) {
-      const speed = profile.minutes_per_km; 
-      const averageDistance = 7; 
-      const calculatedBuffer = averageDistance * speed; 
-      setTravelTimeMinutes(calculatedBuffer);
-      console.log(`🚗 移動バッファを確定: ${calculatedBuffer}分`);
-    } else {
-      setTravelTimeMinutes(30);
-    }
-    
-    setLoading(false);
-  }; // ✅ これで fetchInitialData を正しく閉じます
+      // ✅ 4. 業種キーワードによる自動判定（ReservationForm.jsx からの移植）
+      const VISIT_KEYWORDS = ['訪問', '出張', '代行', 'デリバリー', '清掃'];
+      const businessTypeName = profile.business_type || '';
+      const isVisit = VISIT_KEYWORDS.some(keyword => businessTypeName.includes(keyword));
+
+      if (isVisit && profile.minutes_per_km) {
+        // 🚗 訪問型：キーワードに合致し、かつ設定値がある場合
+        const speed = profile.minutes_per_km; 
+        const averageDistance = 7; 
+        const calculatedBuffer = averageDistance * speed; 
+        setTravelTimeMinutes(calculatedBuffer);
+        console.log(`🚗 訪問予約を検知（業種：${businessTypeName}）: バッファ ${calculatedBuffer}分`);
+      } else {
+        // ✂️ 来店型：キーワードに合致しない（SnipSnapなど）
+        setTravelTimeMinutes(0);
+        console.log(`✂️ 来店予約を検知（業種：${businessTypeName}）: 移動バッファは0分です`);
+      }
+      
+      setLoading(false);
+    };
 
   // 🆕 5. 関数を動かす命令（これも必要です）
   useEffect(() => { fetchInitialData(); }, [shopId, effectiveStaffId]);
@@ -139,10 +146,10 @@ const visitorAddress = location.state?.visitorAddress;
     const interval = shop.slot_interval_min || 15;
 
 // --- ✅ 訪問移動時間を加味した合計拘束時間の計算 ---
-    // 施術時間 ＋ 移動時間（travelTimeMinutes）を合計して、次の予約を入れられるまでの時間を出す
-    const totalMinRequired = (totalSlotsNeeded * interval) + travelTimeMinutes;
+// ✅ 修正ポイント：メニュー時間 ＋ 準備時間(buffer) ＋ 移動時間をすべて合計する
+    const totalMinRequired = (totalSlotsNeeded * interval) + buffer + (travelTimeMinutes || 0);
     const potentialEndTime = new Date(targetDateTime.getTime() + totalMinRequired * 60 * 1000);
-
+    
     const [closeH, closeM] = closeTime.split(':').map(Number);
     const closeDateTime = new Date(`${dateStr}T${String(closeH).padStart(2,'0')}:${String(closeM).padStart(2,'0')}:00`);
 
@@ -167,21 +174,21 @@ const visitorAddress = location.state?.visitorAddress;
     let minRemaining = storeMax;
 
 // --- ✅ 修正後：移動時間を考慮した重複チェック ---
-    for (let t = targetDateTime.getTime(); t < potentialEndTime.getTime(); t += interval * 60 * 1000) {
-      // 🆕 ミリ秒単位の移動バッファを計算
-      const travelBufferMs = travelTimeMinutes * 60 * 1000;
-
-      const globalCount = existingReservations.filter(res => {
-        const resStart = new Date(res.start_time).getTime();
-        const resEnd = new Date(res.end_time).getTime();
+      for (let t = targetDateTime.getTime(); t < potentialEndTime.getTime(); t += interval * 60 * 1000) {
+        // 🆕 移動時間をミリ秒に変換。0分のときはバリアなし。
+        const travelBufferMs = (travelTimeMinutes || 0) * 60 * 1000;
+  
+        const globalCount = existingReservations.filter(res => {
+          const resStart = new Date(res.start_time).getTime();
+          const resEnd = new Date(res.end_time).getTime();
+          
+          // 🆕 訪問型なら「終了後＋移動時間」まで埋める。来店型なら「終了時間」まで。
+          const blockedUntil = resEnd + travelBufferMs;
+          
+          return t >= resStart && t < blockedUntil;
+        }).length;
         
-        // 🆕 既存予約の終了時間に移動時間を足して、その間も「埋まっている」とみなす
-        const blockedUntil = resEnd + travelBufferMs;
-        
-        return t >= resStart && t < blockedUntil;
-      }).length;
-
-      if (globalCount >= storeMax) return { status: 'booked', label: '×', remaining: 0 };
+        if (globalCount >= storeMax) return { status: 'booked', label: '×', remaining: 0 };
       minRemaining = Math.min(minRemaining, storeMax - globalCount);
 
       const anyStaffAvailable = activeStaffs.some(staff => {

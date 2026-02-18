@@ -90,31 +90,27 @@ if (data) {
   };
 
   // 🆕 修正：fetchStaffName をここに定義します！
-  const fetchStaffName = async () => {
+const fetchStaffName = async () => {
     try {
       if (staffId) {
-        console.log("🔍 スタッフデータ取得開始... staffId:", staffId);
-        const { data, error } = await supabase
-          .from('staffs')
-          .select('name')
-          .eq('id', staffId)
-          .single();
-          
-        if (error) {
-          console.error("❌ スタッフ取得エラー:", error.message);
-          return;
-        }
-
-        if (data) {
-          console.log("✅ スタッフ名取得成功:", data.name);
-          setStaffName(data.name);
+        // 1. 指名（staffId）がある場合はその人を優先
+        const { data } = await supabase.from('staffs').select('name').eq('id', staffId).single();
+        if (data) setStaffName(data.name);
+      } else {
+        // 🆕 2. 指名がない場合、店舗の全スタッフを確認
+        const { data: staffs } = await supabase.from('staffs').select('name').eq('shop_id', shopId);
+        
+        if (staffs && staffs.length === 1) {
+          // 🏆 スタッフが1人しかいないなら、その人を自動的に担当者にセット
+          console.log("👤 1人営業のため担当者を自動設定:", staffs[0].name);
+          setStaffName(staffs[0].name);
         }
       }
     } catch (err) {
-      console.error("🔥 スタッフ取得通信エラー:", err);
+      console.error("🔥 スタッフ取得エラー:", err);
     }
   };
-  
+
   // 🆕 LINE連携チェック ＋ 店舗データ取得を一元化
   useEffect(() => {
 // 1. LINEユーザー情報から顧客を特定する関数
@@ -267,13 +263,13 @@ setCustomerData(prev => ({
       const targetTime = adminTime || time;
       const startDateTime = new Date(`${targetDate}T${targetTime}:00`);
       
-      const interval = shop.slot_interval_min || 15;
-      const buffer = shop.buffer_preparation_min || 0;
-      
-      // 🆕 施術時間 + 準備バッファ + 算出した移動時間（travelTimeMinutes）を合計
-      const totalMinutes = (totalSlotsNeeded * interval) + buffer + (travelTimeMinutes || 0);
-      const endDateTime = new Date(startDateTime.getTime() + totalMinutes * 60000);
-
+// 🆕 日時と終了バッファの計算（準備時間を確実に含める）
+const interval = shop.slot_interval_min || 15;
+    const buffer = shop.buffer_preparation_min || 0;
+    // ✅ 修正：メニュー時間 ＋ 準備時間 ＋ 移動時間をすべて足して終了時刻を決定する
+    const totalMinutes = (totalSlotsNeeded * interval) + buffer + (travelTimeMinutes || 0);
+    const endDateTime = new Date(startDateTime.getTime() + totalMinutes * 60000);
+          
       const cancelToken = crypto.randomUUID();
       const cancelUrl = `${window.location.origin}/cancel?token=${cancelToken}`;
 
@@ -363,7 +359,7 @@ setCustomerData(prev => ({
           }
         }
       ]);
-      
+
       if (dbError) throw dbError;
 
       // 通知の送信
