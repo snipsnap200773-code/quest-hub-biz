@@ -112,9 +112,11 @@ function CancelReservation() {
   }
 
   if (view === 'confirm' && reservation) {
-    const d = new Date(reservation.start_at);
-    const dateStr = `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日 ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-    return (
+    // 🆕 保存名（start_time）に合わせて修正。念のため古い形式（start_at）も予備でチェック
+    const rawDate = reservation.start_time || reservation.start_at;
+    const d = new Date(rawDate);
+    
+    const dateStr = `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日 ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;    return (
       <div style={containerStyle}>
         <h1 style={{ color: '#ff7b7b', fontSize: '20px' }}>予約キャンセル</h1>
         <p>以下のご予約をキャンセルしますか？</p>
