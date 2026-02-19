@@ -215,8 +215,6 @@ const ScheduleSettings = () => {
           <label style={{ fontWeight: 'bold', display: 'block', marginBottom: '10px', fontSize: '0.85rem', color: '#334155' }}>直近の予約制限（何時間前まで受付可能か）</label>
           <select value={minLeadTimeHours} onChange={(e) => setMinLeadTimeHours(parseInt(e.target.value))} style={selectStyle}>
             <option value={0}>当日OK</option>
-            <option value={2}>2時間先NG</option>
-            <option value={3}>3時間先NG</option>
             <option value={24}>当日NG</option>
             <option value={48}>翌日までNG</option>
             <option value={72}>翌々日までNG</option>
