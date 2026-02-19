@@ -145,16 +145,22 @@ setCustomerData(prev => ({
           furigana: cust.furigana || '',
           phone: cust.phone || '',
           email: cust.email || '',
-          // 🆕 今回入力した住所（visitorAddress）があればそれを使い、なければDBの住所を使う
-          address: visitorAddress || cust.address || '', 
-          company_name: cust.company_name || '',
-          symptoms: cust.symptoms || '', 
-          request_details: cust.request_details || ''
-        }));
-                setSelectedCustomerId(cust.id);
-      }
-    };
-    
+// 業種別項目（FormCustomizerにある全項目）
+        address: cust.address || '', 
+        parking: cust.parking || '', 
+        building_type: cust.building_type || '',
+        care_notes: cust.care_notes || '',
+        company_name: cust.company_name || '',
+        symptoms: cust.symptoms || '', 
+        request_details: cust.request_details || '',
+        notes: cust.notes || '',
+
+        // カスタム質問がある場合も、JSONデータから復元
+        custom_answers: cust.custom_answers || {} 
+      }));
+      setSelectedCustomerId(cust.id);
+    }
+  };    
     // 2. 実行エリア
     checkLineCustomer();
     fetchShop();      // 🆕 これを呼ぶことで「読み込み中」が解除されます！
@@ -306,21 +312,32 @@ const interval = shop.slot_interval_min || 15;
         }
       }
 
-      // --- 4. 顧客名簿（customers）の保存・更新 ---
+// --- 4. 顧客名簿（customers）の保存・更新 ---
       const customerPayload = {
         shop_id: shopId,
         name: customerData.name,
         furigana: customerData.furigana || null,
         phone: customerData.phone || null,
         email: customerData.email || null,
-        zip_code: visitorZip || null, // 📮 郵便番号を名簿に保存
+        zip_code: visitorZip || null, 
         address: customerData.address || null,
+        // 🆕 業種別項目を追加
+        parking: customerData.parking || null,
+        building_type: customerData.building_type || null,
+        care_notes: customerData.care_notes || null,
+        company_name: customerData.company_name || null,
+        symptoms: customerData.symptoms || null,
+        request_details: customerData.request_details || null,
+        notes: customerData.notes || null,
+        // 🆕 カスタム質問（もしあれば）
+        custom_answers: customerData.custom_answers || null,
+        
         line_user_id: lineUser?.userId || null,
         total_visits: (existingCust?.total_visits || 0) + 1,
         last_arrival_at: startDateTime.toISOString(),
         updated_at: new Date().toISOString()
       };
-
+      
       if (finalCustomerId) {
         await supabase.from('customers').update(customerPayload).eq('id', finalCustomerId);
       } else {
