@@ -44,6 +44,7 @@ const [customerData, setCustomerData] = useState({
     furigana: '', 
     email: '', 
     phone: '', 
+    zip_code: visitorZip || '', 
     address: visitorAddress || '', // 🆕 届いた住所があればそれをセット、なければ空
     parking: '', 
     building_type: '', 
@@ -136,31 +137,29 @@ const fetchStaffName = async () => {
         .eq('line_user_id', lineUser.userId)
         .maybeSingle();
 
-      if (cust) {
+if (cust) {
         console.log("✅ 過去の顧客データを反映:", cust.name);
-        // 過去データがある場合は、LINE名よりもDBの登録名を優先して上書き
-setCustomerData(prev => ({
+        setCustomerData(prev => ({
           ...prev,
           name: cust.name || lineUser.displayName || '',
           furigana: cust.furigana || '',
           phone: cust.phone || '',
           email: cust.email || '',
-// 業種別項目（FormCustomizerにある全項目）
-        address: cust.address || '', 
-        parking: cust.parking || '', 
-        building_type: cust.building_type || '',
-        care_notes: cust.care_notes || '',
-        company_name: cust.company_name || '',
-        symptoms: cust.symptoms || '', 
-        request_details: cust.request_details || '',
-        notes: cust.notes || '',
-
-        // カスタム質問がある場合も、JSONデータから復元
-        custom_answers: cust.custom_answers || {} 
-      }));
-      setSelectedCustomerId(cust.id);
-    }
-  };    
+          // 🆕 郵便番号と住所をDBから復元
+          zip_code: visitorZip || cust.zip_code || '', 
+          address: visitorAddress || cust.address || '', 
+          parking: cust.parking || '', 
+          building_type: cust.building_type || '',
+          care_notes: cust.care_notes || '',
+          company_name: cust.company_name || '',
+          symptoms: cust.symptoms || '', 
+          request_details: cust.request_details || '',
+          notes: cust.notes || '',
+          custom_answers: cust.custom_answers || {} 
+        }));
+        setSelectedCustomerId(cust.id);
+      }
+      };    
     // 2. 実行エリア
     checkLineCustomer();
     fetchShop();      // 🆕 これを呼ぶことで「読み込み中」が解除されます！
@@ -337,7 +336,7 @@ const interval = shop.slot_interval_min || 15;
         last_arrival_at: startDateTime.toISOString(),
         updated_at: new Date().toISOString()
       };
-      
+
       if (finalCustomerId) {
         await supabase.from('customers').update(customerPayload).eq('id', finalCustomerId);
       } else {
@@ -356,7 +355,7 @@ const interval = shop.slot_interval_min || 15;
           customer_name: customerData.name,
           customer_phone: customerData.phone || '---',
           customer_email: customerData.email || 'admin@example.com',
-          zip_code: visitorZip || null,
+          zip_code: customerData.zip_code || null,
           // 🆕 ここを start_time と end_time の2つだけに絞ります
           start_time: startDateTime.toISOString(),
           end_time: endDateTime.toISOString(), 
@@ -473,8 +472,8 @@ return (
           if (!isEnabled) return null;
           if (isAdminEntry && key !== 'name') return null;
           
-          // ⚠️ ふりがな と 備考欄 はこのループ内では直接描画しない（位置を固定するため）
-          if (key === 'furigana' || key === 'notes') return null;
+          // ⚠️ ふりがな、備考欄、郵便番号はこのループ内では直接描画しない（位置を固定するため）
+          if (key === 'furigana' || key === 'notes' || key === 'zip_code') return null;
 
           return (
             <React.Fragment key={key}>
@@ -522,15 +521,6 @@ return (
                     <option value="あり">あり</option>
                     <option value="なし">なし</option>
                   </select>
-                ) : ['care_notes', 'symptoms', 'request_details'].includes(key) ? (
-                  <textarea 
-                    name={key} 
-                    value={customerData[key]} 
-                    onChange={handleInputChange} 
-                    style={{ ...inputStyle, minHeight: '80px', resize: 'none' }} 
-                    placeholder={`${config.label}を入力`}
-                    required={config.required} 
-                  />
                 ) : (
                   <input 
                     name={key}
@@ -546,7 +536,7 @@ return (
 
               {/* 🏆 お名前の直後に強制的に「ふりがな」を挿入 */}
               {key === 'name' && formConfig.furigana && (lineUser ? formConfig.furigana.line_enabled : formConfig.furigana.enabled) && (
-                <div style={{ marginTop: '20px' }}>
+                <div>
                   <label style={{ fontSize: '0.8rem', fontWeight: 'bold', display: 'block', marginBottom: '8px' }}>
                     {formConfig.furigana.label} {formConfig.furigana.required && <span style={{ color: '#ef4444' }}>*</span>}
                   </label>
@@ -558,6 +548,24 @@ return (
                     style={inputStyle} 
                     placeholder={`${formConfig.furigana.label}を入力`}
                     required={formConfig.furigana.required} 
+                  />
+                </div>
+              )}
+
+              {/* 🏆 電話番号（phone）の直後に「郵便番号」を挿入するよう変更 */}
+              {key === 'phone' && formConfig.zip_code && (lineUser ? formConfig.zip_code.line_enabled : formConfig.zip_code.enabled) && (
+                <div>
+                  <label style={{ fontSize: '0.8rem', fontWeight: 'bold', display: 'block', marginBottom: '8px' }}>
+                    {formConfig.zip_code.label} {formConfig.zip_code.required && <span style={{ color: '#ef4444' }}>*</span>}
+                  </label>
+                  <input 
+                    name="zip_code"
+                    type="text" 
+                    value={customerData.zip_code} 
+                    onChange={handleInputChange} 
+                    style={inputStyle} 
+                    placeholder="例: 123-4567"
+                    required={formConfig.zip_code.required} 
                   />
                 </div>
               )}

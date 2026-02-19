@@ -15,7 +15,7 @@ const VISIT_KEYWORDS = ['訪問', '出張', '代行', 'デリバリー', '清掃
 // 🆕 2. 訪問型専用のデフォルト文章
 const VISIT_DEFAULTS = {
   booking_sub: "【予約確定】訪問当日にお伺いするのを楽しみにしております",
-  booking_body: "{name} 様\n\nご予約ありがとうございます。当日はご指定の場所へお伺いいたします。お気をつけてお待ちくださいませ。\n\n📅 日時: {start_time}\n📍 訪問先: {address}\n📋 メニュー: {services}\n👤 担当: {staff_name}",
+  booking_body: "{name} 様\n\nご予約ありがとうございます。当日はご指定の場所へお伺いいたします。\n\n📅 日時: {start_time}\n📍 訪問先: {address}\n📋 メニュー: {services}\n👤 担当: {staff_name}",
   remind_sub: "【リマインド】明日、ご指定の場所へお伺いいたします",
   remind_body: "{name} 様\n\n明日のご予約確認です。お約束の時間にお伺いいたします。\n\n📅 日時: {start_time}\n📍 訪問先: {address}\n📋 メニュー: {services}\n\n当日、道中の状況により多少前後する場合はお電話いたします。",
 };

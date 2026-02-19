@@ -95,6 +95,7 @@ const FormCustomizer = () => {
     furigana: { enabled: false, line_enabled: false, label: "ふりがな", required: false },
     email: { enabled: true, line_enabled: true, label: "メールアドレス", required: true },
     phone: { enabled: true, line_enabled: true, label: "電話番号", required: true },
+    zip_code: { enabled: false, line_enabled: false, label: "郵便番号", required: false },
     address: { enabled: false, line_enabled: false, label: "住所", required: false },
     parking: { enabled: false, line_enabled: false, label: "駐車場", required: false },
     building_type: { enabled: false, line_enabled: false, label: "建物", required: false },
@@ -211,6 +212,7 @@ const FormCustomizer = () => {
 
 <h3 style={{ fontSize: '1rem', color: '#64748b', marginBottom: '15px', paddingLeft: '10px' }}>▼ 業種別項目</h3>
       <section style={{ ...cardStyle, borderTop: `6px solid ${themeColor}` }}>
+        <ConfigItem id="zip_code" icon={MapPin} title="郵便番号" description="住所入力の補助。移動時間の計算に使用されます。" formConfig={formConfig} themeColor={themeColor} toggleField={toggleField} updateLabel={updateLabel} />
         <ConfigItem id="address" icon={MapPin} title="住所" description="訪問サービス用。" formConfig={formConfig} themeColor={themeColor} toggleField={toggleField} updateLabel={updateLabel} />
         <ConfigItem id="parking" icon={Car} title="駐車場" description="駐車場の有無。" formConfig={formConfig} themeColor={themeColor} toggleField={toggleField} updateLabel={updateLabel} />
         
