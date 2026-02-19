@@ -242,13 +242,24 @@ const mRes = await fetch('https://api.resend.com/emails', {
 
 const sendMail = async (to: string, isOwner: boolean) => {
       // ✅ 置換用データセット
-      const placeholderData = { 
-        customerName, shopName, startTime, services, cancelUrl, 
-        furigana, address, parking, buildingType, careNotes,
-        companyName, symptoms, requestDetails, notes,
+const placeholderData = { 
+        customerName, 
+        shopName, 
+        startTime, 
+        services, 
+        cancelUrl, 
+        staffName: staffName || "店舗スタッフ", // 🆕 ここに staffName を追加！
+        furigana, 
+        address, 
+        parking, 
+        buildingType, 
+        careNotes,
+        companyName, 
+        symptoms, 
+        requestDetails, 
+        notes,
         officialUrl: profile.custom_official_url || "" 
-      };
-      
+      };      
       const isVisit = VISIT_KEYWORDS.some(keyword => (profile.business_type || '').includes(keyword));
       const defaults = isVisit ? VISIT_DEFAULTS : STORE_DEFAULTS;
 

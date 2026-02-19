@@ -34,7 +34,8 @@ function ReservationForm() {
   const [categories, setCategories] = useState([]);
   const [services, setServices] = useState([]);
   const [options, setOptions] = useState([]);
-  const [targetStaffName, setTargetStaffName] = useState(''); 
+const [targetStaffName, setTargetStaffName] = useState(''); 
+  const [autoStaffId, setAutoStaffId] = useState(null); // 🆕 自動セットされたスタッフIDを保存  
 
   // ✅ 1. 訪問型とみなす業種リスト（BasicSettingsの選択肢と合わせる）
 const VISIT_KEYWORDS = ['訪問', '出張', '代行', 'デリバリー', '清掃'];
@@ -152,18 +153,17 @@ if (shopRes.data) {
 const optRes = await supabase.from('service_options').select('*');
         if (optRes.data) setOptions(optRes.data);
 
-        // 🆕 ここから追加：スタッフが一人なら自動セット
+        // ✅ スタッフが一人なら自動セットするロジック（State版）
         const { data: staffList } = await supabase.from('staffs').select('*').eq('shop_id', shopId);
         if (staffList && staffList.length === 1 && !isAdminMode && !staffIdFromUrl) {
-          // スタッフが1人なら、その人をデフォルト担当にする
+          console.log("👤 1人営業のため担当者を自動設定:", staffList[0].name);
           setTargetStaffName(staffList[0].name);
-          // 次のステップで使えるように一時保存
-          window.autoSelectedStaffId = staffList[0].id;
+          setAutoStaffId(staffList[0].id); // Stateに保存
         }
-          }
-setLoading(false);
+      } // !shopRes.data.is_suspended の閉じ
+    } // shopRes.data の閉じ
+    setLoading(false);
   };
-
   // ✅ 追加：リピーター対応（LINEログイン後に名簿から前回の住所を自動セット）
   useEffect(() => {
     const fetchPreviousAddress = async () => {
@@ -340,7 +340,7 @@ const handleNextStep = () => {
     const currentOptionName = Object.values(selectedOptions).map(o => o.option_name).join(', ');
     const currentFullName = currentOptionName ? `${currentBaseName}（${currentOptionName}）` : currentBaseName;
 
-    // 2. 新しいカレンダー版（TimeSelectionCalendar）へ引き継ぐ共通データ一式
+    // 2. 次のステップへ引き継ぐ共通データ一式
     const commonState = { 
       people: [...people, { 
         services: selectedServices, 
@@ -348,27 +348,28 @@ const handleNextStep = () => {
         slots: currentPersonSlots,
         fullName: currentFullName 
       }],
-      totalSlotsNeeded, // 🆕 カレンダー側で終了時間の計算（△判定）に使用
+      totalSlotsNeeded,
       lineUser,
       visitorZip,
-      visitorAddress, // ✅ 4. 次のページ（カレンダー）に住所を渡す
+      visitorAddress,
       customShopName: displayBranding.name,
-      staffId: adminStaffId || staffIdFromUrl || window.autoSelectedStaffId,
+      // ✅ 修正：Stateの autoStaffId を使う
+      staffId: adminStaffId || staffIdFromUrl || autoStaffId,
+      fromView: fromView
     };
 
     if (isAdminMode) {
-      // 👑 管理者ねじ込み：カレンダーをスキップして直接「確認画面」へ
       const confirmUrl = `/shop/${shopId}/confirm${adminStaffId ? `?staff=${adminStaffId}` : ''}`;
       navigate(confirmUrl, { 
         state: { ...commonState, date: adminDate, time: adminTime, adminDate, adminTime } 
       });
     } else {
-      // 📅 一般予約：カレンダー版日時選択（TimeSelectionCalendar）へ移動
-      // ※App.jsxでパスを切り替えているため、URLはこのままでOKです
       const nextUrl = `/shop/${shopId}/reserve/time${staffIdFromUrl ? `?staff=${staffIdFromUrl}` : ''}`;
       navigate(nextUrl, { state: commonState });
     }
   };
+
+  // ✅ 抜けていたヘルパー関数とロジックをここに配置
   const getGroupedOptions = (serviceId) => {
     return options.filter(o => o.service_id === serviceId).reduce((acc, opt) => {
       if (!acc[opt.group_name]) acc[opt.group_name] = [];
@@ -394,20 +395,17 @@ const handleNextStep = () => {
       <Link to="/" style={{ position: 'fixed', top: '15px', left: '15px', zIndex: 1100, background: 'rgba(255,255,255,0.9)', color: '#666', textDecoration: 'none', fontSize: '0.7rem', padding: '6px 10px', borderRadius: '15px', border: '1px solid #ddd' }}>← 戻る</Link>
       
       <div style={{ marginTop: '30px', marginBottom: '30px', borderBottom: '1px solid #eee', paddingBottom: '20px' }}>
-        {/* ✅ 着せ替え後の店名を表示 */}
-<h2 style={{ margin: '0 0 10px 0', fontSize: '1.4rem' }}>{displayBranding.name}</h2>
+        <h2 style={{ margin: '0 0 10px 0', fontSize: '1.4rem' }}>{displayBranding.name}</h2>
 
-        {/* ✅ 5. 訪問型の場合のみ、最上部に住所入力欄を表示 */}
+        {/* 🚗 訪問型住所入力エリア */}
         {isVisitService && (
           <div style={{ marginBottom: '25px', padding: '20px', background: isAddressFixed ? '#f8fafc' : '#fff', borderRadius: '16px', border: isAddressFixed ? '1px solid #e2e8f0' : `2px solid ${themeColor}`, boxShadow: '0 4px 12px rgba(0,0,0,0.08)' }}>
             <h3 style={{ marginTop: 0, fontSize: '1rem', marginBottom: '15px', color: themeColor, display: 'flex', alignItems: 'center', gap: '8px' }}>
               <MapPin size={20} /> 1. 訪問先の住所を入力
             </h3>
-{!isAddressFixed ? (
+            {!isAddressFixed ? (
               <>
                 <p style={{ fontSize: '0.8rem', color: '#64748b', marginBottom: '10px' }}>郵便番号を入力すると住所が自動入力されます。</p>
-
-                {/* 🆕 ここに郵便番号入力と「住所検索」ボタンを横並びで配置 */}
                 <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
                   <input 
                     type="tel" 
@@ -416,16 +414,8 @@ const handleNextStep = () => {
                     placeholder="郵便番号(7桁)" 
                     style={{ flex: 1, padding: '14px', borderRadius: '10px', border: '1px solid #ddd', fontSize: '1rem' }} 
                   />
-                  <button 
-                    onClick={handleZipSearch} 
-                    type="button"
-                    style={{ padding: '0 20px', background: '#f1f5f9', border: '1px solid #cbd5e1', borderRadius: '10px', fontSize: '0.85rem', fontWeight: 'bold', cursor: 'pointer', color: '#475569' }}
-                  >
-                    住所検索
-                  </button>
+                  <button onClick={handleZipSearch} type="button" style={{ padding: '0 20px', background: '#f1f5f9', border: '1px solid #cbd5e1', borderRadius: '10px', fontSize: '0.85rem', fontWeight: 'bold', cursor: 'pointer', color: '#475569' }}>住所検索</button>
                 </div>
-
-                {/* 住所入力欄（自動で文字が入る！） */}
                 <input 
                   type="text" 
                   value={visitorAddress} 
@@ -433,26 +423,18 @@ const handleNextStep = () => {
                   placeholder="市区町村・番地・建物名まで入力してください" 
                   style={{ width: '100%', padding: '14px', borderRadius: '10px', border: '1px solid #ddd', fontSize: '1rem', marginBottom: '12px', boxSizing: 'border-box' }} 
                 />
-
-                <button 
-                  disabled={!visitorAddress} 
-                  onClick={() => setIsAddressFixed(true)} 
-                  style={{ width: '100%', padding: '14px', background: visitorAddress ? themeColor : '#cbd5e1', color: '#fff', border: 'none', borderRadius: '10px', fontWeight: 'bold', cursor: 'pointer' }}
-                >
-                  この場所で空き枠を探す
-                </button>
+                <button disabled={!visitorAddress} onClick={() => setIsAddressFixed(true)} style={{ width: '100%', padding: '14px', background: visitorAddress ? themeColor : '#cbd5e1', color: '#fff', border: 'none', borderRadius: '10px', fontWeight: 'bold', cursor: 'pointer' }}>この場所で空き枠を探す</button>
               </>
-                            ) : (
+            ) : (
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div>
-                  {/* 🆕 リピーター向けに「いつもの場所」感を出します */}
                   <p style={{ fontSize: '0.75rem', color: themeColor, fontWeight: 'bold', marginBottom: '4px' }}>📍 訪問先（前回と同じ場所を表示中）</p>
                   <div style={{ fontSize: '0.9rem', fontWeight: 'bold' }}>{visitorAddress}</div>
                 </div>
                 <button onClick={() => setIsAddressFixed(false)} style={{ background: 'none', border: `2px solid ${themeColor}`, color: themeColor, padding: '5px 15px', borderRadius: '20px', fontSize: '0.75rem', fontWeight: 'bold', cursor: 'pointer' }}>変更</button>
               </div>
             )}
-                      </div>
+          </div>
         )}
 
         {lineUser && (
@@ -486,7 +468,6 @@ const handleNextStep = () => {
           </div>
         )}
         
-        {/* ✅ 着せ替え後のサブタイトルを表示（/ による改行対応） */}
         {displayBranding.desc && (
           <p style={{ fontSize: '0.9rem', color: '#475569', lineHeight: '1.6' }}>
             {displayBranding.desc.split('/').map((line, idx) => (
