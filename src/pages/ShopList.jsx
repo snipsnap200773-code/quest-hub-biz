@@ -22,7 +22,7 @@ function ShopList() {
       .from('profiles')
       .select('*')
       .eq('is_suspended', false)
-      .eq('business_type', categoryId)
+      .ilike('business_type', `%${categoryId}%`)
       .not('business_name', 'is', null)
       .order('business_name_kana', { ascending: true });
 
