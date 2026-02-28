@@ -274,59 +274,62 @@ const { data: resData } = await supabase.from('reservations').select('start_time
       </div>
 
 {/* 1ヶ月カレンダー本体 */}
-      <div style={{ padding: '15px' }}>
-        <div style={{ background: '#fff', borderRadius: '20px', padding: '20px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)', border: '1px solid #e2e8f0' }}>
-          
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-            {/* 前の月ボタン：新しいDateオブジェクトを生成してStateを更新 */}
-            <button 
-              onClick={() => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() - 1, 1))} 
-              style={{ border: 'none', background: '#f1f5f9', borderRadius: '50%', padding: '8px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-            >
-              <ChevronLeft size={20}/>
-            </button>
+<div style={{ padding: '15px' }}>
+  <div style={{ background: '#fff', borderRadius: '20px', padding: '20px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)', border: '1px solid #e2e8f0' }}>
+    
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+      {/* 前の月ボタン：prevを使って「全く新しいDate」を生成（Immutabilityの確保） */}
+      <button 
+        onClick={() => setViewDate(prev => new Date(prev.getFullYear(), prev.getMonth() - 1, 1))} 
+        style={{ border: 'none', background: '#f1f5f9', borderRadius: '50%', padding: '8px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+      >
+        <ChevronLeft size={20}/>
+      </button>
 
-            <h3 style={{ margin: 0, fontSize: '1.1rem' }}>{viewDate.getFullYear()}年 {viewDate.getMonth() + 1}月</h3>
+      {/* 新しいオブジェクトが渡されるので、ここが確実に再レンダリングされます */}
+      <h3 style={{ margin: 0, fontSize: '1.1rem' }}>
+        {viewDate.getFullYear()}年 {viewDate.getMonth() + 1}月
+      </h3>
 
-            {/* 次の月ボタン：新しいDateオブジェクトを生成してStateを更新 */}
-            <button 
-              onClick={() => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 1))} 
-              style={{ border: 'none', background: '#f1f5f9', borderRadius: '50%', padding: '8px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-            >
-              <ChevronRight size={20}/>
-            </button>
+      {/* 次の月ボタン：prevを使って「全く新しいDate」を生成（Immutabilityの確保） */}
+      <button 
+        onClick={() => setViewDate(prev => new Date(prev.getFullYear(), prev.getMonth() + 1, 1))} 
+        style={{ border: 'none', background: '#f1f5f9', borderRadius: '50%', padding: '8px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+      >
+        <ChevronRight size={20}/>
+      </button>
+    </div>
+    
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '5px', textAlign: 'center' }}>
+      {['日','月','火','水','木','金','土'].map((d, i) => (
+        <div key={d} style={{ fontSize: '0.7rem', color: i === 0 ? '#ef4444' : i === 6 ? '#2563eb' : '#94a3b8', fontWeight: 'bold', marginBottom: '10px' }}>{d}</div>
+      ))}
+      {calendarDays.map((date, i) => {
+        if (!date) return <div key={`empty-${i}`} />;
+        const isSelected = selectedDate?.toDateString() === date.toDateString();
+        const isHoliday = checkIsRegularHoliday(date);
+        const isPast = date < new Date(new Date().setHours(0,0,0,0));
+        
+        return (
+          <div 
+            key={date.toString()} 
+            onClick={() => !isHoliday && !isPast && setSelectedDate(date)}
+            style={{ 
+              padding: '10px 0', borderRadius: '12px', cursor: isHoliday || isPast ? 'default' : 'pointer',
+              background: isSelected ? themeColor : 'transparent',
+              color: isSelected ? '#fff' : (isHoliday || isPast ? '#cbd5e1' : '#1e293b'),
+              fontWeight: isSelected ? 'bold' : 'normal',
+              position: 'relative'
+            }}
+          >
+            {date.getDate()}
+            {!isHoliday && !isPast && <div style={{ width: '4px', height: '4px', background: isSelected ? '#fff' : themeColor, borderRadius: '50%', margin: '2px auto 0' }} />}
           </div>
-          
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '5px', textAlign: 'center' }}>
-            {['日','月','火','水','木','金','土'].map((d, i) => (
-              <div key={d} style={{ fontSize: '0.7rem', color: i === 0 ? '#ef4444' : i === 6 ? '#2563eb' : '#94a3b8', fontWeight: 'bold', marginBottom: '10px' }}>{d}</div>
-            ))}
-            {calendarDays.map((date, i) => {
-              if (!date) return <div key={`empty-${i}`} />;
-              const isSelected = selectedDate?.toDateString() === date.toDateString();
-              const isHoliday = checkIsRegularHoliday(date);
-              const isPast = date < new Date(new Date().setHours(0,0,0,0));
-              
-              return (
-                <div 
-                  key={date.toString()} 
-                  onClick={() => !isHoliday && !isPast && setSelectedDate(date)}
-                  style={{ 
-                    padding: '10px 0', borderRadius: '12px', cursor: isHoliday || isPast ? 'default' : 'pointer',
-                    background: isSelected ? themeColor : 'transparent',
-                    color: isSelected ? '#fff' : (isHoliday || isPast ? '#cbd5e1' : '#1e293b'),
-                    fontWeight: isSelected ? 'bold' : 'normal',
-                    position: 'relative'
-                  }}
-                >
-                  {date.getDate()}
-                  {!isHoliday && !isPast && <div style={{ width: '4px', height: '4px', background: isSelected ? '#fff' : themeColor, borderRadius: '50%', margin: '2px auto 0' }} />}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      </div>
+        );
+      })}
+    </div>
+  </div>
+</div>
       
       {/* 時間選択カードエリア */}
       <div style={{ padding: '0 15px 20px' }}>
