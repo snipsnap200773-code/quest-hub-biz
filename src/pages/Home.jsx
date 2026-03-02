@@ -75,13 +75,33 @@ const handleSyncUser = async (session) => {
           .select()
           .single();
         
-        if (!insError) {
+if (!insError) {
           currentUser = newUser;
-          // 過去履歴の紐付け（バックグラウンド実行）
-          supabase.from('customers').update({ auth_id: session.user.id }).eq('email', session.user.email).then();
         }
       }
 
+      // 🤝 ここに配置することで、新規登録時もリロード時も常に最新の名寄せを試みます
+      if (currentUser) {
+        setUserProfile(currentUser);
+
+        // 🆕 1. メールアドレスで紐付け（存在する場合のみ）
+        if (session.user.email) {
+          supabase.from('customers')
+            .update({ auth_id: session.user.id })
+            .eq('email', session.user.email)
+            .then();
+        }
+
+        // 🆕 2. 電話番号で紐付け
+        // Googleから取得できる場合、または今後プロフィールに電話番号を保存した場合に備えます
+        const userPhone = currentUser.phone || session.user.phone || session.user.user_metadata?.phone;
+        if (userPhone) {
+          supabase.from('customers')
+            .update({ auth_id: session.user.id })
+            .eq('phone', userPhone)
+            .then();
+        }
+      }
       // 2. プロフィール情報をセット
       if (currentUser) {
         setUserProfile(currentUser);
