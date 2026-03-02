@@ -94,10 +94,19 @@ const [pastVisits, setPastVisits] = useState([]);
   const fetchInitialData = async () => {
     try {
       setLoading(true);
-      // 1. プロフィール取得
-      const { data: profile } = await supabase.from('profiles').select('*').eq('id', cleanShopId).single();
-      if (profile) setShop(profile);
-      
+// 🆕 maybeSingle に変え、business_name がある場合のみセットする
+const { data: profile } = await supabase
+  .from('profiles')
+  .select('*')
+  .eq('id', cleanShopId)
+  .maybeSingle();
+
+if (profile && profile.business_name) {
+  setShop(profile);
+} else {
+  // 店舗ではないID（お客様ID）で管理画面を開こうとした場合のガード
+  console.warn("店舗データが見つかりません。");
+}
       const startOfYear = `${viewYear}-01-01`;
       const endOfYear = `${viewYear}-12-31`;
 
@@ -544,10 +553,16 @@ const formattedServices = services.map(svc => ({
   };
 
   // 🆕 ここから追加：お客様詳細（カルテ）を開く関数
-  const openCustomerInfo = async (res) => {
-    try {
-      // 1. 予約名からお客様の基本情報を取得
-      const { data: customer } = await supabase
+const openCustomerInfo = async (res) => {
+    // 🆕 名前がない予約データの場合は処理しないようにガード
+    if (!res || !res.customer_name) {
+      alert("顧客名が記録されていないため、カルテを開けません。");
+      return;
+    }
+
+    try {
+      // 1. 予約名からお客様の基本情報を取得
+      const { data: customer } = await supabase
         .from('customers')
         .select('*')
         .eq('shop_id', cleanShopId)
@@ -608,9 +623,10 @@ const formattedServices = services.map(svc => ({
   };
 
   const handleDateChangeUI = (days) => { const d = new Date(selectedDate); d.setDate(d.getDate() + days); setSelectedDate(d.toLocaleDateString('sv-SE')); };
-  return (
-    <div style={fullPageWrapper}>
-      <div style={sidebarStyle}>
+return (
+    /* 🆕 translate="no" と className="notranslate" を追加して翻訳を禁止します */
+    <div style={fullPageWrapper} translate="no" className="notranslate">
+          <div style={sidebarStyle}>
         <div style={{ textAlign: 'center', marginBottom: '20px' }}>
           <h2 style={{ fontSize: '2.2rem', fontStyle: 'italic', fontWeight: '900', color: '#4b2c85', margin: 0 }}>SOLO</h2>
           <p style={{ fontSize: '0.6rem', fontWeight: 'bold' }}>MANAGEMENT</p>
@@ -793,9 +809,10 @@ const formattedServices = services.map(svc => ({
                           <td onClick={() => openCheckout(res)} style={tdStyle}>
                             {new Date(res.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                           </td>
-                          <td onClick={() => openCustomerInfo(res)} style={{ ...tdStyle, background: res.status === 'completed' ? '#eee' : '#008000', color: res.status === 'completed' ? '#333' : '#fff', fontWeight: 'bold' }}>
-                            {res.customer_name} {res.status === 'completed' && '✓'}
-                          </td>
+<td onClick={() => openCustomerInfo(res)} style={{ ...tdStyle, background: res.status === 'completed' ? '#eee' : '#008000', color: res.status === 'completed' ? '#333' : '#fff', fontWeight: 'bold' }}>
+  {/* 🆕 customer_name が NULL の場合に備えて '名前なし' を表示するガードを追加 */}
+  {res.customer_name || '名前なし'} {res.status === 'completed' && '✓'}
+</td>
                           <td onClick={() => openCheckout(res)} style={tdStyle}>
                             {parseReservationDetails(res).menuName}
                           </td>
@@ -846,12 +863,13 @@ const formattedServices = services.map(svc => ({
                           </div>
 
                           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px', paddingLeft: '8px' }}>
-                            <div 
-                              onClick={() => openCustomerInfo(res)} 
-                              style={{ flex: 1, fontSize: '1.1rem', fontWeight: 'bold', color: '#1e293b', textDecoration: 'underline', textDecorationColor: '#cbd5e1' }}
-                            >
-                              {res.customer_name} 様
-                            </div>
+<div 
+  onClick={() => openCustomerInfo(res)} 
+  style={{ flex: 1, fontSize: '1.1rem', fontWeight: 'bold', color: '#1e293b', textDecoration: 'underline', textDecorationColor: '#cbd5e1' }}
+>
+  {/* 🆕 ここも同様にガードを入れます */}
+  {res.customer_name || '名前なし'} 様
+</div>
                             <button 
                               onClick={() => openCheckout(res)}
                               style={{ 

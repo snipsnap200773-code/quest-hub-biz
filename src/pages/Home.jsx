@@ -27,6 +27,7 @@ function Home() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [favorites, setFavorites] = useState([]); // お気に入り店舗用（将来用）
+  const [myHistory, setMyHistory] = useState([]);
 
   const sliderImages = [
     { id: 1, url: 'https://images.unsplash.com/photo-1600880210836-8f8fe100a35c?auto=format&fit=crop&w=1200&q=80', title: '自分らしく、働く。', desc: 'Solopreneurを支えるポータルサイト' },
@@ -56,48 +57,71 @@ const { data: authListener } = supabase.auth.onAuthStateChange(async (_event, se
       if (session) {
         setIsModalOpen(false);
 
-        // 🛡️ 防波堤：プロフィールを自動チェック＆生成する
         try {
-          let { data: profile } = await supabase
-            .from('profiles')
+          // 🆕 1. まず会員情報を app_users から取得（ログイン情報の復旧）
+          let { data: appUser } = await supabase
+            .from('app_users')
             .select('*')
             .eq('id', session.user.id)
             .maybeSingle();
 
-          // 🆕 まだ profiles にデータがない「初めてのお客様」の場合
-          if (!profile) {
-            // ランダムなIDを自動生成（例：user_a1b2c）
+          // 🆕 2. データがない場合（新規会員またはゾンビ状態）は自動生成・修復
+          if (!appUser) {
             const randomId = `user_${Math.random().toString(36).substring(2, 7)}`;
             
-            const { data: newProfile, error: insError } = await supabase
-              .from('profiles')
-              .insert({
+            const { data: newAppUser, error: insError } = await supabase
+              .from('app_users')
+              .upsert({ // insert ではなく upsert で安全性を確保
                 id: session.user.id,
                 display_id: randomId,
                 display_name: session.user.user_metadata?.full_name || 'ゲストユーザー',
-                updated_at: new Date()
+                email: session.user.email,
+                avatar_url: session.user.user_metadata?.avatar_url || null
               })
               .select()
               .single();
             
             if (insError) throw insError;
-            profile = newProfile;
+            appUser = newAppUser;
+
+            // 🤝 過去履歴の紐付け（完了を待たずに次に進めるように .then() で実行）
+            supabase.from('customers')
+              .update({ auth_id: session.user.id })
+              .eq('email', session.user.email)
+              .then();
           }
 
-          // Stateに保存
-          setUserProfile(profile);
-          setProfileSet(true); // 自動生成するので、案内リンクは常に出さない設定
+          // 🆕 3. 【重要】履歴を読み込む「前」に、名前だけでも先に表示させる
+          if (appUser) setUserProfile(appUser);
+
+          // 🆕 4. 【安全ガード】履歴取得を完全に独立した try-catch で囲む
+          // これにより、履歴取得が失敗してもトピック表示などの後続処理を止めません
+          try {
+            const { data: historyData } = await supabase
+              .from('reservations')
+              .select('*, profiles(business_name)')
+              .eq('customer_email', session.user.email)
+              .order('start_time', { ascending: false });
+            
+            if (historyData) setMyHistory(historyData);
+          } catch (historyErr) {
+            console.warn("履歴取得で軽微なエラー（無視して続行）:", historyErr);
+          }
+
         } catch (err) {
-          console.warn("プロフィール自動生成に失敗しましたが、処理を続行します:", err);
-          setProfileSet(true);
+          console.error("認証プロセスでエラーが発生しました:", err);
         }
       } else {
-        // ログアウト時は情報をクリア
+        // ログアウト時はきれいにお掃除
         setUserProfile(null);
-        setProfileSet(true);
+        setMyHistory([]);
       }
+
+      // 🆕 5. 【最重要】ログイン成功・失敗に関わらず、トピックデータを必ず読み込む
+      // これにより「リロードするとトピックが消える」問題を根本解決します
+      fetchPortalData(); 
     });
-    const fetchPortalData = async () => {
+            const fetchPortalData = async () => {
       // 1. 店舗データの取得
       const shopRes = await supabase
         .from('profiles')
@@ -167,8 +191,13 @@ const { data: authListener } = supabase.auth.onAuthStateChange(async (_event, se
       // ログイン（Sign In）の実行
       let loginEmail = email;
       if (!email.includes('@')) {
-        const { data: profile } = await supabase.from('profiles').select('email').eq('display_id', email).maybeSingle();
-        if (!profile) return alert("ユーザーIDが見つかりません。");
+// 🆕 検索先を会員専用テーブル（app_users）に切り替え
+        const { data: profile } = await supabase
+          .from('app_users')
+          .select('email')
+          .eq('display_id', email)
+          .maybeSingle();
+          if (!profile) return alert("ユーザーIDが見つかりません。");
         loginEmail = profile.email;
       }
       const { error } = await supabase.auth.signInWithPassword({ email: loginEmail, password });
@@ -257,15 +286,16 @@ const { data: authListener } = supabase.auth.onAuthStateChange(async (_event, se
 {/* 🆕 お客様専用：ログイン後のパーソナライズボード */}
         {user && (
           <div style={{ background: 'linear-gradient(135deg, #07aadb 0%, #0284c7 100%)', borderRadius: '16px', padding: '20px', marginBottom: '25px', color: '#fff', boxShadow: '0 8px 20px rgba(7, 170, 219, 0.2)' }}>
-            <h2 style={{ margin: 0, fontSize: '1.2rem', fontWeight: 'bold', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+<h2 style={{ margin: 0, fontSize: '1.2rem', fontWeight: 'bold', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              {/* 🆕 会員IDを表示 */}
               <span style={{ fontSize: '0.8rem', opacity: 0.8, fontWeight: 'normal' }}>
-                ID: {userProfile?.display_id || '取得中...'}
+                @{userProfile?.display_id || 'guest_user'}
               </span>
               <span>
-                こんにちは、{userProfile?.display_name || user.user_metadata?.full_name || 'ゲスト'} 様
+                こんにちは、{userProfile?.display_name || 'ゲスト'} 様
               </span>
             </h2>
-
+            
             {/* 🗑️ 「あと一歩！」のリンクは自動生成になったので削除しました */}
 
             <div style={{ display: 'flex', gap: '12px', marginTop: '15px' }}>
@@ -276,9 +306,52 @@ const { data: authListener } = supabase.auth.onAuthStateChange(async (_event, se
                 <Heart size={20} style={{ marginBottom: '4px' }} /><br/><span style={{ fontSize: '0.7rem' }}>お気に入り</span>
               </div>
             </div>
+</div>
+        )}
+
+        {/* 🆕 予約履歴（My Journey）セクション */}
+        {user && (
+          <div style={{ marginBottom: '40px' }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px', marginBottom: '15px' }}>
+              <h3 style={{ margin: 0, fontSize: '1.2rem', fontWeight: '900', letterSpacing: '1px', color: '#1a1a1a' }}>My Journey</h3>
+              <span style={{ fontSize: '0.7rem', color: '#94a3b8' }}>これまでの利用履歴</span>
+            </div>
+
+            {myHistory.length > 0 ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                {myHistory.map((res) => (
+                  <div key={res.id} style={{ background: '#fff', borderRadius: '16px', padding: '16px', border: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', boxShadow: '0 2px 8px rgba(0,0,0,0.02)' }}>
+                    <div>
+                      <div style={{ fontSize: '0.65rem', color: '#07aadb', fontWeight: 'bold', marginBottom: '4px' }}>
+                        {new Date(res.start_time).toLocaleDateString('ja-JP')}
+                      </div>
+                      <div style={{ fontWeight: 'bold', fontSize: '1rem', color: '#1e293b' }}>
+                        {res.profiles?.business_name || '店舗情報なし'}
+                      </div>
+                      <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '2px' }}>
+                        {res.menu_name}
+                      </div>
+                    </div>
+                    <div style={{ textAlign: 'right' }}>
+                      <div style={{ fontSize: '1rem', fontWeight: '900', color: '#1e293b' }}>
+                        ¥{res.total_price?.toLocaleString() || 0}
+                      </div>
+                      <span style={{ fontSize: '0.6rem', background: res.status === 'completed' ? '#f1f5f9' : '#ecfdf5', color: res.status === 'completed' ? '#64748b' : '#059669', padding: '2px 8px', borderRadius: '4px', fontWeight: 'bold' }}>
+                        {res.status === 'completed' ? '来店済み' : '予約中'}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div style={{ padding: '30px', textAlign: 'center', background: '#fff', borderRadius: '16px', color: '#94a3b8', fontSize: '0.85rem', border: '2px dashed #e2e8f0' }}>
+                まだ予約履歴がありません。<br/>新しいサービスを体験して、あなたの物語を始めましょう。
+              </div>
+            )}
           </div>
         )}
-                {/* 3. 最新トピック */}
+
+        {/* 3. 最新トピック */}
         {topics.length > 0 && (
           <div style={{ background: '#fff', borderRadius: '16px', padding: '15px', marginBottom: '20px', boxShadow: '0 4px 20px rgba(0,0,0,0.04)' }}>
             <h3 style={{ margin: '0 0 10px 0', fontSize: '0.9rem', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px' }}>
