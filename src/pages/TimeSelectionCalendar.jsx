@@ -28,55 +28,66 @@ function TimeSelectionCalendar() {
 const visitorAddress = location.state?.visitorAddress; 
 
   // 🆕 1. 関数の入り口を復活させます
-  const fetchInitialData = async () => {
+const fetchInitialData = async () => {
     setLoading(true);
 
-    // 🆕 2. データベースからショップ情報を取得（これが無いと profile が使えません）
+    // 🆕 1. セッションの回復を待つ（これが遷移直後の「空き」を防ぐ特効薬です）
+    await supabase.auth.getSession();
+
+    // 2. データベースからショップ情報を取得
     const { data: profile } = await supabase.from('profiles').select('*').eq('id', shopId).single();
     if (!profile) { setLoading(false); return; }
     setShop(profile);
 
-    // 🆕 3. スタッフと予約情報の取得
+    // 3. スタッフと予約情報の取得
     const { data: staffsData } = await supabase.from('staffs').select('*').eq('shop_id', shopId);
     setAllStaffs(staffsData || []);
-if (effectiveStaffId) {
-  const staff = staffsData?.find(s => s.id === effectiveStaffId);
-  if (staff) {
-    setTargetStaff(staff);
-  }
-}
+
+    if (effectiveStaffId) {
+      const staff = staffsData?.find(s => s.id === effectiveStaffId);
+      if (staff) setTargetStaff(staff);
+    }
+
     let targetShopIds = [shopId];
     if (profile.schedule_sync_id) {
       const { data: siblingShops } = await supabase.from('profiles').select('id').eq('schedule_sync_id', profile.schedule_sync_id);
       if (siblingShops) targetShopIds = siblingShops.map(s => s.id);
     }
-const { data: resData } = await supabase.from('reservations').select('start_time, end_time, staff_id').in('shop_id', targetShopIds);
-      setExistingReservations(resData || []);
 
-      // ✅ 4. 業種キーワードによる自動判定（ReservationForm.jsx からの移植）
-      const VISIT_KEYWORDS = ['訪問', '出張', '代行', 'デリバリー', '清掃'];
-      const businessTypeName = profile.business_type || '';
-      const isVisit = VISIT_KEYWORDS.some(keyword => businessTypeName.includes(keyword));
-
-      if (isVisit && profile.minutes_per_km) {
-        // 🚗 訪問型：キーワードに合致し、かつ設定値がある場合
-        const speed = profile.minutes_per_km; 
-        const averageDistance = 7; 
-        const calculatedBuffer = averageDistance * speed; 
-        setTravelTimeMinutes(calculatedBuffer);
-        console.log(`🚗 訪問予約を検知（業種：${businessTypeName}）: バッファ ${calculatedBuffer}分`);
-      } else {
-        // ✂️ 来店型：キーワードに合致しない（SnipSnapなど）
-        setTravelTimeMinutes(0);
-        console.log(`✂️ 来店予約を検知（業種：${businessTypeName}）: 移動バッファは0分です`);
-      }
+    // 🆕 修正：既存予約の取得に「res_type」を追加（管理者ブロックを反映させるため）
+    const { data: resData } = await supabase
+      .from('reservations')
+      .select('start_time, end_time, staff_id, res_type') 
+      .in('shop_id', targetShopIds);
       
-      setLoading(false);
-    };
+    setExistingReservations(resData || []);
 
-  // 🆕 5. 関数を動かす命令（これも必要です）
-  useEffect(() => { fetchInitialData(); }, [shopId, effectiveStaffId]);
-  
+    // ✅ 4. 業種キーワードによる自動判定（三土手さんのオリジナルロジックを完全維持）
+    const VISIT_KEYWORDS = ['訪問', '出張', '代行', 'デリバリー', '清掃'];
+    const businessTypeName = profile.business_type || '';
+    const isVisit = VISIT_KEYWORDS.some(keyword => businessTypeName.includes(keyword));
+
+    if (isVisit && profile.minutes_per_km) {
+      // 🚗 訪問型：キーワードに合致し、かつ設定値がある場合
+      const speed = profile.minutes_per_km; 
+      const averageDistance = 7; 
+      const calculatedBuffer = averageDistance * speed; 
+      setTravelTimeMinutes(calculatedBuffer);
+      console.log(`🚗 訪問予約を検知（業種：${businessTypeName}）: バッファ ${calculatedBuffer}分`);
+    } else {
+      // ✂️ 来店型：キーワードに合致しない（SnipSnapなど）
+      setTravelTimeMinutes(0);
+      console.log(`✂️ 来店予約を検知（業種：${businessTypeName}）: 移動バッファは0分です`);
+    }
+    
+    setLoading(false);
+  };
+
+// 🆕 location.key を追加することで、同じショップ内での画面移動でも確実に再取得を走らせます
+  useEffect(() => { 
+    fetchInitialData(); 
+  }, [shopId, effectiveStaffId, location.key]);
+    
   // --- ⚙️ 三土手さんの本家エンジン（完全継承） ---
   const checkIsRegularHoliday = (date) => {
     if (!shop?.business_hours?.regular_holidays) return false;
