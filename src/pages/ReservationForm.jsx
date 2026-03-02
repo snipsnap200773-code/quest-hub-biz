@@ -53,8 +53,10 @@ const VISIT_KEYWORDS = ['訪問', '出張', '代行', 'デリバリー', '清掃
   const [selectedOptions, setSelectedOptions] = useState({}); 
   
   const [loading, setLoading] = useState(true);
-  const [lineUser, setLineUser] = useState(null);
+  const [lineUser, setLineUser] = useState(null);
+  // 🆕 Googleログインユーザーのプロフィールを保持するState
 
+  const [authUserProfile, setAuthUserProfile] = useState(null);
   // 🆕 【着せ替え用】画面に表示するブランド情報
   const [displayBranding, setDisplayBranding] = useState({ name: '', desc: '' });
 
@@ -158,9 +160,23 @@ const optRes = await supabase.from('service_options').select('*');
         if (staffList && staffList.length === 1 && !isAdminMode && !staffIdFromUrl) {
           console.log("👤 1人営業のため担当者を自動設定:", staffList[0].name);
           setTargetStaffName(staffList[0].name);
-          setAutoStaffId(staffList[0].id); // Stateに保存
+setAutoStaffId(staffList[0].id); // Stateに保存
+        }
+
+        // 🆕 Googleログインユーザー情報の取得
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          // ⚠️ 重要：customersではなく、app_usersから「本人の決めた名前」を取る
+          const { data: profile } = await supabase
+            .from('app_users')
+            .select('display_name, email, phone')
+            .eq('id', user.id)
+            .maybeSingle();
+          
+          if (profile) setAuthUserProfile(profile);
         }
-      } // !shopRes.data.is_suspended の閉じ
+
+      } // !shopRes.data.is_suspended の閉じ
     } // shopRes.data の閉じ
     setLoading(false);
   };
@@ -350,8 +366,10 @@ const handleNextStep = () => {
       }],
       totalSlotsNeeded,
       lineUser,
-      visitorZip,
-      visitorAddress,
+      // 🆕 ログイン済みユーザー情報をバトンタッチ
+      authUserProfile, 
+      visitorZip,
+      visitorAddress,
       customShopName: displayBranding.name,
       // ✅ 修正：Stateの autoStaffId を使う
       staffId: adminStaffId || staffIdFromUrl || autoStaffId,
@@ -441,6 +459,16 @@ const handleNextStep = () => {
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '15px', padding: '10px', background: '#f0fdf4', borderRadius: '10px', border: '1px solid #bbf7d0' }}>
             <img src={lineUser.pictureUrl} style={{ width: '30px', height: '30px', borderRadius: '50%' }} alt="LINE" />
             <span style={{ fontSize: '0.85rem', fontWeight: 'bold', color: '#166534' }}>{lineUser.displayName} さん、こんにちは！</span>
+          </div>
+        )}
+
+        {/* 🆕 Googleログインユーザーへの挨拶表示 */}
+        {authUserProfile && !lineUser && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '15px', padding: '10px', background: `${themeColor}10`, borderRadius: '10px', border: `1px solid ${themeColor}30` }}>
+            <span style={{ fontSize: '1.2rem' }}>👋</span>
+            <span style={{ fontSize: '0.85rem', fontWeight: 'bold', color: themeColor }}>
+              {authUserProfile.display_name} 様、こんにちは！
+            </span>
           </div>
         )}
 

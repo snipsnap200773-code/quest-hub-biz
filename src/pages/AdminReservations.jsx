@@ -85,11 +85,13 @@ const resIndexStyle = (color) => ({
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [customerFullHistory, setCustomerFullHistory] = useState([]);
 const [editFields, setEditFields] = useState({ 
-    name: '', furigana: '', phone: '', email: '', 
+    name: '', 
+    admin_name: '', // 🆕 管理用氏名を追加
+    furigana: '', phone: '', email: '', 
     address: '', parking: '', symptoms: '', request_details: '', 
     memo: '', line_user_id: null 
   });
-  // キーボード選択用のIndex管理
+    // キーボード選択用のIndex管理
   const [selectedIndex, setSelectedIndex] = useState(-1);
 
   useEffect(() => {
@@ -147,8 +149,14 @@ const isPC = windowWidth > 1024;
   useEffect(() => {
     const searchCustomers = async () => {
       if (!searchTerm) { setCustomers([]); setSelectedIndex(-1); return; }
-      const { data } = await supabase.from('customers').select('*').eq('shop_id', shopId).ilike('name', `%${searchTerm}%`).limit(5);
-      setCustomers(data || []);
+// 🆕 name（本人名）か admin_name（管理名）のどちらかにヒットすればOK
+      const { data } = await supabase
+        .from('customers')
+        .select('*')
+        .eq('shop_id', shopId)
+        .or(`name.ilike.%${searchTerm}%,admin_name.ilike.%${searchTerm}%`)
+        .limit(5);
+              setCustomers(data || []);
       setSelectedIndex(-1); // 検索ワードが変わったら選択位置をリセット
     };
     const timer = setTimeout(searchCustomers, 300);
@@ -290,7 +298,7 @@ const isPC = windowWidth > 1024;
 
 const payload = {
         shop_id: shopId,
-        name: editFields.name,
+        admin_name: editFields.name,
         furigana: editFields.furigana || null, // 🆕 追加
         phone: editFields.phone || null,
         email: editFields.email || null,
@@ -677,7 +685,9 @@ const insertData = {
                           background: index === selectedIndex ? themeColorLight : 'transparent'
                         }}
                       >
-                        <div style={{ fontWeight: 'bold', fontSize: '0.9rem' }}>{c.name} 様</div>
+<div style={{ fontWeight: 'bold', fontSize: '0.9rem' }}>
+  {c.admin_name || c.name} 様 {c.admin_name && c.admin_name !== c.name ? `(${c.name})` : ''}
+</div>
                         <div style={{ fontSize: '0.7rem', color: '#94a3b8' }}>{c.phone || '電話未登録'}</div>
                       </div>
                     ))}
@@ -1184,9 +1194,9 @@ drag="x"
               {selectedSlotReservations.map((res, idx) => (
                 <div key={res.id || idx} onClick={() => { setShowSlotListModal(false); openDetail(res); }} style={{ background: '#fff', padding: '18px', borderRadius: '18px', border: `1px solid #e2e8f0`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', boxShadow: '0 4px 6px rgba(0,0,0,0.02)' }}>
                   <div style={{ textAlign: 'left', flex: 1 }}>
-                    <div style={{ fontWeight: '900', fontSize: '1.1rem', color: '#1e293b', marginBottom: '4px' }}>
-                      {res.res_type === 'blocked' ? `🚫 ${res.customer_name}` : `👤 ${res.customer_name} 様`}
-                    </div>
+<div style={{ fontWeight: '900', fontSize: '1.1rem', color: '#1e293b', marginBottom: '4px' }}>
+  {res.res_type === 'blocked' ? `🚫 ${res.customer_name}` : `👤 ${res.customers?.admin_name || res.customer_name} 様`}
+</div>
 <div style={{ fontSize: '0.75rem', color: '#64748b' }}>
   {res.res_type === 'normal' ? (
     <>

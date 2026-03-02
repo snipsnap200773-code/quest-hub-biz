@@ -5,6 +5,10 @@ import { supabase } from '../supabaseClient';
 import { INDUSTRY_LABELS } from '../constants/industryMaster';
 import { MapPin, User, LogIn, Heart, Calendar, LogOut, X, Mail } from 'lucide-react';
 
+const profileInputStyle = { width: '100%', padding: '8px', borderRadius: '6px', border: 'none', color: '#333', fontSize: '0.9rem', boxSizing: 'border-box' };
+const profileSmallBtnStyle = { padding: '8px 12px', background: '#fff', color: '#07aadb', border: 'none', borderRadius: '6px', fontSize: '0.7rem', fontWeight: 'bold', cursor: 'pointer' };
+const profileActionBtnStyle = { flex: 1, padding: '10px', borderRadius: '8px', border: 'none', fontWeight: 'bold', cursor: 'pointer', fontSize: '0.85rem' };
+
 function Home() {
   const navigate = useNavigate();
   const [shops, setShops] = useState([]);
@@ -14,8 +18,15 @@ function Home() {
   const [categoryList, setCategoryList] = useState([]);
   const [user, setUser] = useState(null);
   const [userProfile, setUserProfile] = useState(null);
-  const [isEditingName, setIsEditingName] = useState(false); // 編集モードのON/OFF
-  const [editName, setEditName] = useState('');              // 入力中の名前
+  // 🆕 プロフィール編集モードのON/OFF
+  const [isEditingProfile, setIsEditingProfile] = useState(false); 
+  // 🆕 編集中の各項目をまとめて管理する箱
+  const [editFields, setEditFields] = useState({
+    display_name: '',
+    zip_code: '',
+    address: '',
+    phone: ''
+  });
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -124,27 +135,57 @@ if (!insError) {
     }
   };
 
-  // 🆕 表示名をデータベースに保存する関数
-  const handleUpdateName = async () => {
-    if (!editName.trim()) return; // 空白なら何もしない
+// 🆕 プロフィール情報をデータベースに保存する関数
+  const handleUpdateProfile = async () => {
+    if (!editFields.display_name.trim()) return alert("お名前は必須です");
 
     try {
       const { error } = await supabase
         .from('app_users')
-        .update({ display_name: editName })
+        .update({ 
+          display_name: editFields.display_name,
+          zip_code: editFields.zip_code,
+          address: editFields.address,
+          phone: editFields.phone
+        })
         .eq('id', user.id);
 
       if (error) throw error;
 
-      // データベースの更新が成功したら、画面上のデータも書き換える
-      setUserProfile({ ...userProfile, display_name: editName });
-      setIsEditingName(false); // 編集モードを終了
+      // 保存成功：画面表示を最新にする
+      setUserProfile({ ...userProfile, ...editFields });
+      setIsEditingProfile(false);
+
+      // 🤝 【重要】電話番号が登録されたなら、名寄せ（customersテーブルとの紐付け）を実行
+      if (editFields.phone) {
+        await supabase.from('customers')
+          .update({ auth_id: user.id })
+          .eq('phone', editFields.phone);
+      }
+
+      alert("プロフィールを更新しました！");
     } catch (err) {
-      console.error("Name Update Error:", err);
-      alert("名前の保存に失敗しました。");
+      console.error("Profile Update Error:", err);
+      alert("更新に失敗しました。");
     }
   };
-  
+
+  // 🆕 郵便番号から住所を自動取得する関数
+  const handleZipSearch = async () => {
+    const zip = editFields.zip_code.replace(/[^0-9]/g, '');
+    if (zip.length < 7) return alert("郵便番号を7桁で入力してください");
+    try {
+      const res = await fetch(`https://zipcloud.ibsnet.co.jp/api/search?zipcode=${zip}`);
+      const data = await res.json();
+      if (data.results) {
+        const { address1, address2, address3 } = data.results[0];
+        setEditFields({ ...editFields, address: `${address1}${address2}${address3}` });
+      } else {
+        alert("住所が見つかりませんでした");
+      }
+    } catch (err) { console.error("Zip Search Error:", err); }
+  };
+    
   // 🆕 3. 【司令塔】useEffect：ページを開いた瞬間に一度だけ動く
   useEffect(() => {
     const scrollTimer = setTimeout(() => { window.scrollTo({ top: 0, left: 0, behavior: 'instant' }); }, 100);
@@ -298,65 +339,91 @@ if (!insError) {
       <div style={{ maxWidth: '900px', margin: '0 auto', padding: '20px' }}>
         
 {/* 🆕 お客様専用：ログイン後のパーソナライズボード */}
-        {user && (
-          <div style={{ background: 'linear-gradient(135deg, #07aadb 0%, #0284c7 100%)', borderRadius: '16px', padding: '20px', marginBottom: '25px', color: '#fff', boxShadow: '0 8px 20px rgba(7, 170, 219, 0.2)' }}>
-            <h2 style={{ margin: 0, fontSize: '1.2rem', fontWeight: 'bold', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-              <span style={{ fontSize: '0.8rem', opacity: 0.8, fontWeight: 'normal' }}>
-                @{userProfile?.display_id || 'guest_user'}
-              </span>
+{user && (
+  <div style={{ background: 'linear-gradient(135deg, #07aadb 0%, #0284c7 100%)', borderRadius: '16px', padding: '20px', marginBottom: '25px', color: '#fff', boxShadow: '0 8px 20px rgba(7, 170, 219, 0.2)' }}>
+    <h2 style={{ margin: 0, fontSize: '1.2rem', fontWeight: 'bold', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+      <span style={{ fontSize: '0.8rem', opacity: 0.8, fontWeight: 'normal' }}>
+        @{userProfile?.display_id || 'guest_user'}
+      </span>
 
-{/* 🆕 編集モードかどうかの条件分岐 */}
-{isEditingName ? (
-  <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
-    <input 
-      value={editName}
-      onChange={(e) => setEditName(e.target.value)}
-      style={{ color: '#333', padding: '4px 10px', borderRadius: '8px', border: 'none', fontSize: '1rem', width: '150px' }}
-      placeholder="新しい名前"
-      autoFocus
-    />
-    <button onClick={handleUpdateName} style={{ background: '#fff', color: '#07aadb', border: 'none', padding: '4px 12px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', fontSize: '0.8rem' }}>保存</button>
-    <button onClick={() => setIsEditingName(false)} style={{ background: 'rgba(255,255,255,0.2)', color: '#fff', border: 'none', padding: '4px 12px', borderRadius: '8px', fontSize: '0.8rem', cursor: 'pointer' }}>取消</button>
-  </div>
-) : (
-  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-    <span>こんにちは、{userProfile?.display_name || 'ゲスト'} 様</span>
-    {/* 🆕 ここにボタンを追加しました */}
-    <button 
-      onClick={() => {
-        setEditName(userProfile?.display_name || '');
-        setIsEditingName(true);
-      }}
-      style={{ 
-        background: 'rgba(255,255,255,0.2)', 
-        border: 'none', 
-        color: '#fff', 
-        padding: '2px 10px', 
-        borderRadius: '6px', 
-        fontSize: '0.65rem', 
-        cursor: 'pointer',
-        fontWeight: 'bold'
-      }}
-    >
-      名前を変更
-    </button>
+      {/* 🆕 プロフィール編集モードの条件分岐 */}
+      {isEditingProfile ? (
+        /* --- 編集用フォームを表示 --- */
+        <div style={{ background: 'rgba(255,255,255,0.1)', padding: '15px', borderRadius: '12px', marginTop: '10px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          <div>
+            <label style={{ fontSize: '0.7rem', display: 'block', marginBottom: '4px', opacity: 0.9 }}>お名前</label>
+            <input value={editFields.display_name} onChange={(e) => setEditFields({...editFields, display_name: e.target.value})} style={profileInputStyle} />
+          </div>
+          
+          <div>
+            <label style={{ fontSize: '0.7rem', display: 'block', marginBottom: '4px', opacity: 0.9 }}>メールアドレス（編集不可）</label>
+            <div style={{ fontSize: '0.9rem', padding: '8px', background: 'rgba(255,255,255,0.2)', borderRadius: '6px', opacity: 0.8 }}>{userProfile?.email}</div>
+          </div>
+
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
+            <div style={{ flex: 1 }}>
+              <label style={{ fontSize: '0.7rem', display: 'block', marginBottom: '4px', opacity: 0.9 }}>郵便番号</label>
+              <input value={editFields.zip_code} onChange={(e) => setEditFields({...editFields, zip_code: e.target.value})} placeholder="000-0000" style={profileInputStyle} />
+            </div>
+            <button onClick={handleZipSearch} style={profileSmallBtnStyle}>住所検索</button>
+          </div>
+
+          <div>
+            <label style={{ fontSize: '0.7rem', display: 'block', marginBottom: '4px', opacity: 0.9 }}>住所</label>
+            <input value={editFields.address} onChange={(e) => setEditFields({...editFields, address: e.target.value})} style={profileInputStyle} />
+          </div>
+
+          <div>
+            <label style={{ fontSize: '0.7rem', display: 'block', marginBottom: '4px', opacity: 0.9 }}>電話番号</label>
+            <input value={editFields.phone} onChange={(e) => setEditFields({...editFields, phone: e.target.value})} style={profileInputStyle} />
+          </div>
+
+          <div style={{ display: 'flex', gap: '10px', marginTop: '5px' }}>
+            <button onClick={handleUpdateProfile} style={{ ...profileActionBtnStyle, background: '#fff', color: '#07aadb' }}>保存する</button>
+            <button onClick={() => setIsEditingProfile(false)} style={{ ...profileActionBtnStyle, background: 'rgba(255,255,255,0.2)', color: '#fff' }}>キャンセル</button>
+          </div>
+        </div>
+      ) : (
+        /* --- 通常の表示を表示 --- */
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <span>こんにちは、{userProfile?.display_name || 'ゲスト'} 様</span>
+            <button 
+              onClick={() => {
+                // 現在の情報を編集用の箱（editFields）にセットして編集モードにする
+                setEditFields({
+                  display_name: userProfile?.display_name || '',
+                  zip_code: userProfile?.zip_code || '',
+                  address: userProfile?.address || '',
+                  phone: userProfile?.phone || ''
+                });
+                setIsEditingProfile(true);
+              }}
+              style={{ background: 'rgba(255,255,255,0.2)', border: 'none', color: '#fff', padding: '4px 10px', borderRadius: '6px', fontSize: '0.65rem', cursor: 'pointer', fontWeight: 'bold' }}
+            >
+              プロフィール編集
+            </button>
+          </div>
+          {/* 住所があれば表示する */}
+          {userProfile?.address && (
+            <div style={{ fontSize: '0.75rem', opacity: 0.9, display: 'flex', alignItems: 'center', gap: '5px', fontWeight: 'normal' }}>
+              <MapPin size={12} /> {userProfile.address}
+            </div>
+          )}
+        </div>
+      )}
+    </h2>
+
+    <div style={{ display: 'flex', gap: '12px', marginTop: '15px' }}>
+      <div style={{ flex: 1, background: 'rgba(255,255,255,0.15)', padding: '12px', borderRadius: '12px', textAlign: 'center' }}>
+        <Calendar size={20} style={{ marginBottom: '4px' }} /><br/><span style={{ fontSize: '0.7rem' }}>予約確認</span>
+      </div>
+      <div style={{ flex: 1, background: 'rgba(255,255,255,0.15)', padding: '12px', borderRadius: '12px', textAlign: 'center' }}>
+        <Heart size={20} style={{ marginBottom: '4px' }} /><br/><span style={{ fontSize: '0.7rem' }}>お気に入り</span>
+      </div>
+    </div>
   </div>
 )}
-            </h2>
-
-            {/* 🗑️ 「あと一歩！」のリンクは自動生成になったので削除しました */}
-
-            <div style={{ display: 'flex', gap: '12px', marginTop: '15px' }}>
-              <div style={{ flex: 1, background: 'rgba(255,255,255,0.15)', padding: '12px', borderRadius: '12px', textAlign: 'center' }}>
-                <Calendar size={20} style={{ marginBottom: '4px' }} /><br/><span style={{ fontSize: '0.7rem' }}>予約確認</span>
-              </div>
-              <div style={{ flex: 1, background: 'rgba(255,255,255,0.15)', padding: '12px', borderRadius: '12px', textAlign: 'center' }}>
-                <Heart size={20} style={{ marginBottom: '4px' }} /><br/><span style={{ fontSize: '0.7rem' }}>お気に入り</span>
-              </div>
-            </div>
-</div>
-        )}
-
         {/* 🆕 予約履歴（My Journey）セクション */}
         {user && (
           <div style={{ marginBottom: '40px' }}>

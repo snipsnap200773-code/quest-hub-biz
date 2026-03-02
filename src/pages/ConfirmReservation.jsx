@@ -29,7 +29,8 @@ function ConfirmReservation() {
     fromView,
     visitorZip,
     visitorAddress,
-    travelTimeMinutes
+    travelTimeMinutes,
+    authUserProfile // 🆕 前の画面から渡されたログインユーザー情報
   } = location.state || {};
   
 const isAdminEntry = !!adminDate; 
@@ -113,59 +114,68 @@ const fetchStaffName = async () => {
     }
   };
 
-  // 🆕 LINE連携チェック ＋ 店舗データ取得を一元化
+// 🆕 ログイン情報・店舗データ取得の一元化
   useEffect(() => {
-// 1. LINEユーザー情報から顧客を特定する関数
-    const checkLineCustomer = async () => {
-      if (!lineUser?.userId) {
-        // LINEアプリ内からのアクセス（未連携）で名前だけある場合
-        if (lineUser?.displayName) {
-          console.log("👤 LINE表示名をセット:", lineUser.displayName);
-          setCustomerData(prev => ({ ...prev, name: lineUser.displayName }));
-        }
-        return;
-      }
-
-      // LINE連携済みの場合、まずLINEの表示名を「仮」でセットしておく（即時反映のため）
-      if (lineUser.displayName) {
-        setCustomerData(prev => ({ ...prev, name: lineUser.displayName }));
-      }
-
-      const { data: cust, error } = await supabase
-        .from('customers')
-        .select('*')
-        .eq('shop_id', shopId)
-        .eq('line_user_id', lineUser.userId)
-        .maybeSingle();
-
-if (cust) {
-        console.log("✅ 過去の顧客データを反映:", cust.name);
+    const checkUserAndStore = async () => {
+      // 🆕 1. Googleログインユーザー情報を優先的に入力欄へ反映
+      // authUserProfile にデータがあれば、name, email, phone を初期セットします
+      if (authUserProfile) {
+        console.log("👤 Googleログイン情報を反映:", authUserProfile.display_name);
         setCustomerData(prev => ({
           ...prev,
-          name: cust.name || lineUser.displayName || '',
-          furigana: cust.furigana || '',
-          phone: cust.phone || '',
-          email: cust.email || '',
-          // 🆕 郵便番号と住所をDBから復元
-          zip_code: visitorZip || cust.zip_code || '', 
-          address: visitorAddress || cust.address || '', 
-          parking: cust.parking || '', 
-          building_type: cust.building_type || '',
-          care_notes: cust.care_notes || '',
-          company_name: cust.company_name || '',
-          symptoms: cust.symptoms || '', 
-          request_details: cust.request_details || '',
-          notes: cust.notes || '',
-          custom_answers: cust.custom_answers || {} 
+          name: prev.name || authUserProfile.display_name || '',
+          email: prev.email || authUserProfile.email || '',
+          phone: prev.phone || authUserProfile.phone || '',
         }));
-        setSelectedCustomerId(cust.id);
       }
-      };    
-    // 2. 実行エリア
-    checkLineCustomer();
-    fetchShop();      // 🆕 これを呼ぶことで「読み込み中」が解除されます！
-    fetchStaffName(); // 🆕 スタッフ名取得もここで行うのがスムーズです
-  }, [lineUser, shopId]);
+
+      // 2. LINEユーザー情報の処理
+      if (!lineUser?.userId) {
+        if (lineUser?.displayName) {
+          setCustomerData(prev => ({ ...prev, name: prev.name || lineUser.displayName }));
+        }
+      } else {
+        // LINE連携済みの場合、まずLINE名を仮セット
+        if (lineUser.displayName) {
+          setCustomerData(prev => ({ ...prev, name: prev.name || lineUser.displayName }));
+        }
+
+        // DB（customersテーブル）から過去の保存情報を探す
+        const { data: cust } = await supabase
+          .from('customers')
+          .select('*')
+          .eq('shop_id', shopId)
+          .eq('line_user_id', lineUser.userId)
+          .maybeSingle();
+
+        if (cust) {
+          console.log("✅ 過去の顧客データを反映:", cust.name);
+          setCustomerData(prev => ({
+            ...prev,
+            name: cust.name || prev.name,
+            furigana: cust.furigana || '',
+            phone: cust.phone || prev.phone,
+            email: cust.email || prev.email,
+            zip_code: visitorZip || cust.zip_code || '', 
+            address: visitorAddress || cust.address || '', 
+            parking: cust.parking || '', 
+            building_type: cust.building_type || '',
+            care_notes: cust.care_notes || '',
+            company_name: cust.company_name || '',
+            symptoms: cust.symptoms || '', 
+            request_details: cust.request_details || '',
+            notes: cust.notes || '',
+            custom_answers: cust.custom_answers || {} 
+          }));
+          setSelectedCustomerId(cust.id);
+        }
+      }
+    };
+
+    checkUserAndStore();
+    fetchShop();
+    fetchStaffName();
+  }, [lineUser, authUserProfile, shopId]); // 🆕 authUserProfile も監視対象に追加
 
 // 🆕 顧客検索ロジックを一括State（customerData.name）に対応
   useEffect(() => {
@@ -291,13 +301,27 @@ const interval = shop.slot_interval_min || 15;
         }
       }
 
-      // 既存顧客の検索
+// 既存顧客の検索（名寄せ）
       let finalCustomerId = selectedCustomerId;
       let existingCust = null;
+
       if (!finalCustomerId) {
         const orConditions = [];
-        if (lineUser?.userId) orConditions.push(`line_user_id.eq.${lineUser.userId}`);
-        if (customerData.phone && customerData.phone !== '---') orConditions.push(`phone.eq.${customerData.phone}`);
+
+        // ✅ a. Googleログイン済みなら、前の画面から引き継いだIDで探す（getUserを呼ばなくてOK！）
+        if (authUserProfile?.id) {
+          orConditions.push(`auth_id.eq.${authUserProfile.id}`);
+        }
+        
+        // b. LINE ID で探す
+        if (lineUser?.userId) {
+          orConditions.push(`line_user_id.eq.${lineUser.userId}`);
+        }
+        
+        // c. 電話番号で探す
+        if (customerData.phone && customerData.phone !== '---') {
+          orConditions.push(`phone.eq.${customerData.phone}`);
+        }
         
         const { data: matched } = await supabase
           .from('customers')
@@ -311,11 +335,12 @@ const interval = shop.slot_interval_min || 15;
           existingCust = matched;
         }
       }
-
+      
 // --- 4. 顧客名簿（customers）の保存・更新 ---
       const customerPayload = {
         shop_id: shopId,
         name: customerData.name,
+        auth_id: authUserProfile?.id || null,
         furigana: customerData.furigana || null,
         phone: customerData.phone || null,
         email: customerData.email || null,
