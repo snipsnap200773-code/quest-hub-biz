@@ -10,24 +10,15 @@ function Home() {
   const [shops, setShops] = useState([]);
   const [newShops, setNewShops] = useState([]); 
   const [currentSlide, setCurrentSlide] = useState(0);
-  
-  // DBから取得するデータを保持するState
   const [topics, setTopics] = useState([]);
   const [categoryList, setCategoryList] = useState([]);
-
-// 🆕 ログイン・ユーザー管理用のState
   const [user, setUser] = useState(null);
-  
-  // 🆕 追加：DBから取得した詳細プロフィール（名前や自動生成ID）を入れる場所
   const [userProfile, setUserProfile] = useState(null);
-  // 🆕 追加：案内を出すかの判定用（自動生成するので初期値は true）
-  const [profileSet, setProfileSet] = useState(true);
-
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [favorites, setFavorites] = useState([]); // お気に入り店舗用（将来用）
-  const [myHistory, setMyHistory] = useState([]);
+  const [favorites, setFavorites] = useState([]); 
+  const [myHistory, setMyHistory] = useState([]); // 履歴用
 
   const sliderImages = [
     { id: 1, url: 'https://images.unsplash.com/photo-1600880210836-8f8fe100a35c?auto=format&fit=crop&w=1200&q=80', title: '自分らしく、働く。', desc: 'Solopreneurを支えるポータルサイト' },
@@ -35,33 +26,46 @@ function Home() {
     { id: 3, url: 'https://images.unsplash.com/photo-1521737604893-d14cc237f11d?auto=format&fit=crop&w=1200&q=80', title: '新しい繋がりを。', desc: 'あなたのサービスを世界へ届けよう' },
   ];
 
-// 🆕 1. ユーザー情報の同期（履歴・プロフィール）を「別の箱」として用意
-  // useEffectの外に書くことで、リロード時とログイン時の両方から使い回せます
+  // 🆕 1. 【部品】ポータルデータを読み込む関数（最優先で実行される）
+  const fetchPortalData = async () => {
+    try {
+      const shopRes = await supabase.from('profiles').select('*').eq('is_suspended', false).not('business_name', 'is', null);
+      if (shopRes.data) {
+        setShops(shopRes.data);
+        setNewShops([...shopRes.data].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 3));
+      }
+      const newsRes = await supabase.from('portal_news').select('*').order('sort_order', { ascending: true });
+      if (newsRes.data) setTopics(newsRes.data);
+      const catRes = await supabase.from('portal_categories').select('*').order('sort_order', { ascending: true });
+      if (catRes.data) setCategoryList(catRes.data);
+    } catch (err) {
+      console.error("Portal Data Error:", err);
+    }
+  };
+
+  // 🆕 2. 【部品】ユーザー情報と履歴を同期する関数
   const handleSyncUser = async (session) => {
     if (!session) return;
     try {
-      // プロフィール取得
       let { data: appUser } = await supabase.from('app_users').select('*').eq('id', session.user.id).maybeSingle();
 
       if (!appUser) {
-        // 新規登録・ゾンビ修復ロジック（upsert）
         const randomId = `user_${Math.random().toString(36).substring(2, 7)}`;
-        const { data: newUser, error: insError } = await supabase.from('app_users').upsert({
+        const { data: newUser } = await supabase.from('app_users').upsert({
           id: session.user.id,
           display_id: randomId,
           display_name: session.user.user_metadata?.full_name || 'ゲストユーザー',
           email: session.user.email,
           avatar_url: session.user.user_metadata?.avatar_url || null
         }).select().single();
-        if (insError) throw insError;
         appUser = newUser;
-        // 過去履歴の紐付け（バックグラウンド実行）
+        // 過去履歴の紐付け
         supabase.from('customers').update({ auth_id: session.user.id }).eq('email', session.user.email).then();
       }
 
       if (appUser) setUserProfile(appUser);
 
-      // 履歴取得（ここが遅くても画面フリーズはさせない！）
+      // 履歴取得（安全ガード付き）
       try {
         const { data: history } = await supabase
           .from('reservations')
@@ -70,42 +74,37 @@ function Home() {
           .order('start_time', { ascending: false });
         if (history) setMyHistory(history);
       } catch (hErr) {
-        console.warn("履歴取得でエラーが発生しましたが、無視して続行します:", hErr);
+        console.warn("History Fetch Error:", hErr);
       }
     } catch (err) {
-      console.error("Sync Error:", err);
+      console.error("User Sync Error:", err);
     }
   };
 
-  // 🆕 2. 整理された useEffect
+  // 🆕 3. 【司令塔】useEffect：ページを開いた瞬間に一度だけ動く
   useEffect(() => {
-    const scrollTimer = setTimeout(() => {
-      window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
-    }, 100);
-    const sliderTimer = setInterval(() => {
-      setCurrentSlide((prev) => (prev === sliderImages.length - 1 ? 0 : prev + 1));
-    }, 5000);
+    const scrollTimer = setTimeout(() => { window.scrollTo({ top: 0, left: 0, behavior: 'instant' }); }, 100);
+    const sliderTimer = setInterval(() => { setCurrentSlide((prev) => (prev === sliderImages.length - 1 ? 0 : prev + 1)); }, 5000);
 
-    // 🔥 鉄則：ポータルデータ（トピックなど）は「一番最初」に「独立して」呼ぶ！
-    // これにより、ログイン処理の結果を待たずに画面が表示されます
+    // 🔥 トピック読み込みを真っ先に実行！
     fetchPortalData();
 
-    // ログイン状態の初期チェック（リロード時の復旧用）
-    const getInitialSession = async () => {
+    // 初期セッションチェック
+    const checkSession = async () => {
       const { data: { session } } = await supabase.auth.getSession();
       if (session) {
         setUser(session.user);
-        handleSyncUser(session); // 別の箱（同期関数）を呼ぶ
+        handleSyncUser(session);
       }
     };
-    getInitialSession();
+    checkSession();
 
-    // ログイン状態の監視（ログイン・ログアウトの瞬間に動く）
+    // 認証状態の監視
     const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
       setUser(session?.user ?? null);
       if (session) {
         setIsModalOpen(false);
-        handleSyncUser(session); // 別の箱（同期関数）を呼ぶ
+        handleSyncUser(session);
       } else {
         setUserProfile(null);
         setMyHistory([]);
@@ -117,11 +116,12 @@ function Home() {
       clearInterval(sliderTimer);
       authListener.subscription.unsubscribe();
     };
-  }, []); // 👈 依存配列は空でOK
-  // 🆕 認証用関数
-// 🆕 ステートを追加（ファイルの先頭付近の useState 群に入れてください）
-  const [isSignUpMode, setIsSignUpMode] = useState(false);
+  }, []);
 
+  // 🆕 ステート
+  const [isSignUpMode, setIsSignUpMode] = useState(false);
+  
+  // --- 以降、handleEmailAuth などの関数と return ( ... ) の JSX が続きます ---
   const handleEmailAuth = async (e) => {
     e.preventDefault();
     
