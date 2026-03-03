@@ -114,68 +114,72 @@ const fetchStaffName = async () => {
     }
   };
 
-// 🆕 ログイン情報・店舗データ取得の一元化
-  useEffect(() => {
-    const checkUserAndStore = async () => {
-      // 🆕 1. Googleログインユーザー情報を優先的に入力欄へ反映
-      // authUserProfile にデータがあれば、name, email, phone を初期セットします
-      if (authUserProfile) {
-        console.log("👤 Googleログイン情報を反映:", authUserProfile.display_name);
+// --- 修正後：Google/LINE共通でDBから全13項目を詳細に反映 ---
+useEffect(() => {
+  const checkUserAndStore = async () => {
+    // 🆕 もし管理者による「ねじ込み（isAdminEntry）」なら、
+    // ログイン中のGoogleユーザー（ハム太郎）の情報は一切使わず、真っさらな状態で始める
+    if (isAdminEntry) {
+      console.log("⚡ 管理者ねじ込みモード：ログインユーザー情報を無視します");
+      return; 
+    }
+
+    // 以下は、一般客がマイページ等から予約する場合の既存ロジック
+    if (authUserProfile) {
+      setCustomerData(prev => ({
+        ...prev,
+        name: prev.name || authUserProfile.display_name || '',
+        email: prev.email || authUserProfile.email || '',
+        phone: prev.phone || authUserProfile.phone || '',
+      }));
+    }
+
+    // 2. 🆕 DB検索条件の構築（Google ID または LINE ID）
+    const orConditions = [];
+    if (authUserProfile?.id) orConditions.push(`auth_id.eq.${authUserProfile.id}`);
+    if (lineUser?.userId) orConditions.push(`line_user_id.eq.${lineUser.userId}`);
+
+    if (orConditions.length > 0) {
+      // データベースから「三土手 大道」など過去に保存した全情報を探す
+      const { data: cust } = await supabase
+        .from('customers')
+        .select('*')
+        .or(orConditions.join(','))
+        .eq('shop_id', shopId)
+        .maybeSingle();
+
+      // 🏆 DBにデータが見つかった場合：全13項目を一切省略せず反映！
+      if (cust) {
+        console.log("✅ DBから過去に上書きされた全顧客データを反映:", cust.name);
         setCustomerData(prev => ({
           ...prev,
-          name: prev.name || authUserProfile.display_name || '',
-          email: prev.email || authUserProfile.email || '',
-          phone: prev.phone || authUserProfile.phone || '',
+          name: cust.name || prev.name, // ここで「ハム太郎」が「最新名」に上書きされます
+          furigana: cust.furigana || '',
+          phone: cust.phone || prev.phone,
+          email: cust.email || prev.email,
+          zip_code: visitorZip || cust.zip_code || '', 
+          address: visitorAddress || cust.address || '', 
+          parking: cust.parking || '', 
+          building_type: cust.building_type || '',
+          care_notes: cust.care_notes || '',
+          company_name: cust.company_name || '',
+          symptoms: cust.symptoms || '', 
+          request_details: cust.request_details || '',
+          notes: cust.notes || '',
+          custom_answers: cust.custom_answers || {} 
         }));
+        setSelectedCustomerId(cust.id);
       }
+    } else if (lineUser?.displayName) {
+      // IDがどちらもない場合のフォールバック
+      setCustomerData(prev => ({ ...prev, name: prev.name || lineUser.displayName }));
+    }
+  };
 
-      // 2. LINEユーザー情報の処理
-      if (!lineUser?.userId) {
-        if (lineUser?.displayName) {
-          setCustomerData(prev => ({ ...prev, name: prev.name || lineUser.displayName }));
-        }
-      } else {
-        // LINE連携済みの場合、まずLINE名を仮セット
-        if (lineUser.displayName) {
-          setCustomerData(prev => ({ ...prev, name: prev.name || lineUser.displayName }));
-        }
-
-        // DB（customersテーブル）から過去の保存情報を探す
-        const { data: cust } = await supabase
-          .from('customers')
-          .select('*')
-          .eq('shop_id', shopId)
-          .eq('line_user_id', lineUser.userId)
-          .maybeSingle();
-
-        if (cust) {
-          console.log("✅ 過去の顧客データを反映:", cust.name);
-          setCustomerData(prev => ({
-            ...prev,
-            name: cust.name || prev.name,
-            furigana: cust.furigana || '',
-            phone: cust.phone || prev.phone,
-            email: cust.email || prev.email,
-            zip_code: visitorZip || cust.zip_code || '', 
-            address: visitorAddress || cust.address || '', 
-            parking: cust.parking || '', 
-            building_type: cust.building_type || '',
-            care_notes: cust.care_notes || '',
-            company_name: cust.company_name || '',
-            symptoms: cust.symptoms || '', 
-            request_details: cust.request_details || '',
-            notes: cust.notes || '',
-            custom_answers: cust.custom_answers || {} 
-          }));
-          setSelectedCustomerId(cust.id);
-        }
-      }
-    };
-
-    checkUserAndStore();
-    fetchShop();
-    fetchStaffName();
-  }, [lineUser, authUserProfile, shopId]); // 🆕 authUserProfile も監視対象に追加
+  checkUserAndStore();
+  fetchShop();
+  fetchStaffName();
+}, [lineUser, authUserProfile, shopId]);
 
 // 🆕 顧客検索ロジックを一括State（customerData.name）に対応
   useEffect(() => {
@@ -363,15 +367,37 @@ const interval = shop.slot_interval_min || 15;
         updated_at: new Date().toISOString()
       };
 
+// --- 298行目付近：修正版 ---
       if (finalCustomerId) {
-        await supabase.from('customers').update(customerPayload).eq('id', finalCustomerId);
+        // 🆕 修正ポイント：マスタ（三土手 大造さん）の大切な情報を「汚さない」ためのガード
+        const updatePayload = {
+          // 訪問回数を1増やす（既存データがあれば加算、なければ1）
+          total_visits: (existingCust?.total_visits || 0) + 1,
+          // 最終来店日時を今回の予約時間に更新
+          last_arrival_at: startDateTime.toISOString(),
+          updated_at: new Date().toISOString()
+        };
+
+        // 🆕 Google IDやLINE IDが未紐付けなら、このタイミングでこっそり紐付けておく
+        // （これにより、次回の「3択ポップアップ」がより正確に動きます。名前は変えません）
+        if (authUserProfile?.id && !existingCust?.auth_id) {
+          updatePayload.auth_id = authUserProfile.id;
+        }
+        if (lineUser?.userId && !existingCust?.line_user_id) {
+          updatePayload.line_user_id = lineUser.userId;
+        }
+
+        // ⚠️ customerPayload（ハム太郎という名前を含む全データ）は使わず、実績データのみ更新
+        await supabase.from('customers').update(updatePayload).eq('id', finalCustomerId);
+
       } else {
+        // 全くの新規客（finalCustomerIdがない）の場合のみ、入力された全項目を名簿に新規作成
         const { data: newCust, error: insError } = await supabase.from('customers').insert([customerPayload]).select().single();
         if (insError) throw insError;
         finalCustomerId = newCust.id;
       }
-
-// ✅ 予約データの挿入
+      
+      // ✅ 予約データの挿入
       const { error: dbError } = await supabase.from('reservations').insert([
         {
           shop_id: shopId,

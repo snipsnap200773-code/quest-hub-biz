@@ -83,6 +83,9 @@ const resIndexStyle = (color) => ({
   const [customers, setCustomers] = useState([]); 
   const [showCustomerModal, setShowCustomerModal] = useState(false);
   const [selectedCustomer, setSelectedCustomer] = useState(null);
+  // 他のStateと一緒に定義してください
+const [mergeCandidate, setMergeCandidate] = useState(null); // 重複が見つかった「大造」さん候補
+const [showMergeConfirm, setShowMergeConfirm] = useState(false); // 3択モーダルの表示フラグ
   const [customerFullHistory, setCustomerFullHistory] = useState([]);
 const [editFields, setEditFields] = useState({ 
     name: '', 
@@ -134,12 +137,12 @@ const isPC = windowWidth > 1024;
       }
     }
 
-    // 3. 全関連店舗の予約データを合算して取得（店名も一緒に取得）
+// 3. 全関連店舗の予約データを合算して取得（顧客マスタの最新名も取得）
     const { data: resData } = await supabase
       .from('reservations')
-      .select('*, profiles(business_name), staffs(name)')
+      .select('*, profiles(business_name), staffs(name), customers(name, admin_name)') // 🆕 ここにcustomersを追加
       .in('shop_id', targetShopIds);
-    const { data: staffsData } = await supabase.from('staffs').select('*').eq('shop_id', shopId);
+      const { data: staffsData } = await supabase.from('staffs').select('*').eq('shop_id', shopId);
     setStaffs(staffsData || []);
 
     setReservations(resData || []);
@@ -165,14 +168,17 @@ const isPC = windowWidth > 1024;
 
   const openCustomerDetail = async (customer) => {
     setSelectedCustomer(customer);
-    setEditFields({ 
-      name: customer.name, 
-      phone: customer.phone || '', 
-      email: customer.email || '', 
+setEditFields({ 
+      // 管理名があればそれを、なければ本人名をセット
+      name: customer.admin_name || customer.name, 
+      // マスタ側に電話番号があればそれを、なければ今回の予約時のものを優先
+      phone: customer.phone || selectedRes?.customer_phone || '', 
+      // 🆕 ここが重要！マスタにメールがなくても、予約時のメールがあればそれを表示に活かす
+      email: customer.email || selectedRes?.customer_email || '', 
       memo: customer.memo || '',
-      line_user_id: customer.line_user_id || null 
+      line_user_id: customer.line_user_id || selectedRes?.line_user_id || null 
     });
-    setSearchTerm('');
+        setSearchTerm('');
     setSelectedIndex(-1);
     const { data } = await supabase.from('reservations').select('*').eq('shop_id', shopId).eq('customer_name', customer.name).order('start_time', { ascending: false });
     setCustomerFullHistory(data || []);
@@ -200,39 +206,66 @@ const isPC = windowWidth > 1024;
     }
   };
 
+// 🆕 修正後：名寄せスカウター搭載版
   const openDetail = async (res) => {
-    // 🆕 修正ポイント： shop_id が存在し、かつ現在の店舗と違う場合のみアラートを出す
-    // (定休日などのシステムデータには shop_id がないので、スルーさせる)
     if (res.shop_id && res.shop_id !== shopId) {
-      alert(`こちらは他店舗（${res.profiles?.business_name || '別ブランド'}）の予約枠です。詳細は各店舗の管理画面で確認してください。`);
+      alert(`こちらは他店舗（${res.profiles?.business_name || '別ブランド'}）の予約枠です。`);
       return;
     }
-
     setSelectedRes(res);
+
+    // 🔍 【スカウター発動】電話番号またはメールで既存客をガサ入れ
+    const orConditions = [];
+    if (res.customer_phone && res.customer_phone !== '---') orConditions.push(`phone.eq.${res.customer_phone}`);
+    if (res.customer_email) orConditions.push(`email.eq.${res.customer_email}`);
+
     let cust = null;
-    if (res.line_user_id) {
-      const { data } = await supabase.from('customers').select('*').eq('shop_id', shopId).eq('line_user_id', res.line_user_id).maybeSingle();
-      cust = data;
-    }
-    if (!cust && res.customer_name) {
-      const { data } = await supabase.from('customers').select('*').eq('shop_id', shopId).eq('name', res.customer_name).maybeSingle();
-      cust = data;
+    if (orConditions.length > 0) {
+      const { data: matched } = await supabase
+        .from('customers')
+        .select('*')
+        .eq('shop_id', shopId)
+        .or(orConditions.join(','))
+        .maybeSingle();
+      cust = matched;
     }
 
-// 🆕 予約データに紐づく詳細情報を取得
+// 🔍 判定：連絡先（電話・メール）が一致する人がDBに既にいる場合
+    if (cust) {
+      // 🆕 修正ポイント：
+      // ヒットした顧客マスタのID (cust.id) と、
+      // 予約データに紐付いている顧客ID (res.customer_id) が同じなら
+      // それは「統合済み」の状態なので、3択を出さずにそのまま詳細を開く
+      if (cust.id === res.customer_id) {
+        finalizeOpenDetail(res, cust);
+        return;
+      }
+
+      console.log(`🔍 重複チェック：予約名[${res.customer_name}] vs 名簿名[${cust.name}]`);
+      
+      setMergeCandidate(cust); 
+      setShowMergeConfirm(true); 
+      return; 
+    }    
+    // 重複がない、または名前も一致なら、そのまま詳細表示へ
+    finalizeOpenDetail(res, cust);
+  };
+
+  // 🆕 共通処理：詳細モーダルを表示するための確定処理
+  const finalizeOpenDetail = (res, cust) => {
     const visitInfo = res.options?.visit_info || {};
 
     if (cust) {
       setSelectedCustomer(cust);
       setEditFields({ 
-        name: cust.name, 
-        furigana: cust.furigana || visitInfo.furigana || '', // 🆕 追加
+        name: cust.admin_name || cust.name, // マスタの管理名を優先
+        furigana: cust.furigana || visitInfo.furigana || '',
         phone: cust.phone || '', 
         email: cust.email || '', 
-        address: cust.address || visitInfo.address || '', // 🆕 追加
-        parking: cust.parking || visitInfo.parking || '', // 🆕 追加
-        symptoms: cust.symptoms || visitInfo.symptoms || '', // 🆕 追加
-        request_details: cust.request_details || visitInfo.request_details || '', // 🆕 追加
+        address: cust.address || visitInfo.address || '', 
+        parking: cust.parking || visitInfo.parking || '', 
+        symptoms: cust.symptoms || visitInfo.symptoms || '', 
+        request_details: cust.request_details || visitInfo.request_details || '', 
         memo: cust.memo || '',
         line_user_id: cust.line_user_id || res.line_user_id || null
       });
@@ -240,26 +273,71 @@ const isPC = windowWidth > 1024;
       setSelectedCustomer(null);
       setEditFields({ 
         name: res.customer_name, 
-        furigana: visitInfo.furigana || '', // 🆕 追加
+        furigana: visitInfo.furigana || '', 
         phone: res.customer_phone || '', 
         email: res.customer_email || '', 
-        address: visitInfo.address || '', // 🆕 追加
-        parking: visitInfo.parking || '', // 🆕 追加
-        symptoms: visitInfo.symptoms || '', // 🆕 追加
-        request_details: visitInfo.request_details || '', // 🆕 追加
+        address: visitInfo.address || '', 
+        parking: visitInfo.parking || '', 
+        symptoms: visitInfo.symptoms || '', 
+        request_details: visitInfo.request_details || '', 
         memo: '',
         line_user_id: res.line_user_id || null
       });
     }
-        const history = reservations.filter(r => r.shop_id === shopId && r.res_type === 'normal' && r.id !== res.id && (r.customer_name === res.customer_name) && new Date(r.start_time) < new Date(res.start_time)).sort((a, b) => new Date(b.start_time) - new Date(a.start_time)).slice(0, 5);
+    const history = reservations.filter(r => r.shop_id === shopId && r.res_type === 'normal' && r.id !== res.id && (r.customer_name === res.customer_name) && new Date(r.start_time) < new Date(res.start_time)).sort((a, b) => new Date(b.start_time) - new Date(a.start_time)).slice(0, 5);
     setCustomerHistory(history);
     setShowDetailModal(true);
+}; // finalizeOpenDetail の終わり
+
+  // 🆕 ここから追記：理想の名寄せ：名前の選択肢を持たせた統合処理
+  const handleMergeAction = async (masterId, finalName) => {
+    try {
+      // 1. 予約データのIDと名前を、選んだ名前に書き換えてマスタに紐付ける
+      const { error: resError } = await supabase
+        .from('reservations')
+        .update({ 
+          customer_id: masterId,
+          customer_name: finalName // 予約票上の表示名も統一する
+        })
+        .eq('id', selectedRes.id);
+
+      if (resError) throw resError;
+
+      // 2. 顧客マスタ側の名前も、三土手さんが選んだ「正解の名前」で更新
+      const customerUpdate = { 
+        name: finalName,
+        updated_at: new Date().toISOString()
+      };
+
+      // Google IDがあれば紐付けを維持/追加
+      if (selectedRes.auth_id) {
+        customerUpdate.auth_id = selectedRes.auth_id;
+      }
+
+      const { error: custError } = await supabase
+        .from('customers')
+        .update(customerUpdate)
+        .eq('id', masterId);
+
+      if (custError) throw custError;
+
+      console.log(`✅ 統合完了: 「${finalName}」様としてマスタを確定しました`);
+      
+      setShowMergeConfirm(false);
+      fetchData(); // カレンダーの表示名を更新するために再取得
+      finalizeOpenDetail(selectedRes, { ...mergeCandidate, name: finalName }); 
+    } catch (err) {
+      console.error("名寄せエラー:", err);
+      alert("統合処理に失敗しました。");
+    }
   };
+  // 🆕 追記ここまで
 
 // ✅ 名簿保存 ＆ 統合（名寄せ）ロジック：最強版
   const handleUpdateCustomer = async () => {
     try {
       let targetCustomerId = selectedCustomer?.id;
+      // ...（以下、既存の処理）
 
       // --- 🆕 自動名寄せチェック ---
       if (!targetCustomerId) {
@@ -835,10 +913,14 @@ drag="x"
                                   isStart ? (
                                     <div style={{ fontWeight: 'bold', fontSize: isPC ? '0.85rem' : '0.7rem', color: isOtherShop ? '#94a3b8' : colors.text, textAlign: 'center', whiteSpace: 'nowrap', padding: '0 4px' }}>
                                       {(() => {
-                                        if (startingHere.length === 1) {
-                                          const name = startingHere[0].customer_name.split(/[\s　]+/)[0];
-                                          const countSuffix = reservationCount > 1 ? ` (${reservationCount}名)` : " 様";
-                                          return isPC ? (`${name}${countSuffix}`) : (
+if (startingHere.length === 1) {
+            // 🆕 予約票の名前(snapshot)ではなく、マスタ側の最新名(admin_nameがあれば最優先)を特定する
+            const res = startingHere[0];
+            const masterName = res.customers?.admin_name || res.customers?.name || res.customer_name;
+            
+            const name = masterName.split(/[\s　]+/)[0];
+            const countSuffix = reservationCount > 1 ? ` (${reservationCount}名)` : " 様";
+            return isPC ? (`${name}${countSuffix}`) : (
                                             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', lineHeight: 1 }}>
                                               <span style={{ writingMode: 'vertical-rl', textOrientation: 'upright' }}>{name}</span>
                                               {reservationCount > 1 && <span style={{ fontSize: '0.6rem', marginTop: '2px' }}>({reservationCount})</span>}
@@ -871,6 +953,69 @@ drag="x"
           </div>
         )}
       </div>
+
+{/* 🆕 3択の名寄せ（マージ）確認モーダル */}
+{showMergeConfirm && (
+  <div 
+    onClick={() => setShowMergeConfirm(false)} 
+    style={{
+      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 5000, 
+      display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(8px)' 
+    }}
+  >
+    <div 
+      onClick={(e) => e.stopPropagation()} 
+      style={{ 
+        background: '#fff', width: '90%', maxWidth: '400px', borderRadius: '30px', 
+        padding: '35px', textAlign: 'center', boxShadow: '0 20px 50px rgba(0,0,0,0.3)' 
+      }}
+    >
+      <div style={{ fontSize: '3rem', marginBottom: '15px' }}>👤</div>
+      <h3 style={{ fontSize: '1.2rem', fontWeight: '900', marginBottom: '10px', color: '#1e293b' }}>
+        同一人物の可能性があります
+      </h3>
+      <p style={{ fontSize: '0.85rem', color: '#64748b', lineHeight: '1.6', marginBottom: '30px' }}>
+        連絡先が一致するお客様が既に登録されています。<br/>
+        <strong>「{mergeCandidate?.name}」</strong> 様として管理しますか？
+      </p>
+
+<div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+        {/* 選択肢A：店主が把握している名前（大造さん）を守る */}
+        <button 
+          onClick={() => handleMergeAction(mergeCandidate.id, mergeCandidate.name)}
+          style={{ 
+            padding: '18px', background: themeColor, color: '#fff', border: 'none', 
+            borderRadius: '16px', fontWeight: 'bold', fontSize: '1rem', cursor: 'pointer' 
+          }}
+        >
+          👤 既存の「{mergeCandidate?.name}」様に統合
+        </button>
+
+        {/* 選択肢B：お客様が新しく名乗った名前（ハム太郎）を正式採用してあげる */}
+        <button 
+          onClick={() => handleMergeAction(mergeCandidate.id, selectedRes.customer_name)}
+          style={{ 
+            padding: '16px', background: '#fff', color: themeColor, 
+            border: `2px solid ${themeColor}`, borderRadius: '16px', fontWeight: 'bold', cursor: 'pointer' 
+          }}
+        >
+          🐹 今回の「{selectedRes?.customer_name}」様へ名前を更新
+        </button>
+
+        {/* 選択肢C：同姓同名の別人として新規登録 */}
+        <button 
+          onClick={() => {
+            setShowMergeConfirm(false);
+            finalizeOpenDetail(selectedRes, null); 
+          }}
+          style={{ padding: '12px', background: 'none', border: 'none', color: '#64748b', fontSize: '0.85rem', cursor: 'pointer' }}
+        >
+          🙅 同姓同名の別人として別名簿で管理
+        </button>
+      </div>
+          </div>
+  </div>
+)}
 
 {(showCustomerModal || showDetailModal) && (
         <div onClick={() => { if(selectedRes?.isRegularHoliday) return; setShowCustomerModal(false); setShowDetailModal(false); }} style={overlayStyle}>

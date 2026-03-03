@@ -163,10 +163,10 @@ const optRes = await supabase.from('service_options').select('*');
 setAutoStaffId(staffList[0].id); // Stateに保存
         }
 
-        // 🆕 Googleログインユーザー情報の取得
+// 🆕 Googleログインユーザー情報の取得
+        // 🛡️ 管理者ねじ込みモード(isAdminMode)の場合は、ログイン情報を無視する
         const { data: { user } } = await supabase.auth.getUser();
-        if (user) {
-          // ⚠️ 重要：customersではなく、app_usersから「本人の決めた名前」を取る
+        if (user && !isAdminMode) {
           const { data: profile } = await supabase
             .from('app_users')
             .select('display_name, email, phone')
@@ -174,8 +174,10 @@ setAutoStaffId(staffList[0].id); // Stateに保存
             .maybeSingle();
           
           if (profile) setAuthUserProfile(profile);
+        } else if (isAdminMode) {
+          console.log("🛡️ 管理者モード：ログインユーザー情報を読み込みません");
         }
-
+        
       } // !shopRes.data.is_suspended の閉じ
     } // shopRes.data の閉じ
     setLoading(false);
