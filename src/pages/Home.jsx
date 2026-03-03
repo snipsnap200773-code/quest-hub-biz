@@ -9,6 +9,10 @@ const profileInputStyle = { width: '100%', padding: '8px', borderRadius: '6px', 
 const profileSmallBtnStyle = { padding: '8px 12px', background: '#fff', color: '#07aadb', border: 'none', borderRadius: '6px', fontSize: '0.7rem', fontWeight: 'bold', cursor: 'pointer' };
 const profileActionBtnStyle = { flex: 1, padding: '10px', borderRadius: '8px', border: 'none', fontWeight: 'bold', cursor: 'pointer', fontSize: '0.85rem' };
 
+// 🆕 ここから追記：モーダル内で使う共通スタイル（エラー解消用）
+const modalInputStyle = { padding: '14px', borderRadius: '12px', border: '1px solid #e2e8f0', fontSize: '1rem', width: '100%', boxSizing: 'border-box' };
+const modalPrimaryBtnStyle = { background: '#0f172a', color: '#fff', border: 'none', padding: '16px', borderRadius: '16px', fontWeight: 'bold', cursor: 'pointer', marginTop: '8px', fontSize: '1.05rem', boxShadow: '0 10px 15px -3px rgba(15,23,42,0.3)', width: '100%' };
+
 function Home() {
   const navigate = useNavigate();
   const [shops, setShops] = useState([]);
@@ -27,9 +31,14 @@ function Home() {
     address: '',
     phone: ''
   });
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+const [isModalOpen, setIsModalOpen] = useState(false);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  // 🆕 追加：多段登録フロー用
+  const [signUpStep, setSignUpStep] = useState('email'); // 'email' | 'otp' | 'password' | 'profile'
+  const [otpCode, setOtpCode] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [phone, setPhone] = useState('');
   const [favorites, setFavorites] = useState([]); 
   const [myHistory, setMyHistory] = useState([]); // 履歴用
 
@@ -204,18 +213,24 @@ if (!insError) {
     };
     checkSession();
 
-    // 認証状態の監視
+// 認証状態の監視
     const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
       setUser(session?.user ?? null);
+      
       if (session) {
-        setIsModalOpen(false);
+        // 🆕 重要：新規登録モード(isSignUpMode)の時は、何があってもモーダルを閉じない
+        if (isSignUpMode) {
+          console.log("🛠 登録フロー継続中：モーダルを維持します");
+        } else {
+          setIsModalOpen(false);
+        }
         handleSyncUser(session);
       } else {
         setUserProfile(null);
         setMyHistory([]);
       }
     });
-
+    
     return () => {
       clearTimeout(scrollTimer);
       clearInterval(sliderTimer);
@@ -224,42 +239,91 @@ if (!insError) {
   }, []);
 
   // 🆕 ステート
-  const [isSignUpMode, setIsSignUpMode] = useState(false);
-  
-  // --- 以降、handleEmailAuth などの関数と return ( ... ) の JSX が続きます ---
-  const handleEmailAuth = async (e) => {
-    e.preventDefault();
-    
-    // 🆕 新規登録時のパスワード強度チェック
-    if (isSignUpMode) {
-      const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$/;
-      if (!passwordRegex.test(password)) {
-        alert("セキュリティのため「英大文字・小文字・数字」をすべて含めて8文字以上で設定してください。");
-        return;
-      }
+const [isSignUpMode, setIsSignUpMode] = useState(false);
 
-      // 🆕 新規登録（Sign Up）の実行
-      const { error } = await supabase.auth.signUp({ email, password });
-      if (error) alert("登録エラー: " + error.message);
-      else alert("確認メールを送信しました。メール内のリンクをクリックして完了してください。");
-    } else {
-      // ログイン（Sign In）の実行
+  // 🆕 1. 新規登録フロー：ステップごとに処理を切り替える
+  const handleSignUpFlow = async (e) => {
+    e.preventDefault();
+    try {
+      if (signUpStep === 'email') {
+        // 【ステップ1】認証コード（OTP）を送信
+        const { error } = await supabase.auth.signInWithOtp({ 
+          email, 
+          options: { shouldCreateUser: true } 
+        });
+        if (error) throw error;
+        setSignUpStep('otp');
+        alert("6ケタの認証コードを送信しました。");
+
+} else if (signUpStep === 'otp') {
+        const { error } = await supabase.auth.verifyOtp({
+          email,
+          token: otpCode,
+          type: 'email'
+        });
+        if (error) throw error;
+
+        // 認証成功！
+        // 本来はここでマイページに行こうとしますが、
+        // ログインモード(isSignUpMode)が true の間は、モーダルを閉じずに
+        // 次のステップ（パスワード設定）へ強制的に進めます。
+        setSignUpStep('password');
+        
+        // 【重要】もし useEffect などで「ログインしたらモーダルを閉じる」
+        // という処理を入れている場合は、一時的にその動きを止める必要があります。
+        
+      } else if (signUpStep === 'password') {
+        // 【ステップ3】パスワード設定
+        if (password !== confirmPassword) return alert("パスワードが一致しません");
+        if (password.length < 8) return alert("8文字以上で入力してください");
+        
+        const { error } = await supabase.auth.updateUser({ password });
+        if (error) throw error;
+        setSignUpStep('profile');
+
+      } else if (signUpStep === 'profile') {
+        // 【ステップ4】電話番号の最終登録
+        if (!phone) return alert("電話番号を入力してください");
+        
+        // 会員テーブル(app_users)を更新
+        const { error } = await supabase.from('app_users').update({ 
+          phone: phone,
+          updated_at: new Date().toISOString()
+        }).eq('id', user.id);
+        
+        if (error) throw error;
+
+        // 全行程完了！
+        alert("登録が完了しました！");
+        setIsModalOpen(false);
+        setSignUpStep('email'); // 初期状態に戻しておく
+      }
+    } catch (err) {
+      alert("エラーが発生しました: " + err.message);
+    }
+  };
+
+  // 🆕 2. ログイン専用の関数
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    try {
       let loginEmail = email;
+      // IDログイン対応
       if (!email.includes('@')) {
-// 🆕 検索先を会員専用テーブル（app_users）に切り替え
-        const { data: profile } = await supabase
-          .from('app_users')
-          .select('email')
-          .eq('display_id', email)
-          .maybeSingle();
-          if (!profile) return alert("ユーザーIDが見つかりません。");
+        const { data: profile } = await supabase.from('app_users').select('email').eq('display_id', email).maybeSingle();
+        if (!profile) return alert("ユーザーIDが見つかりません。");
         loginEmail = profile.email;
       }
       const { error } = await supabase.auth.signInWithPassword({ email: loginEmail, password });
-      if (error) alert("ログイン失敗: " + error.message);
+      if (error) throw error;
+      
+      setIsModalOpen(false);
+    } catch (err) {
+      alert("ログイン失敗: " + err.message);
     }
   };
-    const handleGoogleLogin = async () => {
+
+  const handleGoogleLogin = async () => {
     const { error } = await supabase.auth.signInWithOAuth({ provider: 'google' });
     if (error) alert(error.message);
   };
@@ -285,8 +349,18 @@ if (!insError) {
           <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
             {user ? (
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <img src={user.user_metadata?.avatar_url || 'https://via.placeholder.com/32'} style={{ width: '32px', height: '32px', borderRadius: '50%', border: '2px solid #07aadb' }} alt="profile" />
-                <button onClick={handleLogout} style={{ background: 'none', border: 'none', cursor: 'pointer' }}><LogOut size={18} color="#666" /></button>
+{user.user_metadata?.avatar_url ? (
+  <img 
+    src={user.user_metadata.avatar_url} 
+    style={{ width: '32px', height: '32px', borderRadius: '50%', border: '2px solid #07aadb' }} 
+    alt="profile" 
+  />
+) : (
+  <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '2px solid #07aadb' }}>
+    <User size={18} color="#07aadb" />
+  </div>
+)}
+         <button onClick={handleLogout} style={{ background: 'none', border: 'none', cursor: 'pointer' }}><LogOut size={18} color="#666" /></button>
               </div>
             ) : (
               <button onClick={() => setIsModalOpen(true)} style={{ background: '#07aadb', color: '#fff', border: 'none', padding: '8px 18px', borderRadius: '20px', fontWeight: 'bold', fontSize: '0.8rem', cursor: 'pointer', boxShadow: '0 4px 10px rgba(7,170,219,0.2)' }}>
@@ -339,7 +413,7 @@ if (!insError) {
       <div style={{ maxWidth: '900px', margin: '0 auto', padding: '20px' }}>
         
 {/* 🆕 お客様専用：ログイン後のパーソナライズボード */}
-{user && (
+{user && !isSignUpMode && (
   <div style={{ background: 'linear-gradient(135deg, #07aadb 0%, #0284c7 100%)', borderRadius: '16px', padding: '20px', marginBottom: '25px', color: '#fff', boxShadow: '0 8px 20px rgba(7, 170, 219, 0.2)' }}>
     <h2 style={{ margin: 0, fontSize: '1.2rem', fontWeight: 'bold', display: 'flex', flexDirection: 'column', gap: '4px' }}>
       <span style={{ fontSize: '0.8rem', opacity: 0.8, fontWeight: 'normal' }}>
@@ -425,7 +499,7 @@ if (!insError) {
   </div>
 )}
         {/* 🆕 予約履歴（My Journey）セクション */}
-        {user && (
+        {user && !isSignUpMode && (
           <div style={{ marginBottom: '40px' }}>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px', marginBottom: '15px' }}>
               <h3 style={{ margin: 0, fontSize: '1.2rem', fontWeight: '900', letterSpacing: '1px', color: '#1a1a1a' }}>My Journey</h3>
@@ -516,7 +590,7 @@ if (!insError) {
         )}
 
         {/* 🆕 お気に入り店舗セクション */}
-        {user && (
+        {user && !isSignUpMode && (
           <div style={{ marginBottom: '40px' }}>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px', marginBottom: '15px' }}>
               <h3 style={{ margin: 0, fontSize: '1.2rem', fontWeight: '900', letterSpacing: '1px', color: '#1a1a1a' }}>My Favorite</h3>
@@ -590,63 +664,96 @@ if (!insError) {
               <X size={24} color="#94a3b8" />
             </button>
             
-            {/* 1. タイトル部分：モードによって文字を変える */}
+{/* 1. タイトル部分：ステップに応じてメッセージを細かく変える */}
             <div style={{ textAlign: 'center', marginBottom: '32px' }}>
               <h2 style={{ fontSize: '1.6rem', fontWeight: '900', color: '#1e293b', marginBottom: '8px' }}>
-                {isSignUpMode ? '新規アカウント作成' : 'SOLOにログイン'}
+                {!isSignUpMode ? 'SOLOにログイン' : 
+                 signUpStep === 'email' ? '新規アカウント作成' : 
+                 signUpStep === 'otp' ? '認証コードを確認' : 
+                 signUpStep === 'password' ? 'パスワード設定' : 'プロフィール登録'}
               </h2>
               <p style={{ fontSize: '0.85rem', color: '#64748b' }}>
-                {isSignUpMode ? 'まずは無料で始めましょう' : 'スマートな予約体験を。'}
+                {!isSignUpMode ? 'スマートな予約体験を。' : 
+                 signUpStep === 'email' ? 'まずはメールアドレスを送信してください' : 
+                 signUpStep === 'otp' ? 'メールに届いた6ケタの番号を入力' : 
+                 signUpStep === 'password' ? 'ログイン用のパスワードを決めましょう' : '最後に連絡先を教えてください'}
               </p>
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
               
-              {/* Googleログインボタン */}
-              <button onClick={handleGoogleLogin} style={{ background: '#fff', color: '#334155', border: '2px solid #e2e8f0', padding: '14px', borderRadius: '16px', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '12px', cursor: 'pointer', fontSize: '1rem' }}>
-                <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" width="20" alt="G" /> 
-                Googleで{isSignUpMode ? '登録' : 'ログイン'}
-              </button>
+              {/* Googleボタンは最初のステップ（ログイン中 or 新規登録開始時）だけ表示 */}
+              {(!isSignUpMode || signUpStep === 'email') && (
+                <>
+                  <button onClick={handleGoogleLogin} style={{ background: '#fff', color: '#334155', border: '2px solid #e2e8f0', padding: '14px', borderRadius: '16px', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '12px', cursor: 'pointer', fontSize: '1rem' }}>
+                    <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" width="20" alt="G" /> 
+                    Googleで{!isSignUpMode ? 'ログイン' : '登録'}
+                  </button>
 
-              <div style={{ display: 'flex', alignItems: 'center', margin: '16px 0' }}>
-                <div style={{ flex: 1, height: '1px', background: '#f1f5f9' }}></div>
-                <span style={{ padding: '0 16px', fontSize: '0.75rem', color: '#94a3b8', fontWeight: 'bold' }}>OR</span>
-                <div style={{ flex: 1, height: '1px', background: '#f1f5f9' }}></div>
-              </div>
+                  <div style={{ display: 'flex', alignItems: 'center', margin: '16px 0' }}>
+                    <div style={{ flex: 1, height: '1px', background: '#f1f5f9' }}></div>
+                    <span style={{ padding: '0 16px', fontSize: '0.75rem', color: '#94a3b8', fontWeight: 'bold' }}>OR</span>
+                    <div style={{ flex: 1, height: '1px', background: '#f1f5f9' }}></div>
+                  </div>
+                </>
+              )}
 
-              {/* 2. 入力フォーム部分 */}
-              <form onSubmit={handleEmailAuth} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                <input 
-                  type="email" 
-                  placeholder="メールアドレス" 
-                  value={email} 
-                  onChange={(e) => setEmail(e.target.value)} 
-                  style={{ padding: '14px', borderRadius: '12px', border: '1px solid #e2e8f0', fontSize: '1rem' }} 
-                  required 
-                />
+              {/* 2. 入力フォーム部分：onSubmit先をモードで切り替え */}
+{/* 2. 入力フォーム部分 */}
+              <form onSubmit={isSignUpMode ? handleSignUpFlow : handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                 
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                  <input 
-                    type="password" 
-                    placeholder="パスワード" 
-                    value={password} 
-                    onChange={(e) => setPassword(e.target.value)} 
-                    style={{ padding: '14px', borderRadius: '12px', border: '1px solid #e2e8f0', fontSize: '1rem', width: '100%', boxSizing: 'border-box' }} 
-                    required 
-                  />
-                  
-                  {/* 新規登録時のみパスワードの条件を表示する */}
-                  {isSignUpMode && (
-                    <span style={{ fontSize: '0.7rem', color: '#94a3b8', paddingLeft: '4px', lineHeight: '1.4' }}>
-                      ※英大文字・小文字・数字をすべて含めて8文字以上
-                    </span>
-                  )}
-                </div>
+                {/* --- A. ログインモード --- */}
+                {!isSignUpMode && (
+                  <>
+                    <input type="text" placeholder="メールアドレス または ID" value={email} onChange={(e) => setEmail(e.target.value)} style={modalInputStyle} required />
+                    <input type="password" placeholder="パスワード" value={password} onChange={(e) => setPassword(e.target.value)} style={modalInputStyle} required />
+                    <button type="submit" style={modalPrimaryBtnStyle}>ログインして進む</button>
+                  </>
+                )}
 
-                {/* ボタンの文字もモードで切り替える */}
-                <button type="submit" style={{ background: '#0f172a', color: '#fff', border: 'none', padding: '16px', borderRadius: '16px', fontWeight: 'bold', cursor: 'pointer', marginTop: '8px', fontSize: '1.05rem', boxShadow: '0 10px 15px -3px rgba(15,23,42,0.3)' }}>
-                  {isSignUpMode ? '無料でアカウント作成' : 'ログインして進む'}
-                </button>
+                {/* --- B. 新規登録モード：ステップごとの出し分け --- */}
+                {isSignUpMode && (
+                  <>
+                    {signUpStep === 'email' && (
+                      <>
+                        <input type="email" placeholder="メールアドレス" value={email} onChange={(e) => setEmail(e.target.value)} style={modalInputStyle} required />
+                        <button type="submit" style={modalPrimaryBtnStyle}>認証コードを送信</button>
+                      </>
+                    )}
+
+                    {signUpStep === 'otp' && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                        <input 
+                          type="text" 
+                          placeholder="000000" 
+                          maxLength={6} 
+                          value={otpCode} 
+                          onChange={(e) => setOtpCode(e.target.value.replace(/[^0-9]/g, ''))} 
+                          style={{ ...modalInputStyle, textAlign: 'center', letterSpacing: '8px', fontSize: '1.5rem', fontWeight: '900' }} 
+                          required 
+                        />
+                        <button type="submit" style={modalPrimaryBtnStyle}>番号を認証する</button>
+                        <button type="button" onClick={() => setSignUpStep('email')} style={{ background: 'none', border: 'none', color: '#94a3b8', fontSize: '0.8rem', cursor: 'pointer' }}>やり直す</button>
+                      </div>
+                    )}
+
+                    {signUpStep === 'password' && (
+                      <>
+                        <input type="password" placeholder="新しいパスワード（8文字以上）" value={password} onChange={(e) => setPassword(e.target.value)} style={modalInputStyle} required />
+                        <input type="password" placeholder="パスワード（確認用）" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} style={modalInputStyle} required />
+                        <span style={{ fontSize: '0.65rem', color: '#94a3b8', padding: '0 4px' }}>※英大文字・小文字・数字をすべて含めてください</span>
+                        <button type="submit" style={modalPrimaryBtnStyle}>パスワードを確定して次へ</button>
+                      </>
+                    )}
+
+                    {signUpStep === 'profile' && (
+                      <>
+                        <input type="tel" placeholder="電話番号（ハイフンなし）" value={phone} onChange={(e) => setPhone(e.target.value.replace(/[^0-9]/g, ''))} style={modalInputStyle} required />
+                        <button type="submit" style={modalPrimaryBtnStyle}>すべての登録を完了する</button>
+                      </>
+                    )}
+                  </>
+                )}
               </form>
 
               {/* 3. モード切り替えリンク：ここが一番大事！ */}
