@@ -117,11 +117,16 @@ const [shops, setShops] = useState([]);
                   }}
                 >
                   {/* 背景画像 */}
-                  <div style={{
-                    position: 'absolute', inset: 0,
-                    backgroundImage: `linear-gradient(rgba(0,0,0,0.3), rgba(0,0,0,0.6)), url(${catInfo?.image_url || 'https://via.placeholder.com/100'})`,
-                    backgroundSize: 'cover', backgroundPosition: 'center'
-                  }} />
+<div style={{
+  position: 'absolute', inset: 0,
+  background: '#e2e8f0', // 画像がない時のベース色
+  // 🆕 画像がある時だけグラデーションとurl()を合成する
+  ...(catInfo?.image_url && { 
+    backgroundImage: `linear-gradient(rgba(0,0,0,0.3), rgba(0,0,0,0.6)), url(${catInfo.image_url})` 
+  }),
+  backgroundSize: 'cover', 
+  backgroundPosition: 'center'
+}} />
                   {/* 文字 */}
                   <div style={{
                     position: 'relative', height: '100%', display: 'flex', 

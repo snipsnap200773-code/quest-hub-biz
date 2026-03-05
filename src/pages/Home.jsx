@@ -639,19 +639,6 @@ if (error) {
           </div>
         )}
 
-        {/* 🆕 お気に入り店舗セクション */}
-        {user && !isSignUpMode && (
-          <div style={{ marginBottom: '40px' }}>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px', marginBottom: '15px' }}>
-              <h3 style={{ margin: 0, fontSize: '1.2rem', fontWeight: '900', letterSpacing: '1px', color: '#1a1a1a' }}>My Favorite</h3>
-              <span style={{ fontSize: '0.7rem', color: '#999' }}>お気に入り登録した店舗</span>
-            </div>
-            <div style={{ padding: '30px', textAlign: 'center', background: '#fff', borderRadius: '16px', color: '#94a3b8', fontSize: '0.85rem', border: '2px dashed #e2e8f0' }}>
-              お気に入りの店舗はまだありません。<br/>気になるお店を保存してすぐに予約できるようにしましょう。
-            </div>
-          </div>
-        )}
-
         {/* 4. Pick Up Solopreneur */}
         <div style={{ marginBottom: '40px' }}>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px', marginBottom: '15px' }}>
@@ -662,8 +649,19 @@ if (error) {
             {newShops.map(shop => (
               <div key={shop.id} style={{ background: '#fff', border: '1px solid #eee', borderRadius: '8px', overflow: 'hidden', boxShadow: '0 4px 12px rgba(0,0,0,0.03)', display: 'flex', height: '120px' }}>
                 <Link to={`/shop/${shop.id}/detail`} style={{ textDecoration: 'none', color: 'inherit', display: 'flex', width: '100%' }}>
-                  <div style={{ width: '120px', minWidth: '120px', height: '120px', background: '#f0f0f0', backgroundImage: shop.image_url ? `url(${shop.image_url})` : 'none', backgroundSize: 'cover', backgroundPosition: 'center', position: 'relative', flexShrink: 0 }}>
-                    {!shop.image_url && <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: '0.6rem', color: '#ccc' }}>NO IMAGE</div>}
+<div style={{ 
+  width: '120px', 
+  minWidth: '120px', 
+  height: '120px', 
+  background: '#f1f5f9', // 🆕 少し明るいグレーに変更
+  // 🆕 三土手さん案：画像がある時だけurl()を作る
+  ...(shop.image_url && { backgroundImage: `url(${shop.image_url})` }), 
+  backgroundSize: 'cover', 
+  backgroundPosition: 'center', 
+  position: 'relative', 
+  flexShrink: 0 
+}}>
+                      {!shop.image_url && <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: '0.6rem', color: '#ccc' }}>NO IMAGE</div>}
                     <div style={{ position: 'absolute', top: '0', left: '0', background: 'rgba(230,0,18,0.9)', color: '#fff', fontSize: '0.5rem', fontWeight: 'bold', padding: '4px 8px', borderRadius: '0 0 4px 0' }}>PICK UP</div>
                   </div>
                   <div style={{ padding: '12px 15px', flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>

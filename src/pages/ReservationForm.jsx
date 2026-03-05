@@ -164,18 +164,29 @@ setAutoStaffId(staffList[0].id); // Stateに保存
         }
 
 // 🆕 Googleログインユーザー情報の取得
-        // 🛡️ 管理者ねじ込みモード(isAdminMode)の場合は、ログイン情報を無視する
-        const { data: { user } } = await supabase.auth.getUser();
-        if (user && !isAdminMode) {
-          const { data: profile } = await supabase
-            .from('app_users')
-            .select('display_name, email, phone')
-            .eq('id', user.id)
-            .maybeSingle();
-          
-          if (profile) setAuthUserProfile(profile);
-        } else if (isAdminMode) {
-          console.log("🛡️ 管理者モード：ログインユーザー情報を読み込みません");
+        // 🛡️ 管理者ねじ込みモード(isAdminMode)の場合は、ログイン情報を無視する
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user && !isAdminMode) {
+          // 🆕 住所(address)と郵便番号(zip_code)を select に追加 [cite: 2025-12-01]
+          const { data: profile } = await supabase
+            .from('app_users')
+            .select('display_name, email, phone, address, zip_code')
+            .eq('id', user.id)
+            .maybeSingle();
+          
+          if (profile) {
+            setAuthUserProfile(profile);
+
+            // 🆕 訪問型(isVisit) かつ マイページに住所がある場合、Stateにセットする [cite: 2025-12-01]
+            if (isVisit && profile.address) {
+              setVisitorZip(profile.zip_code || '');
+              setVisitorAddress(profile.address || '');
+              setIsAddressFixed(true); // 👈 これで入力欄を閉じてメニュー選択へ進める
+              console.log("🏠 マイページから訪問先住所を自動セットしました");
+            }
+          }
+        } else if (isAdminMode) {
+              console.log("🛡️ 管理者モード：ログインユーザー情報を読み込みません");
         }
         
       } // !shopRes.data.is_suspended の閉じ

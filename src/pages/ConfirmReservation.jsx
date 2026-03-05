@@ -266,15 +266,38 @@ useEffect(() => {
   };
 
 // ✅ 修正後の保存ロジック（handleReserve）
-  const handleReserve = async () => {
-    // --- 1. バリデーションチェック ---
+const handleReserve = async () => {
+    // --- 1. バリデーションチェック（標準項目 ＆ カスタム質問） ---
+    
+    // A. 標準項目のチェック（お名前、電話番号、住所など）
     for (const [key, config] of Object.entries(formConfig)) {
+      // 🆕 カスタム質問の配列はここではスキップする [cite: 2025-12-01]
+      if (key === 'custom_questions') continue;
+
       const isEnabled = lineUser ? config.line_enabled : config.enabled;
+      
+      // 🆕 「設定画面で必須にチェックされている」かつ「表示されている」場合のみチェック [cite: 2025-12-01]
       if (isEnabled && config.required) {
-        if (isAdminEntry && key !== 'name') continue; 
+        if (isAdminEntry && key !== 'name') continue; // 管理者ねじ込み時は名前以外スルー
+        
         if (!customerData[key]) {
           alert(`${config.label}を入力してください`);
           return;
+        }
+      }
+    }
+
+    // 🆕 B. カスタム質問（ラジオボタン）の必須チェックを追加 [cite: 2025-12-01]
+    if (formConfig.custom_questions && !isAdminEntry) {
+      for (const q of formConfig.custom_questions) {
+        const isEnabled = lineUser ? q.line_enabled : q.enabled;
+        
+        // 🆕 必須設定になっていて、かつ回答（customAnswers）が空の場合 [cite: 2025-12-01]
+        if (isEnabled && q.required) {
+          if (!customAnswers[q.id]) {
+            alert(`質問「${q.label}」に回答してください`);
+            return;
+          }
         }
       }
     }
@@ -441,13 +464,19 @@ const interval = shop.slot_interval_min || 15;
 
       // 通知の送信
 // ✅ 修正ポイント：宛先メールアドレスと詳細データをすべて backend へ送る
-      if (!isAdminEntry) {
-        await supabaseAnon.functions.invoke('resend', {
-          body: {
-            type: 'booking', 
-            shopId,
-            customerName: customerData.name,
-            staffName: finalStaffName || staffName,
+// 通知の送信
+      if (!isAdminEntry) {
+        // 🆕 名簿(existingCust)に名前があればそちらを、なければ入力された名前(customerData.name)を使用
+        const displayNameForEmail = (existingCust && existingCust.name) 
+                                      ? existingCust.name 
+                                      : customerData.name;
+
+        await supabaseAnon.functions.invoke('resend', {
+          body: {
+            type: 'booking', 
+            shopId,
+            customerName: displayNameForEmail, // ✅ 書き換えられた名前を送る
+            staffName: finalStaffName || staffName,
             shopName: customShopName || shop.business_name, // 🆕 追加
             startTime: `${targetDate.replace(/-/g, '/')} ${targetTime}`,
             services: menuLabel,

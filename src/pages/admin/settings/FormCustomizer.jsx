@@ -27,20 +27,31 @@ const ConfigItem = ({ id, icon: Icon, title, description, formConfig, themeColor
             <div style={{ fontSize: '0.75rem', color: '#64748b' }}>{description}</div>
           </div>
         </div>
-        <div style={{ display: 'flex', gap: '24px', textAlign: 'center' }}>
+<div style={{ display: 'flex', gap: '24px', textAlign: 'center' }}>
+          {/* 🆕 必須項目の切り替えスイッチを追加 [cite: 2025-12-01] */}
           <div>
-            <div style={{ fontSize: '0.65rem', color: '#64748b', marginBottom: '4px', fontWeight: 'bold' }}>Web</div>
-            <button onClick={() => toggleField(id, 'normal')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: formConfig[id].enabled ? themeColor : '#cbd5e1' }}>
-              {formConfig[id].enabled ? <ToggleRight size={36} /> : <ToggleLeft size={36} />}
+            <div style={{ fontSize: '0.65rem', color: '#ef4444', marginBottom: '4px', fontWeight: 'bold' }}>必須</div>
+            <button 
+              onClick={() => toggleField(id, 'required')} 
+              style={{ background: 'none', border: 'none', cursor: 'pointer', color: formConfig[id].required ? '#ef4444' : '#cbd5e1' }}
+              disabled={id === 'name'} // 🆕 お名前はシステム上常に必須とする [cite: 2025-12-01]
+            >
+              {formConfig[id].required ? <ToggleRight size={36} /> : <ToggleLeft size={36} />}
             </button>
           </div>
-          <div>
-            <div style={{ fontSize: '0.65rem', color: '#16a34a', marginBottom: '4px', fontWeight: 'bold' }}>LINE</div>
-            <button onClick={() => toggleField(id, 'line')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: formConfig[id].line_enabled ? '#16a34a' : '#cbd5e1' }}>
-              {formConfig[id].line_enabled ? <ToggleRight size={36} /> : <ToggleLeft size={36} />}
-            </button>
-          </div>
-        </div>
+          <div>
+            <div style={{ fontSize: '0.65rem', color: '#64748b', marginBottom: '4px', fontWeight: 'bold' }}>Web</div>
+            <button onClick={() => toggleField(id, 'normal')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: formConfig[id].enabled ? themeColor : '#cbd5e1' }}>
+              {formConfig[id].enabled ? <ToggleRight size={36} /> : <ToggleLeft size={36} />}
+            </button>
+          </div>
+          <div>
+            <div style={{ fontSize: '0.65rem', color: '#16a34a', marginBottom: '4px', fontWeight: 'bold' }}>LINE</div>
+            <button onClick={() => toggleField(id, 'line')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: formConfig[id].line_enabled ? '#16a34a' : '#cbd5e1' }}>
+              {formConfig[id].line_enabled ? <ToggleRight size={36} /> : <ToggleLeft size={36} />}
+            </button>
+          </div>
+        </div>
       </div>
       {(formConfig[id].enabled || formConfig[id].line_enabled) && (
         <div style={{ marginLeft: '46px' }}>
@@ -149,10 +160,13 @@ const FormCustomizer = () => {
     showMsg(`${INDUSTRY_PRESETS[presetKey].label}向けに最適化しました！`);
   };
 
-  const toggleField = (key, type = 'normal') => {
-    const targetKey = type === 'line' ? 'line_enabled' : 'enabled';
-    setFormConfig(prev => ({ ...prev, [key]: { ...prev[key], [targetKey]: !prev[key][targetKey] } }));
-  };
+const toggleField = (key, type = 'normal') => {
+    let targetKey = 'enabled';
+    if (type === 'line') targetKey = 'line_enabled';
+    if (type === 'required') targetKey = 'required'; // 🆕 追加 [cite: 2025-12-01]
+    
+    setFormConfig(prev => ({ ...prev, [key]: { ...prev[key], [targetKey]: !prev[key][targetKey] } }));
+  };
 
   const updateLabel = (key, newLabel) => {
     setFormConfig(prev => ({ ...prev, [key]: { ...prev[key], label: newLabel } }));
