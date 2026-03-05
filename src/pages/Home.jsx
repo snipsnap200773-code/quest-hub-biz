@@ -45,6 +45,19 @@ const [isModalOpen, setIsModalOpen] = useState(false);
   const [favorites, setFavorites] = useState([]); 
   const [myHistory, setMyHistory] = useState([]); // 履歴用
 
+  const getDaysUntil = (dateStr) => {
+    const target = new Date(dateStr);
+    const today = new Date();
+    // 時刻のズレで計算が狂わないよう、00:00:00にリセット [cite: 2025-12-01]
+    target.setHours(0, 0, 0, 0);
+    today.setHours(0, 0, 0, 0);
+    
+    // ミリ秒の差分を日にちに変換
+    const diffTime = target.getTime() - today.getTime();
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    return diffDays;
+  };
+
   const sliderImages = [
     { id: 1, url: 'https://images.unsplash.com/photo-1600880210836-8f8fe100a35c?auto=format&fit=crop&w=1200&q=80', title: '自分らしく、働く。', desc: 'Solopreneurを支えるポータルサイト' },
     { id: 2, url: 'https://images.unsplash.com/photo-1556761175-5973dc0f32e7?auto=format&fit=crop&w=1200&q=80', title: '次世代の予約管理', desc: 'SOLOでビジネスを加速させる' },
@@ -573,20 +586,32 @@ if (error) {
       )}
     </h2>
 
-<div style={{ display: 'flex', gap: '12px', marginTop: '15px' }}>
-      <div 
-        onClick={() => setActiveTabModal('history')}
-        style={{ flex: 1, background: 'rgba(255,255,255,0.15)', padding: '12px', borderRadius: '12px', textAlign: 'center', cursor: 'pointer' }}
-      >
-        <Calendar size={20} style={{ marginBottom: '4px' }} /><br/><span style={{ fontSize: '0.7rem' }}>予約確認</span>
-      </div>
-      <div 
-        onClick={() => setActiveTabModal('favorites')}
-        style={{ flex: 1, background: 'rgba(255,255,255,0.15)', padding: '12px', borderRadius: '12px', textAlign: 'center', cursor: 'pointer' }}
-      >
-        <Heart size={20} style={{ marginBottom: '4px' }} /><br/><span style={{ fontSize: '0.7rem' }}>お気に入り</span>
-      </div>
-    </div>
+<div style={{ display: 'flex', gap: '10px', marginTop: '15px' }}>
+  {/* 予約確認ボタン */}
+  <div 
+    onClick={() => setActiveTabModal('history')}
+    style={{ flex: 1, background: 'rgba(255,255,255,0.15)', padding: '12px', borderRadius: '12px', textAlign: 'center', cursor: 'pointer' }}
+  >
+    <Calendar size={20} style={{ marginBottom: '4px' }} /><br/><span style={{ fontSize: '0.7rem' }}>予約確認</span>
+  </div>
+
+  {/* 🆕 履歴ボタンを追加 [cite: 2025-12-01] */}
+  <div 
+    onClick={() => setActiveTabModal('past_history')}
+    style={{ flex: 1, background: 'rgba(255,255,255,0.15)', padding: '12px', borderRadius: '12px', textAlign: 'center', cursor: 'pointer' }}
+  >
+    <div style={{ fontSize: '1.2rem', marginBottom: '4px', lineHeight: 1 }}>📚</div>
+    <span style={{ fontSize: '0.7rem' }}>利用履歴</span>
+  </div>
+
+  {/* お気に入りボタン */}
+  <div 
+    onClick={() => setActiveTabModal('favorites')}
+    style={{ flex: 1, background: 'rgba(255,255,255,0.15)', padding: '12px', borderRadius: '12px', textAlign: 'center', cursor: 'pointer' }}
+  >
+    <Heart size={20} style={{ marginBottom: '4px' }} /><br/><span style={{ fontSize: '0.7rem' }}>お気に入り</span>
+  </div>
+</div>
   </div>
 )}
 
@@ -818,97 +843,108 @@ if (error) {
               {activeTabModal === 'history' ? 'My Journey' : 'My Favorite'}
             </h3>
 
-{activeTabModal === 'history' ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '25px' }}>
-                {myHistory.length > 0 ? (
-                  <>
-                    {/* 🆕 1. 【最上段】直近の予約タスク（これから行く予定） [cite: 2025-12-01] */}
-                    {(() => {
-                      const upcoming = myHistory.filter(res => new Date(res.start_time) >= new Date());
-                      if (upcoming.length === 0) return null;
-                      return (
+{/* 🆕 予約履歴・利用履歴の切り分け表示ロジック [cite: 2025-12-01] */}
+{(activeTabModal === 'history' || activeTabModal === 'past_history') ? (
+  <div style={{ display: 'flex', flexDirection: 'column', gap: '25px' }}>
+    {myHistory.length > 0 ? (
+      <>
+        {/* 📅 「予約確認」タブの時：これからの予定（未来）だけを表示 [cite: 2026-03-01] */}
+        {activeTabModal === 'history' && (
+          <div>
+            <div style={{ fontSize: '0.75rem', color: '#07aadb', fontWeight: '900', marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <div style={{ width: '8px', height: '8px', background: '#07aadb', borderRadius: '50%' }}></div>
+              これからの予定
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              {myHistory
+                .filter(res => new Date(res.start_time) >= new Date())
+                .sort((a, b) => new Date(a.start_time) - new Date(b.start_time))
+                .map(res => (
+                  <Link key={res.id} to={`/shop/${res.profiles?.id}/detail`} onClick={() => setActiveTabModal(null)} style={{ textDecoration: 'none' }}>
+                    <div style={{ background: '#f0f9ff', borderRadius: '16px', padding: '16px', border: '2px solid #07aadb', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                          <div style={{ fontSize: '0.85rem', color: '#07aadb', fontWeight: 'bold' }}>
+                            {new Date(res.start_time).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                          </div>
+                          
+                          {/* 🆕 カウントダウンバッジ [cite: 2026-03-01] */}
+                          {(() => {
+                            const days = getDaysUntil(res.start_time);
+                            if (days < 0) return null;
+                            return (
+                              <div style={{ background: days === 0 ? '#ef4444' : (days <= 3 ? '#f59e0b' : '#07aadb'), color: '#fff', padding: '2px 10px', borderRadius: '20px', fontSize: '0.65rem', fontWeight: '900' }}>
+                                {days === 0 ? '本日予約！' : `あと ${days} 日`}
+                              </div>
+                            );
+                          })()}
+                        </div>
+                        <div style={{ fontWeight: '900', fontSize: '1.1rem', color: '#1e293b', margin: '2px 0' }}>{res.profiles?.business_name}</div>
+                        <div style={{ fontSize: '0.75rem', color: '#64748b' }}>{res.menu_name}</div>
+                      </div>
+                      <ChevronRight size={20} color="#07aadb" />
+                    </div>
+                  </Link>
+                ))}
+            </div>
+            {/* 未来の予約がない場合のメッセージ [cite: 2025-12-01] */}
+            {myHistory.filter(res => new Date(res.start_time) >= new Date()).length === 0 && (
+              <p style={{ textAlign: 'center', color: '#94a3b8', padding: '20px 0', fontSize: '0.85rem' }}>現在、予定されている予約はありません</p>
+            )}
+          </div>
+        )}
+
+        {/* 📚 「利用履歴」タブの時：過去の履歴（ショップ別）だけを表示 [cite: 2025-12-01] */}
+        {activeTabModal === 'past_history' && (
+          <div>
+            <div style={{ fontSize: '0.75rem', color: '#94a3b8', fontWeight: '900', marginBottom: '12px', borderBottom: '1px solid #f1f5f9', paddingBottom: '8px' }}>
+              ショップ別のご利用記録
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
+              {(() => {
+                const past = myHistory.filter(res => new Date(res.start_time) < new Date());
+                if (past.length === 0) return <p style={{ textAlign: 'center', color: '#94a3b8', padding: '20px 0', fontSize: '0.85rem' }}>過去のご利用履歴はありません</p>;
+
+                const shopGroups = past.reduce((acc, res) => {
+                  const sId = res.profiles?.id || 'unknown';
+                  if (!acc[sId]) {
+                    acc[sId] = { profile: res.profiles, visits: [] };
+                  }
+                  acc[sId].visits.push(res);
+                  return acc;
+                }, {});
+
+                return Object.values(shopGroups).map((group) => (
+                  <Link key={group.profile.id} to={`/shop/${group.profile.id}/detail`} onClick={() => setActiveTabModal(null)} style={{ textDecoration: 'none' }}>
+                    <div style={{ background: '#fff', borderRadius: '20px', padding: '16px', border: '1px solid #f1f5f9', boxShadow: '0 4px 12px rgba(0,0,0,0.02)' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
                         <div>
-                          <div style={{ fontSize: '0.75rem', color: '#07aadb', fontWeight: '900', marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                            <div style={{ width: '8px', height: '8px', background: '#07aadb', borderRadius: '50%' }}></div>
-                            これからの予定
-                          </div>
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                            {upcoming.map(res => (
-                              <Link key={res.id} to={`/shop/${res.profiles?.id}/detail`} onClick={() => setActiveTabModal(null)} style={{ textDecoration: 'none' }}>
-                                <div style={{ background: '#f0f9ff', borderRadius: '16px', padding: '16px', border: '2px solid #07aadb', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}>
-                                  <div style={{ flex: 1 }}>
-                                    <div style={{ fontSize: '0.85rem', color: '#07aadb', fontWeight: 'bold' }}>
-                                      {new Date(res.start_time).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                                    </div>
-                                    <div style={{ fontWeight: '900', fontSize: '1.1rem', color: '#1e293b', margin: '2px 0' }}>{res.profiles?.business_name}</div>
-                                    <div style={{ fontSize: '0.75rem', color: '#64748b' }}>{res.menu_name}</div>
-                                  </div>
-                                  <ChevronRight size={20} color="#07aadb" />
-                                </div>
-                              </Link>
-                            ))}
-                          </div>
+                          <div style={{ fontWeight: '900', fontSize: '1.1rem', color: '#1e293b' }}>{group.profile.business_name}</div>
+                          <div style={{ fontSize: '0.7rem', color: '#07aadb', fontWeight: 'bold', marginTop: '2px' }}>来店回数：{group.visits.length}回</div>
                         </div>
-                      );
-                    })()}
-
-{/* 🆕 2. 【下段】過去の履歴（ショップ別に集計） [cite: 2025-12-01] */}
-                    {(() => {
-                      const past = myHistory.filter(res => new Date(res.start_time) < new Date());
-                      if (past.length === 0) return null;
-
-                      // 🆕 お店ごとにデータをまとめるロジック [cite: 2025-12-01]
-                      const shopGroups = past.reduce((acc, res) => {
-                        const sId = res.profiles?.id || 'unknown';
-                        if (!acc[sId]) {
-                          acc[sId] = {
-                            profile: res.profiles,
-                            visits: [],
-                            totalPrice: 0
-                          };
-                        }
-                        acc[sId].visits.push(res);
-                        acc[sId].totalPrice += (res.total_price || 0);
-                        return acc;
-                      }, {});
-
-                      return (
-                        <div style={{ marginTop: '10px' }}>
-                          <div style={{ fontSize: '0.75rem', color: '#94a3b8', fontWeight: '900', marginBottom: '12px', borderBottom: '1px solid #f1f5f9', paddingBottom: '8px' }}>
-                            ショップ別のご利用記録
-                          </div>
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
-                            {Object.values(shopGroups).map((group) => (
-                              <Link key={group.profile.id} to={`/shop/${group.profile.id}/detail`} onClick={() => setActiveTabModal(null)} style={{ textDecoration: 'none' }}>
-                                <div style={{ background: '#fff', borderRadius: '20px', padding: '16px', border: '1px solid #f1f5f9', boxShadow: '0 4px 12px rgba(0,0,0,0.02)' }}>
-                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
-                                    <div>
-                                      <div style={{ fontWeight: '900', fontSize: '1.1rem', color: '#1e293b' }}>{group.profile.business_name}</div>
-                                      <div style={{ fontSize: '0.7rem', color: '#07aadb', fontWeight: 'bold', marginTop: '2px' }}>来店回数：{group.visits.length}回</div>
-                                    </div>
-                                    <div style={{ color: '#cbd5e1' }}><ChevronRight size={20} /></div>
-                                  </div>
-                                  
-                                  {/* 🆕 そのお店での直近のメニューを表示 [cite: 2025-12-01] */}
-                                  <div style={{ background: '#f8fafc', borderRadius: '12px', padding: '10px', fontSize: '0.75rem' }}>
-                                    <div style={{ color: '#64748b', marginBottom: '4px', fontSize: '0.65rem' }}>最新の利用日：{new Date(group.visits[0].start_time).toLocaleDateString('ja-JP')}</div>
-                                    <div style={{ color: '#1e293b', fontWeight: 'bold' }}>{group.visits[0].menu_name}</div>
-                                  </div>
-                                </div>
-                              </Link>
-                            ))}
-                          </div>
-                        </div>
-                      );
-                    })()}
-                                      </>
-                ) : (
-                  <p style={{ textAlign: 'center', color: '#94a3b8', padding: '40px 0' }}>履歴はありません</p>
-                )}
-              </div>
-            ) : (
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                {favorites.length > 0 ? (
+                        <ChevronRight size={20} color="#cbd5e1" />
+                      </div>
+                      <div style={{ background: '#f8fafc', borderRadius: '12px', padding: '10px', fontSize: '0.75rem' }}>
+                        <div style={{ color: '#64748b', marginBottom: '4px', fontSize: '0.65rem' }}>最新の利用日：{new Date(group.visits[0].start_time).toLocaleDateString('ja-JP')}</div>
+                        <div style={{ color: '#1e293b', fontWeight: 'bold' }}>{group.visits[0].menu_name}</div>
+                      </div>
+                    </div>
+                  </Link>
+                ));
+              })()}
+            </div>
+          </div>
+        )}
+      </>
+    ) : (
+      <p style={{ textAlign: 'center', color: '#94a3b8', padding: '40px 0' }}>履歴はありません</p>
+    )}
+  </div>
+) : (
+  /* --- お気に入り表示ロジック --- */
+  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+    {/* ...（既存のお気に入りコード）... */}
+                    {favorites.length > 0 ? (
                   [...favorites].sort((a, b) => (a.profiles?.business_name || "").localeCompare(b.profiles?.business_name || "", 'ja'))
                   .map((fav) => (
                     <Link key={fav.id} to={`/shop/${fav.profiles?.id}/detail`} onClick={() => setActiveTabModal(null)} style={{ textDecoration: 'none', color: 'inherit' }}>
