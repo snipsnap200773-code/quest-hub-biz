@@ -2,6 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useLocation, useNavigate } from 'react-router-dom';
 import { supabase, supabaseAnon } from '../supabaseClient';
 import { Loader2, Sparkles } from 'lucide-react';
+// 🎮 🆕 ゲームとの連絡係をインポート [cite: 2026-03-01]
+import { triggerGameEvent } from '../components/game/GameBridge';
+
 function ConfirmReservation() {
   const { shopId } = useParams();
   const location = useLocation();

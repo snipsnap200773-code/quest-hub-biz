@@ -4,6 +4,8 @@ import { supabase } from '../supabaseClient';
 // 🆕 共通マスター（大カテゴリのリスト）をインポート
 import { INDUSTRY_LABELS } from '../constants/industryMaster';
 import { MapPin, User, LogIn, Heart, Calendar, LogOut, X, Mail, ChevronRight } from 'lucide-react';
+// 🎮 🆕 ゲームの司令塔（ハブ）をインポート！ [cite: 2025-12-03]
+import GameQuestHub from '../components/game/GameQuestHub';
 const profileInputStyle = { width: '100%', padding: '8px', borderRadius: '6px', border: 'none', color: '#333', fontSize: '0.9rem', boxSizing: 'border-box' };
 const profileSmallBtnStyle = { padding: '8px 12px', background: '#fff', color: '#07aadb', border: 'none', borderRadius: '6px', fontSize: '0.7rem', fontWeight: 'bold', cursor: 'pointer' };
 const profileActionBtnStyle = { flex: 1, padding: '10px', borderRadius: '8px', border: 'none', fontWeight: 'bold', cursor: 'pointer', fontSize: '0.85rem' };
