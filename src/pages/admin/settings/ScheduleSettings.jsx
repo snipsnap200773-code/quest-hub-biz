@@ -39,12 +39,27 @@ const ScheduleSettings = () => {
     if (shopId) fetchScheduleData();
   }, [shopId]);
 
-  const fetchScheduleData = async () => {
+const fetchScheduleData = async () => {
     const { data } = await supabase.from('profiles').select('*').eq('id', shopId).single();
     if (data) {
       setShopData(data);
-      setBusinessHours(data.business_hours || {});
-      setRegularHolidays(data.business_hours?.regular_holidays || {});
+      
+      // ✅ 修正：データが空でも 09:00〜18:00 を初期値として強制セット [cite: 2026-03-06]
+      const baseHours = data.business_hours || {};
+      const initializedHours = {};
+      const days = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
+      
+      days.forEach(day => {
+        initializedHours[day] = {
+          open: baseHours[day]?.open || '09:00',
+          close: baseHours[day]?.close || '18:00',
+          rest_start: baseHours[day]?.rest_start || '',
+          rest_end: baseHours[day]?.rest_end || ''
+        };
+      });
+
+      setBusinessHours(initializedHours);
+      setRegularHolidays(baseHours.regular_holidays || {});
       setBufferPreparationMin(data.buffer_preparation_min || 0);
       setMinLeadTimeHours(data.min_lead_time_hours || 0);
       setAutoFillLogic(data.auto_fill_logic ?? true);
@@ -102,7 +117,7 @@ const ScheduleSettings = () => {
       )}
 
 {/* 🚀 ナビゲーションヘッダー（統一デザイン＆レスポンシブ版） */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px', gap: '10px' }}>
+<div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px', gap: '10px' }}>
         <button 
           onClick={() => navigate(`/admin/${shopId}/dashboard`)}
           style={{ 
@@ -124,6 +139,21 @@ const ScheduleSettings = () => {
           <ArrowLeft size={18} /> {isPC ? 'ダッシュボードへ' : '戻る'}
         </button>
 
+        {/* ✅ 追加：全曜日にコピーするボタン */}
+        <button 
+          onClick={() => {
+            if(window.confirm('月曜日の設定を全曜日にコピーしますか？')){
+              const mon = businessHours['mon'];
+              const newH = {};
+              ['mon','tue','wed','thu','fri','sat','sun'].forEach(d => newH[d] = {...mon});
+              setBusinessHours(newH);
+              showMsg('全曜日にコピーしました！');
+            }
+          }}
+          style={{ background: '#f8fafc', border: '1px solid #cbd5e1', padding: '10px 15px', borderRadius: '30px', fontSize: '0.8rem', fontWeight: 'bold', color: '#475569', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' }}
+        >
+          <Sparkles size={16} /> 全曜日にコピー
+        </button>
         <button 
           onClick={() => navigate(`/admin/${shopId}/settings/schedule-guide`)}
           style={{ 
@@ -161,10 +191,11 @@ const ScheduleSettings = () => {
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', padding: '16px', background: '#f8fafc', borderRadius: '16px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
                 <span style={{ fontSize: '0.8rem', width: '35px', color: '#64748b', fontWeight: 'bold' }}>営業</span>
-                <input type="time" value={businessHours[day]?.open || '09:00'} onChange={(e) => setBusinessHours({...businessHours, [day]: {...businessHours[day], open: e.target.value}})} style={inputStyle} />
+{/* ?? を使い、データが全く無い初期状態でも '09:00' などの標準時が表示されるようにします [cite: 2026-03-06] */}
+                <input type="time" value={businessHours[day]?.open ?? '09:00'} onChange={(e) => setBusinessHours({...businessHours, [day]: {...businessHours[day], open: e.target.value}})} style={inputStyle} />
                 <span style={{ color: '#cbd5e1' }}>〜</span>
-                <input type="time" value={businessHours[day]?.close || '18:00'} onChange={(e) => setBusinessHours({...businessHours, [day]: {...businessHours[day], close: e.target.value}})} style={inputStyle} />
-              </div>
+                <input type="time" value={businessHours[day]?.close ?? '18:00'} onChange={(e) => setBusinessHours({...businessHours, [day]: {...businessHours[day], close: e.target.value}})} style={inputStyle} />
+                              </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
                 <span style={{ fontSize: '0.8rem', width: '35px', color: '#64748b', fontWeight: 'bold' }}>休憩</span>
                 <input type="time" value={businessHours[day]?.rest_start || ''} onChange={(e) => setBusinessHours({...businessHours, [day]: { ...businessHours[day], rest_start: e.target.value }})} style={inputStyle} />
@@ -271,10 +302,11 @@ const ScheduleSettings = () => {
               {weekLabels.map(week => (
                 <tr key={week.key} style={{ borderBottom: '1px solid #f1f5f9' }}>
                   <td style={{ padding: '12px 0', fontSize: '0.7rem', fontWeight: 'bold', color: '#64748b', whiteSpace: 'nowrap' }}>{week.label}</td>
-                  {Object.keys(dayMap).map(day => {
-                    const isActive = regularHolidays[`${week.key}-${day}`];
+{Object.keys(dayMap).map(day => {
+                    // regularHolidays が null の場合に備えて確実に boolean を取得します [cite: 2026-03-01]
+                    const isActive = !!(regularHolidays && regularHolidays[`${week.key}-${day}`]);
                     return (
-                      <td key={day} style={{ padding: '6px', textAlign: 'center' }}>
+                                            <td key={day} style={{ padding: '6px', textAlign: 'center' }}>
                         <button 
                           onClick={() => toggleHoliday(week.key, day)} 
                           style={{ width: '36px', height: '36px', borderRadius: '10px', border: '1px solid #eee', background: isActive ? '#ef4444' : '#fff', color: isActive ? '#fff' : '#cbd5e1', fontWeight: 'bold', fontSize: '0.8rem', cursor: 'pointer', transition: '0.2s', boxShadow: isActive ? '0 4px 10px rgba(239,68,68,0.3)' : 'none' }}

@@ -715,11 +715,31 @@ const insertData = {
           </div>
 
 <div style={{ marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            {/* ✅ 追加：現場での実行用「今日のタスク」ボタン [cite: 2026-03-06] */}
+            <button 
+              onClick={() => navigate(`/admin/${shopId}/today-tasks`)}
+              style={{ 
+                padding: '15px', 
+                background: '#1e293b', // カレンダーと差別化するために深い色に
+                color: '#fff', 
+                border: 'none', 
+                borderRadius: '12px', 
+                cursor: 'pointer', 
+                fontWeight: 'bold',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '8px',
+                boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
+              }}
+            >
+              ⚡ 本日のタスク (実行)
+            </button>
 
             <button 
               onClick={() => isManagementEnabled && navigate(`/admin/${shopId}/management`)} 
               style={{ 
-                padding: '15px', 
+                padding: '15px',
                 background: isManagementEnabled ? themeColor : '#e2e8f0', 
                 color: isManagementEnabled ? '#fff' : '#94a3b8', 
                 border: 'none', 
@@ -776,14 +796,33 @@ const insertData = {
               </div>
               <h2 style={{ fontSize: '1.1rem', margin: '0 0 0 auto', fontWeight: '900', color: '#1e293b' }}>{startDate.getFullYear()}年 {startDate.getMonth() + 1}月</h2>
             </div>
-          ) : (
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', gap: '15px' }}>
+) : (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', gap: '15px', position: 'relative' }}>
               <button onClick={goPrevMonth} style={mobileArrowBtnStyle}>◀</button>
               <h2 style={{ fontSize: '1.3rem', margin: 0, fontWeight: '900', color: '#1e293b' }}>{startDate.getFullYear()}年 {startDate.getMonth() + 1}月</h2>
               <button onClick={goNextMonth} style={mobileArrowBtnStyle}>▶</button>
+              
+              {/* ✅ 追加：スマホ画面の右端に配置 [cite: 2026-03-06] */}
+              <button 
+                onClick={() => navigate(`/admin/${shopId}/today-tasks`)}
+                style={{ 
+                  position: 'absolute', 
+                  right: '0', 
+                  background: themeColor, 
+                  color: '#fff', 
+                  border: 'none', 
+                  padding: '8px 12px', 
+                  borderRadius: '10px', 
+                  fontSize: '0.75rem', 
+                  fontWeight: 'bold',
+                  boxShadow: `0 4px 10px ${themeColor}44`
+                }}
+              >
+                タスク
+              </button>
             </div>
           )}
-        </div>
+          </div>
 
 {/* ✅ 親要素：はみ出しを隠し、高さを固定 */}
         <div style={{ flex: 1, overflow: 'hidden', position: 'relative', display: 'flex', flexDirection: 'column' }}>

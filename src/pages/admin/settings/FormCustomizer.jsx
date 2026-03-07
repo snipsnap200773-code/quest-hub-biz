@@ -13,9 +13,10 @@ import {
 
 // 標準項目用の部品
 const ConfigItem = ({ id, icon: Icon, title, description, formConfig, themeColor, toggleField, updateLabel }) => {
-  if (!formConfig[id]) return null;
+  // 指定された id が config 内に存在しない、または必要なプロパティが欠けている場合は表示しません
+  if (!formConfig || !formConfig[id]) return null;
   const inputStyle = { width: '100%', padding: '12px', borderRadius: '10px', border: '1px solid #cbd5e1', fontSize: '0.9rem' };
-  return (
+    return (
     <div style={{ marginBottom: '25px', paddingBottom: '20px', borderBottom: '1px solid #f1f5f9' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
         <div style={{ display: 'flex', gap: '12px', flex: 1 }}>
@@ -77,9 +78,9 @@ const CustomFieldItem = ({ field, themeColor, updateCustomField, deleteCustomFie
         </button>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px', marginBottom: '15px' }}>
-        <div>
+<div>
           <label style={{ fontSize: '0.7rem', fontWeight: 'bold', color: '#64748b' }}>質問内容</label>
-          <input type="text" value={field.label} onChange={(e) => updateCustomField(field.id, 'label', e.target.value)} style={inputStyle} />
+          <input type="text" value={field.label || ''} onChange={(e) => updateCustomField(field.id, 'label', e.target.value)} style={inputStyle} />
         </div>
         <div>
           <label style={{ fontSize: '0.7rem', fontWeight: 'bold', color: '#64748b' }}>選択肢（カンマ区切り）</label>
@@ -131,12 +132,13 @@ const FormCustomizer = () => {
     const { data } = await supabase.from('profiles').select('theme_color, form_config').eq('id', shopId).single();
     if (data) {
       setThemeColor(data.theme_color || '#2563eb');
-      if (data.form_config) {
+if (data.form_config) {
         const { custom_questions, ...restConfig } = data.form_config;
-        setFormConfig(prev => ({ ...prev, ...restConfig }));
+        // restConfig が空や null の場合に備え、既存の prev をベースに上書きします
+        setFormConfig(prev => ({ ...prev, ...(restConfig || {}) }));
         setCustomFields(custom_questions || []);
       }
-    }
+        }
   };
 
   const showMsg = (txt) => { setMessage(txt); setTimeout(() => setMessage(''), 3000); };

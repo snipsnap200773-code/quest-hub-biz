@@ -38,12 +38,12 @@ const LineSettings = () => {
 
   const fetchLineData = async () => {
     const { data } = await supabase.from('profiles').select('*').eq('id', shopId).single();
-    if (data) {
+if (data) {
       setNotifyLineEnabled(data.notify_line_enabled ?? true);
-      // DBのカラム名に合わせてセット
+      // カラムが未作成の場合に備え、初期値を確実にセットします
       setCustomerLineBookingEnabled(data.customer_line_booking_enabled ?? true);
       setCustomerLineRemindEnabled(data.customer_line_remind_enabled ?? false);
-      setLineToken(data.line_channel_access_token || '');
+            setLineToken(data.line_channel_access_token || '');
       setLineAdminId(data.line_admin_user_id || '');
       setLiffId(data.liff_id || '');
     }
@@ -66,12 +66,13 @@ const LineSettings = () => {
   };
 
   // 🆕 ここに追加！
-  const handleTestNotify = async () => {
-    if (!lineToken || !lineAdminId) {
+const handleTestNotify = async () => {
+    // 全ての必要項目が「空文字ではない」ことを厳密にチェックします
+    if (!(lineToken || '').trim() || !(lineAdminId || '').trim()) {
       alert("トークンとユーザーIDを入力してからテストしてください。");
       return;
     }
-    try {
+        try {
       const { error } = await supabase.functions.invoke('resend', {
         body: {
           type: 'test',
@@ -218,18 +219,19 @@ const LineSettings = () => {
                 <label style={{ fontSize: '0.75rem', fontWeight: 'bold', color: '#00b900', display: 'block', marginBottom: '8px' }}>
                   💬 LINEリッチメニュー用URL（コピーして使用）
                 </label>
-                <div style={{ display: 'flex', gap: '8px' }}>
+<div style={{ display: 'flex', gap: '8px' }}>
                   <input 
                     readOnly 
-                    value={`https://liff.line.me/${liffId}`} 
+                    value={liffId ? `https://liff.line.me/${liffId}` : ''} 
                     style={{ ...inputStyle, background: '#f8fafc', fontSize: '0.8rem', flex: 1, border: '1px solid #cbd5e1' }} 
                   />
                   <button 
                     onClick={() => {
+                      if (!liffId) return; // IDがない場合は何もしない
                       navigator.clipboard.writeText(`https://liff.line.me/${liffId}`);
-                      showMsg("URLをコピーしました！"); // 既存のshowMsg関数を利用
+                      showMsg("URLをコピーしました！");
                     }}
-                    style={{ padding: '0 15px', background: '#00b900', color: '#fff', border: 'none', borderRadius: '10px', fontSize: '0.75rem', fontWeight: 'bold', cursor: 'pointer' }}
+                                        style={{ padding: '0 15px', background: '#00b900', color: '#fff', border: 'none', borderRadius: '10px', fontSize: '0.75rem', fontWeight: 'bold', cursor: 'pointer' }}
                   >
                     コピー
                   </button>

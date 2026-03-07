@@ -103,10 +103,12 @@ const updates = newList.map((item, i) => ({
     await supabase.from(table).upsert(updates); fetchMenuDetails();
   };
 
-  const handleToggleDisableCat = async (catId, targetCatName) => {
+const handleToggleDisableCat = async (catId, targetCatName) => {
     const targetCat = categories.find(c => c.id === catId);
-    let currentDisables = targetCat.disable_categories ? targetCat.disable_categories.split(',').map(s => s.trim()).filter(s => s) : [];
-    if (currentDisables.includes(targetCatName)) currentDisables = currentDisables.filter(name => name !== targetCatName);
+    if (!targetCat) return; // 念のためのガード
+    // (targetCat.disable_categories || '') とすることで null 回避します [cite: 2026-03-01]
+    let currentDisables = (targetCat.disable_categories || '').split(',').map(s => s.trim()).filter(s => s);
+        if (currentDisables.includes(targetCatName)) currentDisables = currentDisables.filter(name => name !== targetCatName);
     else currentDisables.push(targetCatName);
     await supabase.from('service_categories').update({ disable_categories: currentDisables.join(',') }).eq('id', catId);
     fetchMenuDetails();
@@ -142,10 +144,15 @@ const updates = newList.map((item, i) => ({
     fetchMenuDetails(); showMsg('カテゴリを保存しました');
   };
 
-  const handleServiceSubmit = async (e) => {
+const handleServiceSubmit = async (e) => {
     e.preventDefault();
+    // カテゴリが0件の場合は、登録を中断してメッセージを出します [cite: 2026-03-06]
+    if (categories.length === 0) {
+      alert("先にカテゴリを登録してください。");
+      return;
+    }
     const finalCategory = selectedCategory || (categories[0]?.name || 'その他');
-    const serviceData = { 
+        const serviceData = { 
   shop_id: shopId, 
   name: newServiceName, 
   slots: Number(newServiceSlots), // ✅ Number() で囲って確実に数字にする
@@ -254,7 +261,7 @@ const updates = newList.map((item, i) => ({
           <Layers size={20} color="#64748b" /> カテゴリ設定
         </h3>
         <form onSubmit={handleCategorySubmit} style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '24px' }}>
-          <input placeholder="カテゴリ名 (例: カット, カラー)" value={newCategoryName} onChange={(e) => setNewCategoryName(e.target.value)} style={inputStyle} required />
+          <input placeholder="カテゴリ名 (例: カット, カラー)" value={newCategoryName || ''} onChange={(e) => setNewCategoryName(e.target.value)} style={inputStyle} required />
           <div style={{ display: 'flex', gap: '10px' }}>
             <input placeholder="識別キー (url用)" value={newUrlKey} onChange={(e) => setNewUrlKey(e.target.value)} style={{ ...inputStyle, flex: 1 }} />
             <input placeholder="専用屋号 (任意)" value={newCustomShopName} onChange={(e) => setNewCustomShopName(e.target.value)} style={{ ...inputStyle, flex: 1 }} />
@@ -323,7 +330,13 @@ const updates = newList.map((item, i) => ({
           </div>
           <div style={{ marginBottom: '12px' }}>
             <label style={{ fontSize: '0.8rem', fontWeight: 'bold', color: '#64748b', display: 'block', marginBottom: '6px' }}>メニュー名</label>
-            <input value={newServiceName} onChange={(e) => setNewServiceName(e.target.value)} style={inputStyle} placeholder="例: カット ＆ ブロー" required />
+<input 
+  value={newServiceName} 
+  onChange={(e) => setNewServiceName(e.target.value)} 
+  style={inputStyle} 
+  placeholder="例: カット ＆ ブロー" 
+  required 
+/>
           </div>
           <div style={{ marginBottom: '20px' }}>
             <label style={{ fontSize: '0.85rem', fontWeight: 'bold', display: 'block', marginBottom: '10px', color: '#64748b' }}>
@@ -380,9 +393,10 @@ const updates = newList.map((item, i) => ({
                       </div>
                     </form>
                     
-                    <div style={{ marginTop: '20px' }}>
-                      {Array.from(new Set(options.filter(o => o.service_id === s.id).map(o => o.group_name))).map(group => (
-                        <div key={group} style={{ marginBottom: '12px' }}>
+<div style={{ marginTop: '20px' }}>
+                      {/* (options || []) で配列であることを保証します [cite: 2026-03-01] */}
+                      {Array.from(new Set((options || []).filter(o => o && o.service_id === s.id).map(o => o.group_name || '共通'))).map(group => (
+                                                <div key={group} style={{ marginBottom: '12px' }}>
                           <div style={{ fontSize: '0.75rem', fontWeight: 'bold', color: '#94a3b8', marginBottom: '6px' }}>▼ {group || '共通'}</div>
                           {options.filter(o => o.service_id === s.id && o.group_name === group).map(o => (
                             <div key={o.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: '#fff', borderRadius: '8px', border: '1px solid #eee', marginBottom: '4px' }}>

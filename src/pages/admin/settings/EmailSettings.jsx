@@ -38,9 +38,10 @@ const [shopData, setShopData] = useState(null);
 
   const fetchSettings = async () => {
     const { data } = await supabase.from('profiles').select('*').eq('id', shopId).single();
-    if (data) {
+if (data) {
       setShopData(data);
-      setNotifyMailEnabled(data.notify_mail_enabled ?? true); // 🆕 追加
+      setNotifyMailEnabled(data.notify_mail_enabled ?? true);
+      // ↓ 各項目が null の場合に備え || '' を徹底します
       setTemplates({
         customer_booking: { sub: data.mail_sub_customer_booking || '', body: data.mail_body_customer_booking || '' },
         customer_remind: { sub: data.mail_sub_customer_remind || '', body: data.mail_body_customer_remind || '', enabled: data.notify_mail_remind_enabled ?? true },
@@ -79,7 +80,9 @@ const [shopData, setShopData] = useState(null);
     setTemplates({ ...templates, [activeTab]: { ...current, body: current.body + tag } });
   };
 
-  const getPreview = (text) => {
+const getPreview = (text) => {
+    // text が空の場合は空文字を返すようにガードを入れます
+    if (!text) return ''; 
     return text.replace(/{name}/g, 'お客様名')
                .replace(/{shop_name}/g, shopData?.business_name || '店名')
                .replace(/{start_time}/g, '予約日時')
@@ -177,11 +180,11 @@ const [shopData, setShopData] = useState(null);
               </label>
             )}
             
-            <div style={{ marginBottom: '20px' }}>
+<div style={{ marginBottom: '20px' }}>
               <label style={{ fontSize: '0.85rem', fontWeight: 'bold', color: '#64748b', display: 'block', marginBottom: '8px' }}>件名</label>
-              <input value={templates[activeTab].sub} onChange={e => setTemplates({...templates, [activeTab]: {...templates[activeTab], sub: e.target.value}})} style={{ width: '100%', padding: '14px', borderRadius: '12px', border: '1px solid #cbd5e1', fontSize: '1rem', boxSizing: 'border-box' }} placeholder="例: ご予約ありがとうございます" />
+              <input value={templates[activeTab]?.sub || ''} onChange={e => setTemplates({...templates, [activeTab]: {...templates[activeTab], sub: e.target.value}})} style={{ width: '100%', padding: '14px', borderRadius: '12px', border: '1px solid #cbd5e1', fontSize: '1rem', boxSizing: 'border-box' }} placeholder="例: ご予約ありがとうございます" />
             </div>
-
+            
             <div style={{ marginBottom: '20px' }}>
               <label style={{ fontSize: '0.85rem', fontWeight: 'bold', color: '#64748b', display: 'block', marginBottom: '8px' }}>本文</label>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '12px' }}>

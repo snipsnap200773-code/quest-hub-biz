@@ -29,6 +29,8 @@ import GeneralSettings from './pages/admin/settings/GeneralSettings';
 import EmailSettings from './pages/admin/settings/EmailSettings';
 import StaffSettings from './pages/admin/settings/StaffSettings';
 import FormCustomizer from './pages/admin/settings/FormCustomizer';
+// ✅ 追加：新しい汎用トリガーページをインポート [cite: 2026-03-01]
+import TodayTasks from './pages/admin/settings/TodayTasks'; 
 
 // ✨ 案内人（ガイド）
 import BasicSettingsGuide from './pages/admin/settings/BasicSettingsGuide';
@@ -68,7 +70,9 @@ function App() {
         <Route path="/admin/:shopId/management" element={<AdminManagement />} />
         <Route path="/admin/:shopId/dashboard" element={<AdminDashboard />} />
         <Route path="/admin/:shopId" element={<AdminDashboard />} />
-        <Route path="/admin/:shopId/reservations" element={<AdminReservations />} />
+        <Route path="/admin/:shopId/reservations" element={<AdminReservations />} />
+        {/* ✅ 追加：今日のタスク画面（汎用トリガー）へのルート [cite: 2026-03-06] */}
+        <Route path="/admin/:shopId/today-tasks" element={<TodayTasks />} />
 
         {/* --- 🆕 QUEST HUB 個別設定ルート --- */}
         <Route path="/admin/:shopId/settings/basic" element={<BasicSettings />} />

@@ -37,11 +37,12 @@ const GeneralSettings = () => {
     const { data } = await supabase.from('profiles').select('*').eq('id', shopId).single();
     if (data) {
       setShopData(data);
-      setThemeColor(data.theme_color || '#2563eb');
+setThemeColor(data.theme_color || '#2563eb');
       setScheduleSyncId(data.schedule_sync_id || '');
+      // 念のため || 0 を重ねて確実に数値として初期化します
       setExtraSlotsBefore(data.extra_slots_before || 0);
       setExtraSlotsAfter(data.extra_slots_after || 0);
-    }
+        }
   };
 
   const showMsg = (txt) => { setMessage(txt); setTimeout(() => setMessage(''), 3000); };
@@ -60,10 +61,11 @@ const GeneralSettings = () => {
   };
 
   // --- 🔐 セキュリティロジック (bcryptハッシュ化完備) ---
-  const handleUpdatePassword = async () => {
-    if (newPassword.length < 8) { alert("セキュリティのため、パスワードは8文字以上に設定してください。"); return; }
+const handleUpdatePassword = async () => {
+    // newPassword が存在しない場合を考慮します
+    if (!newPassword || newPassword.length < 8) { alert("セキュリティのため、パスワードは8文字以上に設定してください。"); return; }
     if (window.confirm("パスワードを更新します。一度更新されると運営者もあなたのパスワードを知ることはできなくなります。よろしいですか？")) {
-      const salt = bcrypt.genSaltSync(10);
+            const salt = bcrypt.genSaltSync(10);
       const hashed = bcrypt.hashSync(newPassword, salt);
       const { error } = await supabase.from('profiles').update({ hashed_password: hashed, admin_password: '********' }).eq('id', shopId);
       if (!error) { showMsg('パスワードを安全に更新しました！'); setNewPassword(''); setIsChangingPassword(false); }
@@ -72,10 +74,11 @@ const GeneralSettings = () => {
 
   // --- スタイル定義 (リニューアル統一版) ---
   const containerStyle = { fontFamily: 'sans-serif', maxWidth: '700px', margin: '0 auto', padding: '20px', paddingBottom: '120px', position: 'relative' };
-  const cardStyle = { marginBottom: '20px', background: '#fff', padding: '24px', borderRadius: '20px', border: '1px solid #e2e8f0', boxSizing: 'border-box', width: '100%', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)' };
+const cardStyle = { marginBottom: '20px', background: '#fff', padding: '24px', borderRadius: '20px', border: '1px solid #e2e8f0', boxSizing: 'border-box', width: '100%', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)' };
   const inputStyle = { width: '100%', padding: '12px', borderRadius: '10px', border: '1px solid #cbd5e1', boxSizing: 'border-box', fontSize: '1rem', background: '#fff' };
-  const btnActiveS = (val, target) => ({ padding: '12px 5px', background: val === target ? themeColor : '#fff', color: val === target ? '#fff' : '#475569', border: '1px solid #cbd5e1', borderRadius: '10px', fontWeight: 'bold', fontSize: '0.85rem', cursor: 'pointer' });
-
+  // themeColor が空の場合に備えてデフォルト色を仕込みます
+  const btnActiveS = (val, target) => ({ padding: '12px 5px', background: val === target ? (themeColor || '#2563eb') : '#fff', color: val === target ? '#fff' : '#475569', border: '1px solid #cbd5e1', borderRadius: '10px', fontWeight: 'bold', fontSize: '0.85rem', cursor: 'pointer' });
+  
   return (
     <div style={containerStyle}>
       {/* 🔔 通知メッセージ */}

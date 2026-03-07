@@ -63,9 +63,9 @@ if (data) {
       setPhone(data.phone || '');
       setEmailContact(data.email_contact || '');
 // ✅ 住所に加え、拠点住所と移動スピードも取得する
-      setAddress(data.address || '');
+setAddress(data.address || '');
       setBaseAddress(data.base_address || data.address || ''); // 拠点住所が空なら店舗住所を初期値に
-      setMinutesPerKm(data.minutes_per_km || 3);
+      setMinutesPerKm(data.minutes_per_km ?? 3); // nullやundefinedならデフォルト値の3を入れる
       setDescription(data.description || '');
       setIntroText(data.intro_text || '');
       setNotes(data.notes || '');
@@ -360,10 +360,10 @@ const handleSave = async () => {
         {/* サブタイトル (プレビュー付き) */}
         <label style={labelStyle}>サブタイトル (予約画面に表示されます)</label>
         <input value={description} onChange={(e) => setDescription(e.target.value)} style={{ ...inputStyle, marginBottom: '8px' }} placeholder="スラッシュ(/)で改行できます" />
-        <div style={{ marginBottom: '24px', padding: '16px', background: '#f8fafc', borderRadius: '12px', border: `1px solid ${themeColor}22` }}>
+<div style={{ marginBottom: '24px', padding: '16px', background: '#f8fafc', borderRadius: '12px', border: `1px solid ${themeColor}22` }}>
           <div style={{ fontSize: '0.85rem', fontWeight: 'bold', color: themeColor, lineHeight: '1.6' }}>
-            {description ? description.split('/').map((line, idx) => (
-              <React.Fragment key={idx}>{line}{idx < description.split('/').length - 1 && <br />}</React.Fragment>
+            {description ? (description || '').split('/').map((line, idx) => (
+              <React.Fragment key={idx}>{line}{idx < (description || '').split('/').length - 1 && <br />}</React.Fragment>
             )) : 'プレビューが表示されます'}
           </div>
         </div>
