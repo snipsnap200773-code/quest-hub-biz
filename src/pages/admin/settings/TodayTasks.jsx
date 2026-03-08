@@ -12,9 +12,12 @@ const TodayTasks = () => {
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState('');
 const [tasks, setTasks] = useState([]);
-  const [shopData, setShopData] = useState(null);
+const [shopData, setShopData] = useState(null);
+  // 🆕 金額計算のためにマスターを保持する箱を追加
+  const [services, setServices] = useState([]);
+  const [serviceOptions, setServiceOptions] = useState([]);
 
-  // 🆕 追加：レジ用の状態管理 [cite: 2026-03-08]
+  // 🆕 追加：レジ用の状態管理
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
   const [selectedTask, setSelectedTask] = useState(null);
   const [adjustments, setAdjustments] = useState([]);
@@ -33,20 +36,22 @@ const [tasks, setTasks] = useState([]);
   }, [shopId]);
 
 // 🆕 調整項目とカテゴリを並び順通りに取得 [cite: 2026-03-08]
-  const fetchMasterData = async () => {
-    // 1. 調整カテゴリを取得（is_adjustment_cat が true のもの） [cite: 2026-03-08]
-    const { data: catData } = await supabase.from('service_categories').select('*').eq('shop_id', shopId).eq('is_adjustment_cat', true).order('sort_order');
-    
-    // 2. 調整項目を取得 [cite: 2026-03-08]
-    const { data: adjData } = await supabase.from('admin_adjustments').select('*').eq('shop_id', shopId).is('service_id', null).order('sort_order');
-    
-    // 3. 店販商品を取得 [cite: 2026-03-08]
-    const { data: prodData } = await supabase.from('products').select('*').eq('shop_id', shopId);
+const fetchMasterData = async () => {
+    // 調整、店販などを取得
+    const [catRes, adjRes, prodRes, servRes, optRes] = await Promise.all([
+      supabase.from('service_categories').select('*').eq('shop_id', shopId).eq('is_adjustment_cat', true).order('sort_order'),
+      supabase.from('admin_adjustments').select('*').eq('shop_id', shopId).is('service_id', null).order('sort_order'),
+      supabase.from('products').select('*').eq('shop_id', shopId),
+      supabase.from('services').select('*').eq('shop_id', shopId), // 🆕 メニューマスター
+      supabase.from('service_options').select('*') // 🆕 枝分かれオプション
+    ]);
 
-    setAdjCategories(catData || []);
-    setAdjustments(adjData || []);
-    setProducts(prodData || []);
-  };
+    setAdjCategories(catRes.data || []);
+    setAdjustments(adjRes.data || []);
+    setProducts(prodRes.data || []);
+    setServices(servRes.data || []); // 🆕 セット
+    setServiceOptions(optRes.data || []); // 🆕 セット
+  };
 
   // 画面サイズ管理
   const [windowWidth, setWindowWidth] = useState(window.innerWidth);
@@ -97,36 +102,70 @@ const fetchTodayTasks = async () => {
     } else {
       console.error("取得エラー:", error.message);
     }
+// ...省略 (fetchTodayTasks 関数の終わり)
     setLoading(false);
-  };    
+  };
+    
 const showMsg = (txt) => { setMessage(txt); setTimeout(() => setMessage(''), 3000); };
 
-  // 🆕 追加：レジを開く（初期値をセット） [cite: 2026-03-08]
+// 🆕 Step 3: AdminManagement.jsx から移植した「正確な金額集計」ロジック [cite: 2026-03-08]
+// 予約データの JSON(options) を解読して、メニューと枝分かれの合計額を算出します
+const calculateInitialPrice = (task) => {
+  if (!task) return 0;
+  // すでにレジで確定済み（total_priceがある）なら、その確定金額を優先して返します [cite: 2026-03-08]
+  if (task.total_price && task.total_price > 0) return task.total_price;
+
+  // 予約時の options(JSON) を解析します
+  const opt = typeof task.options === 'string' ? JSON.parse(task.options) : (task.options || {});
+  
+  // 1人予約かグループ予約かを判定してサービス一覧を抽出します
+  const items = opt.people ? opt.people.flatMap(p => p.services || []) : (opt.services || []);
+  const subItems = opt.people ? opt.people.flatMap(p => Object.values(p.options || {})) : Object.values(opt.options || {});
+
+  // 1. メニュー基本料金の集計（価格がなければマスターから補完） [cite: 2026-03-08]
+  const basePrice = items.reduce((sum, item) => {
+    let p = Number(item.price);
+    if (!p || p === 0) {
+      const master = services.find(s => s.id === item.id || s.name === item.name);
+      p = master ? Number(master.price) : 0;
+    }
+    return sum + p;
+  }, 0);
+
+  // 2. 枝分かれオプション（シャンプー等）の追加料金を集計
+  const optPrice = subItems.reduce((sum, o) => sum + (Number(o.additional_price) || 0), 0);
+
+  return basePrice + optPrice;
+};
+
+// 🆕 レジを開く時
   const openQuickCheckout = (task) => {
     setSelectedTask(task);
     setSelectedAdjustments([]);
     setSelectedProducts([]);
-    // 元々の予約時の金額（total_priceがない場合は0）を初期値にする [cite: 2026-03-08]
-    setFinalPrice(task.total_price || 0); 
+    
+    // 💡 修正：集計関数を使って正しい初期値をセット
+    const initialPrice = calculateInitialPrice(task);
+    setFinalPrice(initialPrice); 
+    
     setIsCheckoutOpen(true);
   };
 
-  // 🆕 追加：調整項目や商品が選ばれるたびに金額を再計算する [cite: 2026-03-08]
+// 🆕 追加：調整項目や商品が選ばれるたびに金額を再計算する [cite: 2026-03-08]
   useEffect(() => {
     if (!selectedTask) return;
-    let total = selectedTask.total_price || 0;
+    
+    // 💡 修正：ここも集計関数をベースに計算を開始
+    let total = calculateInitialPrice(selectedTask);
 
-    // 薬剤追加や割引の計算 [cite: 2026-03-08]
     selectedAdjustments.forEach(adj => {
       if (adj.is_percent) total = total * (1 - (adj.price / 100));
       else total += adj.is_minus ? -adj.price : adj.price;
     });
 
-    // 店販商品の加算 [cite: 2026-03-08]
     selectedProducts.forEach(prod => total += (prod.price || 0));
-    
     setFinalPrice(Math.max(0, Math.round(total)));
-  }, [selectedAdjustments, selectedProducts, selectedTask]);
+  }, [selectedAdjustments, selectedProducts, selectedTask, services]); // 💡 servicesも監視 [cite: 2026-03-08]
 
   // 🚀 アップグレード：お会計確定 ＆ サービス完了（売上台帳へも記録） [cite: 2026-03-08]
   const handleCompleteTask = async () => {
@@ -137,7 +176,6 @@ const showMsg = (txt) => { setMessage(txt); setTimeout(() => setMessage(''), 300
         .update({ 
           status: 'completed', 
           total_price: finalPrice,
-          // どんな調整をしたか履歴を残す（任意） [cite: 2026-03-08]
           options: { ...selectedTask.options, quick_checkout: true, adjustments: selectedAdjustments } 
         })
         .eq('id', selectedTask.id);
@@ -145,24 +183,22 @@ const showMsg = (txt) => { setMessage(txt); setTimeout(() => setMessage(''), 300
       if (resError) throw resError;
 
       // 2. 売上管理（salesテーブル）に自動で1件記録を追加する [cite: 2026-03-08]
-      // これで AdminManagement.jsx の分析画面にも即時反映されます [cite: 2026-03-08]
       const { error: saleError } = await supabase.from('sales').insert([{
         shop_id: shopId,
         reservation_id: selectedTask.id,
         total_amount: finalPrice,
-        sale_date: new Date().toLocaleDateString('sv-SE') // 本日の日付 [cite: 2026-03-01]
+        sale_date: new Date().toLocaleDateString('sv-SE') 
       }]);
 
       if (saleError) console.error("売上台帳への記録に失敗:", saleError.message);
 
       showMsg("お会計とサービス完了を記録しました！✨");
       setIsCheckoutOpen(false);
-      fetchTodayTasks(); // リストを最新にする
+      fetchTodayTasks(); 
     } catch (err) {
       alert("確定エラー: " + err.message);
     }
   };
-
   const themeColor = shopData?.theme_color || '#2563eb';
 
   if (loading) return <div style={{ textAlign: 'center', padding: '50px' }}>読み込み中...</div>;
