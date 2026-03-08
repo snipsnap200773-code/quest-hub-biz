@@ -334,40 +334,45 @@ setEditFields({
   };
   // 🆕 追記ここまで
 
-// ✅ 名簿保存 ＆ 統合（名寄せ）ロジック：最強版
+// ✅ 名簿保存 ＆ 統合（名寄せ）ロジック：真・最強版
   const handleUpdateCustomer = async () => {
     try {
+      // 🆕 1. 名前の正規化：全角スペースを半角に変換し、前後の余白を削除 [cite: 2026-03-08]
+      const normalizedName = editFields.name.replace(/　/g, ' ').trim();
+      
       let targetCustomerId = selectedCustomer?.id;
-      // ...（以下、既存の処理）
 
-      // --- 🆕 自動名寄せチェック ---
+      // --- 🆕 自動名寄せチェック：検索精度をアップ ---
       if (!targetCustomerId) {
-        // 1. まず LINE ID か 電話番号 で「絶対にこの人！」という既存客を探す
+        // A. 連絡先（LINE ID または 電話番号）による「絶対一致」検索
         let identifierQuery = supabase.from('customers').select('id, name').eq('shop_id', shopId);
         
+        let hasIdentifier = false;
         if (editFields.line_user_id) {
           identifierQuery = identifierQuery.eq('line_user_id', editFields.line_user_id);
-        } else if (editFields.phone) {
+          hasIdentifier = true;
+        } else if (editFields.phone && editFields.phone !== '---') {
           identifierQuery = identifierQuery.eq('phone', editFields.phone);
+          hasIdentifier = true;
         }
 
-        const { data: matchedCust } = await identifierQuery.maybeSingle();
+        const { data: matchedCust } = hasIdentifier ? await identifierQuery.maybeSingle() : { data: null };
 
         if (matchedCust) {
-          // ✅ A. LINEや電話が一致！ → 自動的にその人のIDを使う（分身を作らせない）
+          // 連絡先が一致！ → 分身を作らせないために既存IDを採用 [cite: 2026-03-08]
           targetCustomerId = matchedCust.id;
         } else {
-          // 2. 連絡先で見つからない場合のみ、名前で「同姓同名の別人かも？」をチェック
+          // B. 連絡先で見つからない場合、正規化した名前で「同姓同名」を検索
           const { data: nameMatchCust } = await supabase
             .from('customers')
             .select('*')
             .eq('shop_id', shopId)
-            .eq('name', editFields.name)
+            .eq('name', normalizedName) // ここで正規化した名前を使用 [cite: 2026-03-08]
             .maybeSingle();
 
           if (nameMatchCust) {
             const confirmMerge = window.confirm(
-              `「${editFields.name}」様は既に名簿に存在しますが、連絡先が一致しません。\n既存のデータへ統合しますか？`
+              `「${normalizedName}」様は既に名簿に存在しますが、連絡先が一致しません。\n既存のデータへ統合しますか？`
             );
             if (confirmMerge) targetCustomerId = nameMatchCust.id;
           }
@@ -375,10 +380,10 @@ setEditFields({
       }
       // --- 🆕 チェック終了 ---
 
-const payload = {
+      const payload = {
         shop_id: shopId,
-        name: editFields.name,
-        admin_name: editFields.name,
+        name: normalizedName, // 保存する名前も正規化したものに統一 [cite: 2026-03-08]
+        admin_name: normalizedName,
         furigana: editFields.furigana || null, // 🆕 追加
         phone: editFields.phone || null,
         email: editFields.email || null,
