@@ -41,7 +41,8 @@ const MenuSettings = () => {
 
   // メニュー用State
   const [newServiceName, setNewServiceName] = useState('');
-  const [newServiceSlots, setNewServiceSlots] = useState(1); 
+  const [newServiceSlots, setNewServiceSlots] = useState(1);
+  const [newServicePrice, setNewServicePrice] = useState(0);
   const [selectedCategory, setSelectedCategory] = useState('');
   const [editingServiceId, setEditingServiceId] = useState(null);
 
@@ -50,9 +51,25 @@ const MenuSettings = () => {
   const [optGroupName, setOptGroupName] = useState(''); 
   const [optName, setOptName] = useState('');                  
   const [optSlots, setOptSlots] = useState(0);
+const [optPrice, setOptPrice] = useState(0);
+  const [editingOptionId, setEditingOptionId] = useState(null);
+
+  /* ==========================================
+     🆕 追加：お会計調整マスター用の箱（State） [cite: 2026-03-08]
+     ========================================== */
+  const [adjustments, setAdjustments] = useState([]);      // 調整項目のリスト
+  const [adjCategories, setAdjCategories] = useState([]);   // 調整カテゴリのリスト
+  
+  const [newAdjCatName, setNewAdjCatName] = useState('');   // 登録用：カテゴリ名
+  const [editingAdjCatId, setEditingAdjCatId] = useState(null);
+
+  const [selectedAdjCat, setSelectedAdjCat] = useState(''); // 登録用：選択中のカテゴリ
+  const [newAdjName, setNewAdjName] = useState('');         // 登録用：ボタン名
+  const [adjType, setAdjType] = useState('minus');          // 登録用：効果(＋－％)
+  const [adjValue, setAdjValue] = useState(0);              // 登録用：数値
+  const [editingAdjId, setEditingAdjId] = useState(null);
 
   const themeColor = shopData?.theme_color || '#2563eb';
-
   // --- 2. データ取得系 ---
   useEffect(() => {
     if (shopId) {
@@ -70,15 +87,23 @@ const MenuSettings = () => {
     }
   };
 
-  const fetchMenuDetails = async () => {
-    const catRes = await supabase.from('service_categories').select('*').eq('shop_id', shopId).order('sort_order', { ascending: true });
-    const servRes = await supabase.from('services').select('*').eq('shop_id', shopId).order('sort_order', { ascending: true });
+const fetchMenuDetails = async () => {
+    // 1. 通常カテゴリを取得 [cite: 2026-03-08]
+    const catRes = await supabase.from('service_categories').select('*').eq('shop_id', shopId).or('is_adjustment_cat.is.null,is_adjustment_cat.eq.false').order('sort_order');
+    // 2. 調整用カテゴリを取得 [cite: 2026-03-08]
+    const adjCatRes = await supabase.from('service_categories').select('*').eq('shop_id', shopId).eq('is_adjustment_cat', true).order('sort_order');
+    
+    const servRes = await supabase.from('services').select('*').eq('shop_id', shopId).order('sort_order');
     const optRes = await supabase.from('service_options').select('*'); 
+    // 3. 調整項目（ボタン本体）を取得 [cite: 2026-03-08]
+    const adjRes = await supabase.from('admin_adjustments').select('*').eq('shop_id', shopId).is('service_id', null).order('sort_order');
+
     if (catRes.data) setCategories(catRes.data);
+    if (adjCatRes.data) setAdjCategories(adjCatRes.data); // 調整カテゴリをセット [cite: 2026-03-08]
     if (servRes.data) setServices(servRes.data);
     if (optRes.data) setOptions(optRes.data);
+    if (adjRes.data) setAdjustments(adjRes.data); // 調整項目をセット [cite: 2026-03-08]
   };
-
   const showMsg = (txt) => { setMessage(txt); setTimeout(() => setMessage(''), 3000); };
 
   // --- 3. アクション系ロジック (完全維持) ---
@@ -152,21 +177,89 @@ const handleServiceSubmit = async (e) => {
       return;
     }
     const finalCategory = selectedCategory || (categories[0]?.name || 'その他');
-        const serviceData = { 
-  shop_id: shopId, 
-  name: newServiceName, 
-  slots: Number(newServiceSlots), // ✅ Number() で囲って確実に数字にする
-  category: finalCategory 
+const serviceData = { 
+  shop_id: shopId, 
+  name: newServiceName, 
+  slots: Number(newServiceSlots),
+  // 🆕 料金もデータに含めます [cite: 2026-03-08]
+  price: Number(newServicePrice), 
+  category: finalCategory 
 };
-    if (editingServiceId) await supabase.from('services').update(serviceData).eq('id', editingServiceId);
-    else await supabase.from('services').insert([{ ...serviceData, sort_order: services.length }]);
-    setEditingServiceId(null); setNewServiceName(''); setNewServiceSlots(1); fetchMenuDetails(); showMsg('メニューを保存しました');
+    if (editingServiceId) await supabase.from('services').update(serviceData).eq('id', editingServiceId);
+    else await supabase.from('services').insert([{ ...serviceData, sort_order: services.length }]);
+    
+    // 保存後は料金の入力欄も 0 にリセットします [cite: 2026-03-08]
+    setEditingServiceId(null); 
+    setNewServiceName(''); 
+    setNewServiceSlots(1); 
+    setNewServicePrice(0); 
+    fetchMenuDetails(); 
+    showMsg('メニューを保存しました');
+    };
+
+const handleOptionSubmit = async (e) => {
+    e.preventDefault();
+    const payload = { 
+      service_id: activeServiceForOptions.id, 
+      group_name: optGroupName, 
+      option_name: optName, 
+      additional_slots: Number(optSlots),
+      // 🆕 金額を保存対象に含めます [cite: 2026-03-08]
+      additional_price: Number(optPrice) 
+    };
+
+    if (editingOptionId) {
+      // 🆕 編集モード：既存のデータを更新 [cite: 2026-03-08]
+      await supabase.from('service_options').update(payload).eq('id', editingOptionId);
+    } else {
+      // 新規登録
+      await supabase.from('service_options').insert([payload]);
+    }
+
+    // 保存後は入力をリセット [cite: 2026-03-08]
+    setEditingOptionId(null);
+    setOptName(''); 
+    setOptSlots(0); 
+    setOptPrice(0); 
+    fetchMenuDetails(); 
+showMsg(editingOptionId ? '枝メニューを更新しました' : '枝メニューを追加しました');
   };
 
-  const handleOptionSubmit = async (e) => {
+  /* ==========================================
+     🆕 追加：調整項目をDBに保存する関数 [cite: 2026-03-08]
+     ========================================== */
+
+  // 1. 調整カテゴリを保存する
+  const handleAdjCatSubmit = async (e) => {
     e.preventDefault();
-    await supabase.from('service_options').insert([{ service_id: activeServiceForOptions.id, group_name: optGroupName, option_name: optName, additional_slots: optSlots }]);
-    setOptName(''); setOptSlots(0); fetchMenuDetails(); showMsg('枝メニューを追加しました');
+    const payload = { name: newAdjCatName, shop_id: shopId, is_adjustment_cat: true };
+    if (editingAdjCatId) await supabase.from('service_categories').update(payload).eq('id', editingAdjCatId);
+    else await supabase.from('service_categories').insert([{ ...payload, sort_order: adjCategories.length }]);
+    
+    setNewAdjCatName(''); setEditingAdjCatId(null); 
+    fetchMenuDetails(); // 画面を更新 [cite: 2026-03-08]
+    showMsg('調整カテゴリを保存しました');
+  };
+
+  // 2. 調整ボタン本体を保存する
+  const handleAdjItemSubmit = async (e) => {
+    e.preventDefault();
+    const finalCat = selectedAdjCat || (adjCategories[0]?.name || 'その他');
+    const payload = {
+      shop_id: shopId,
+      category: finalCat,
+      name: newAdjName,
+      price: Number(adjValue),
+      is_percent: adjType === 'percent',
+      is_minus: adjType === 'minus' || adjType === 'percent',
+      service_id: null
+    };
+    if (editingAdjId) await supabase.from('admin_adjustments').update(payload).eq('id', editingAdjId);
+    else await supabase.from('admin_adjustments').insert([{ ...payload, sort_order: adjustments.length }]);
+    
+    setNewAdjName(''); setAdjValue(0); setEditingAdjId(null); 
+    fetchMenuDetails(); // 画面を更新 [cite: 2026-03-08]
+    showMsg('調整項目を保存しました');
   };
 
   // --- 4. スタイル設定 ---
@@ -328,18 +421,34 @@ const handleServiceSubmit = async (e) => {
               {categories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
             </select>
           </div>
-          <div style={{ marginBottom: '12px' }}>
+<div style={{ marginBottom: '12px' }}>
             <label style={{ fontSize: '0.8rem', fontWeight: 'bold', color: '#64748b', display: 'block', marginBottom: '6px' }}>メニュー名</label>
-<input 
-  value={newServiceName} 
-  onChange={(e) => setNewServiceName(e.target.value)} 
-  style={inputStyle} 
-  placeholder="例: カット ＆ ブロー" 
-  required 
-/>
+            <input 
+              value={newServiceName} 
+              onChange={(e) => setNewServiceName(e.target.value)} 
+              style={inputStyle} 
+              placeholder="例: カット ＆ ブロー" 
+              required 
+            />
           </div>
-          <div style={{ marginBottom: '20px' }}>
-            <label style={{ fontSize: '0.85rem', fontWeight: 'bold', display: 'block', marginBottom: '10px', color: '#64748b' }}>
+
+          {/* 💰 追加：基本料金入力欄（ここを差し込みます） [cite: 2026-03-08] */}
+          <div style={{ marginBottom: '12px' }}>
+            <label style={{ fontSize: '0.8rem', fontWeight: 'bold', color: '#64748b', display: 'block', marginBottom: '6px' }}>基本料金 (税込)</label>
+            <div style={{ position: 'relative' }}>
+              <span style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: '#64748b', fontWeight: 'bold' }}>¥</span>
+              <input 
+                type="number" 
+                value={newServicePrice} 
+                onChange={(e) => setNewServicePrice(e.target.value)} 
+                style={{ ...inputStyle, paddingLeft: '30px', fontWeight: '900', color: '#d34817' }} 
+                placeholder="0" 
+                required 
+              />
+            </div>
+          </div>
+
+          <div style={{ marginBottom: '20px' }}>            <label style={{ fontSize: '0.85rem', fontWeight: 'bold', display: 'block', marginBottom: '10px', color: '#64748b' }}>
               必要コマ数: <span style={{ color: themeColor, fontSize: '1.1rem' }}>{newServiceSlots}コマ（{newServiceSlots * slotIntervalMin}分）</span>
             </label>
             <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
@@ -363,16 +472,34 @@ const handleServiceSubmit = async (e) => {
             {services.filter(s => s.category === cat.name).map((s) => (
               <div key={s.id} style={{ ...cardStyle, marginBottom: '12px', border: activeServiceForOptions?.id === s.id ? `2px solid ${themeColor}` : '1px solid #e2e8f0' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div style={{ flex: 1 }}>
+<div style={{ flex: 1 }}>
                     <div style={{ fontWeight: 'bold', color: '#1e293b' }}>{s.name}</div>
-                    <div style={{ fontSize: '0.8rem', color: themeColor, fontWeight: 'bold', marginTop: '4px' }}>{s.slots}コマ（{s.slots * slotIntervalMin}分）</div>
+                    {/* 金額を表示するために flex で横並びにします [cite: 2026-03-08] */}
+                    <div style={{ display: 'flex', gap: '12px', marginTop: '4px' }}>
+                      <div style={{ fontSize: '0.8rem', color: themeColor, fontWeight: 'bold' }}>{s.slots}コマ（{s.slots * slotIntervalMin}分）</div>
+                      {/* ✅ 料金表示を追加 [cite: 2026-03-08] */}
+                      <div style={{ fontSize: '0.8rem', color: '#d34817', fontWeight: 'bold' }}>¥{(s.price || 0).toLocaleString()}</div>
+                    </div>
                   </div>
-                  <div style={{ display: 'flex', gap: '8px' }}>
+                                    <div style={{ display: 'flex', gap: '8px' }}>
                     <button onClick={() => setActiveServiceForOptions(activeServiceForOptions?.id === s.id ? null : s)} style={{ padding: '6px 12px', background: activeServiceForOptions?.id === s.id ? themeColor : '#f1f5f9', border: '1px solid #cbd5e1', borderRadius: '8px', fontSize: '0.8rem', fontWeight: 'bold', color: activeServiceForOptions?.id === s.id ? '#fff' : '#475569', cursor: 'pointer' }}>枝</button>
                     <button onClick={() => moveItem('service', services.filter(ser => ser.category === cat.name), s.id, 'up')} style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '4px' }}><ArrowUp size={16} /></button>
                     <button onClick={() => moveItem('service', services.filter(ser => ser.category === cat.name), s.id, 'down')} style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '4px' }}><ArrowDown size={16} /></button>
-                    <button onClick={() => { setEditingServiceId(s.id); setNewServiceName(s.name); setNewServiceSlots(s.slots); setSelectedCategory(s.category); menuFormRef.current?.scrollIntoView({ behavior: 'smooth' }); }} style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '4px', color: '#3b82f6' }}><Edit2 size={16} /></button>
-                    <button onClick={async () => { if(window.confirm('メニューを削除しますか？')) { await supabase.from('services').delete().eq('id', s.id); fetchMenuDetails(); } }} style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '4px', color: '#ef4444' }}><Trash2 size={16} /></button>
+<button 
+                      onClick={() => { 
+                        setEditingServiceId(s.id); 
+                        setNewServiceName(s.name); 
+                        setNewServiceSlots(s.slots); 
+                        // ✅ 修正：保存されている金額も入力欄へ戻るように追加 [cite: 2026-03-08]
+                        setNewServicePrice(s.price || 0); 
+                        setSelectedCategory(s.category); 
+                        menuFormRef.current?.scrollIntoView({ behavior: 'smooth' }); 
+                      }} 
+                      style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '4px', color: '#3b82f6' }}
+                    >
+                      <Edit2 size={16} />
+                    </button>
+                                        <button onClick={async () => { if(window.confirm('メニューを削除しますか？')) { await supabase.from('services').delete().eq('id', s.id); fetchMenuDetails(); } }} style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '4px', color: '#ef4444' }}><Trash2 size={16} /></button>
                   </div>
                 </div>
 
@@ -383,15 +510,24 @@ const handleServiceSubmit = async (e) => {
                     <form onSubmit={handleOptionSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                       <input placeholder="枝カテゴリ (例: シャンプー, 指名料)" value={optGroupName} onChange={(e) => setOptGroupName(e.target.value)} style={inputStyle} />
                       <input placeholder="枝メニュー名 (例: あり, 担当 A)" value={optName} onChange={(e) => setOptName(e.target.value)} style={inputStyle} required />
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+<div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                           <span style={{ fontSize: '0.8rem', color: '#64748b' }}>追加:</span>
-                          <input type="number" value={optSlots} onChange={(e) => setOptSlots(parseInt(e.target.value))} style={{ width: '70px', ...inputStyle }} />
+                          <input type="number" value={optSlots} onChange={(e) => setOptSlots(parseInt(e.target.value))} style={{ width: '60px', ...inputStyle }} />
                           <span style={{ fontSize: '0.8rem', color: '#64748b' }}>コマ</span>
                         </div>
-                        <button type="submit" style={{ flex: 1, padding: '12px', background: '#1e293b', color: '#fff', border: 'none', borderRadius: '10px', fontWeight: 'bold', cursor: 'pointer' }}>＋ 枝追加</button>
+
+                        {/* 💰 🆕 枝メニューの料金入力欄を追加 [cite: 2026-03-08] */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1 }}>
+                          <span style={{ fontSize: '0.8rem', color: '#64748b' }}>料金: +¥</span>
+                          <input type="number" value={optPrice} onChange={(e) => setOptPrice(Number(e.target.value))} style={{ flex: 1, ...inputStyle }} placeholder="500" />
+                        </div>
+
+                        <button type="submit" style={{ padding: '12px 20px', background: '#1e293b', color: '#fff', border: 'none', borderRadius: '10px', fontWeight: 'bold', cursor: 'pointer' }}>
+                          {editingOptionId ? '枝を更新' : '＋ 枝追加'}
+                        </button>
                       </div>
-                    </form>
+                                          </form>
                     
 <div style={{ marginTop: '20px' }}>
                       {/* (options || []) で配列であることを保証します [cite: 2026-03-01] */}
@@ -399,11 +535,36 @@ const handleServiceSubmit = async (e) => {
                                                 <div key={group} style={{ marginBottom: '12px' }}>
                           <div style={{ fontSize: '0.75rem', fontWeight: 'bold', color: '#94a3b8', marginBottom: '6px' }}>▼ {group || '共通'}</div>
                           {options.filter(o => o.service_id === s.id && o.group_name === group).map(o => (
-                            <div key={o.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: '#fff', borderRadius: '8px', border: '1px solid #eee', marginBottom: '4px' }}>
-                              <span style={{ fontSize: '0.85rem', color: '#1e293b' }}>{o.option_name} <span style={{ color: themeColor, fontWeight: 'bold' }}>+{o.additional_slots}コマ</span></span>
-                              <button onClick={async () => { if(window.confirm('この枝メニューを削除しますか？')) { await supabase.from('service_options').delete().eq('id', o.id); fetchMenuDetails(); } }} style={{ color: '#ef4444', border: 'none', background: 'none', cursor: 'pointer', padding: '4px' }}><Trash2 size={16} /></button>
+<div key={o.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: '#fff', borderRadius: '8px', border: '1px solid #eee', marginBottom: '4px' }}>
+                              <div style={{ display: 'flex', flexDirection: 'column' }}>
+                                <span style={{ fontSize: '0.85rem', color: '#1e293b', fontWeight: 'bold' }}>{o.option_name}</span>
+                                <div style={{ display: 'flex', gap: '8px', fontSize: '0.75rem' }}>
+                                  <span style={{ color: themeColor }}>+{o.additional_slots}コマ</span>
+                                  {/* ✅ 枝メニューの追加料金を表示 [cite: 2026-03-08] */}
+                                  <span style={{ color: '#d34817', fontWeight: 'bold' }}>+¥{(o.additional_price || 0).toLocaleString()}</span>
+                                </div>
+                              </div>
+                              
+                              <div style={{ display: 'flex', gap: '4px' }}>
+                                {/* ✏️ 🆕 枝メニューの編集ボタン [cite: 2026-03-08] */}
+                                <button 
+                                  onClick={() => {
+                                    setEditingOptionId(o.id);
+                                    setOptGroupName(o.group_name || '');
+                                    setOptName(o.option_name);
+                                    setOptSlots(o.additional_slots || 0);
+                                    setOptPrice(o.additional_price || 0);
+                                  }} 
+                                  style={{ color: '#3b82f6', border: 'none', background: 'none', cursor: 'pointer', padding: '4px' }}
+                                >
+                                  <Edit2 size={16} />
+                                </button>
+                                <button onClick={async () => { if(window.confirm('この枝メニューを削除しますか？')) { await supabase.from('service_options').delete().eq('id', o.id); fetchMenuDetails(); } }} style={{ color: '#ef4444', border: 'none', background: 'none', cursor: 'pointer', padding: '4px' }}>
+                                  <Trash2 size={16} />
+                                </button>
+                              </div>
                             </div>
-                          ))}
+                                                    ))}
                         </div>
                       ))}
                     </div>
@@ -411,9 +572,79 @@ const handleServiceSubmit = async (e) => {
                 )}
               </div>
             ))}
+</div>
+        ))}
+      </div>
+
+      <div style={{ marginTop: '60px', borderTop: '6px solid #ef4444', paddingTop: '40px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '30px' }}>
+          <div style={{ background: '#ef4444', color: '#fff', padding: '8px', borderRadius: '10px' }}><Settings2 size={24} /></div>
+          <h2 style={{ fontSize: '1.5rem', color: '#1e293b', margin: 0, fontWeight: '900' }}>お会計調整マスター管理</h2>
+        </div>
+
+        {/* 1. 調整カテゴリ作成 */}
+        <section style={{ ...cardStyle, background: '#fff5f5', border: '2px solid #feb2b2' }}>
+          <h3 style={{ marginTop: 0, fontSize: '1rem', color: '#ef4444', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '15px' }}><Layers size={18} /> 調整カテゴリの作成</h3>
+          <form onSubmit={handleAdjCatSubmit} style={{ display: 'flex', gap: '10px' }}>
+            <input placeholder="例：割引, キャンペーン" value={newAdjCatName} onChange={(e) => setNewAdjCatName(e.target.value)} style={inputStyle} required />
+            <button type="submit" style={{ padding: '0 25px', background: '#ef4444', color: 'white', border: 'none', borderRadius: '12px', fontWeight: 'bold', cursor: 'pointer' }}>
+              {editingAdjCatId ? '更新' : '＋作成'}
+            </button>
+          </form>
+        </section>
+
+        {/* 2. 調整ボタン登録 */}
+        <section style={{ ...cardStyle, border: '2px solid #ef4444' }}>
+          <h3 style={{ marginTop: 0, fontSize: '1rem', color: '#ef4444', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '15px' }}><Plus size={20} /> 調整ボタンの登録</h3>
+          <form onSubmit={handleAdjItemSubmit}>
+            <div style={{ marginBottom: '15px' }}>
+              <label style={{ fontSize: '0.8rem', fontWeight: 'bold', color: '#64748b', display: 'block', marginBottom: '8px' }}>所属カテゴリ</label>
+              <select value={selectedAdjCat} onChange={(e) => setSelectedAdjCat(e.target.value)} style={inputStyle} required>
+                <option value="">-- カテゴリを選択 --</option>
+                {adjCategories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+              </select>
+            </div>
+            <div style={{ display: 'flex', gap: '10px', marginBottom: '15px' }}>
+              <div style={{ flex: 2 }}><input placeholder="ボタン名" value={newAdjName} onChange={(e) => setNewAdjName(e.target.value)} style={inputStyle} required /></div>
+              <div style={{ flex: 1 }}>
+                <select value={adjType} onChange={(e) => setAdjType(e.target.value)} style={inputStyle}>
+                  <option value="minus">－ (引く)</option>
+                  <option value="plus">＋ (足す)</option>
+                  <option value="percent">％ (割引)</option>
+                </select>
+              </div>
+            </div>
+            <input type="number" placeholder="数値" value={adjValue} onChange={(e) => setAdjValue(e.target.value)} style={inputStyle} required />
+            <button type="submit" style={{ width: '100%', marginTop: '20px', padding: '16px', background: '#ef4444', color: 'white', border: 'none', borderRadius: '16px', fontWeight: 'bold', fontSize: '1rem' }}>
+              {editingAdjId ? '調整項目を更新する' : '調整ボタンを新規登録'}
+            </button>
+          </form>
+        </section>
+
+        {/* 3. 調整ボタン一覧（並び替え・編集機能） [cite: 2026-03-08] */}
+        {adjCategories.map(cat => (
+          <div key={cat.id} style={{ marginBottom: '30px' }}>
+            <h4 style={{ color: '#ef4444', fontSize: '0.9rem', marginBottom: '15px', borderLeft: '5px solid #ef4444', paddingLeft: '12px', fontWeight: 'bold' }}>{cat.name}</h4>
+            {adjustments.filter(a => a.category === cat.name).map((adj) => (
+              <div key={adj.id} style={{ ...cardStyle, padding: '18px 25px', marginBottom: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', border: '1px solid #feb2b2' }}>
+                <div>
+                  <div style={{ fontWeight: 'bold', color: '#1e293b' }}>{adj.name}</div>
+                  <div style={{ fontSize: '0.95rem', color: '#ef4444', fontWeight: 'bold', marginTop: '4px' }}>
+                    {adj.is_minus ? '－' : adj.is_percent ? '' : '＋'}{adj.price}{adj.is_percent ? '%' : '円'}
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button onClick={() => moveItem('adjustment', adjustments, adj.id, 'up')} style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '6px' }}><ArrowUp size={20} /></button>
+                  <button onClick={() => moveItem('adjustment', adjustments, adj.id, 'down')} style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '6px' }}><ArrowDown size={20} /></button>
+                  <button onClick={() => { setEditingAdjId(adj.id); setNewAdjName(adj.name); setAdjValue(adj.price); setSelectedAdjCat(adj.category); }} style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '6px', color: '#3b82f6' }}><Edit2 size={20} /></button>
+                  <button onClick={async () => { if(window.confirm('削除しますか？')) { await supabase.from('admin_adjustments').delete().eq('id', adj.id); fetchMenuDetails(); } }} style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '6px', color: '#ef4444' }}><Trash2 size={20} /></button>
+                </div>
+              </div>
+            ))}
           </div>
         ))}
       </div>
+
     </div>
   );
 };

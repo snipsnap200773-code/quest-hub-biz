@@ -18,6 +18,7 @@ const [tasks, setTasks] = useState([]);
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
   const [selectedTask, setSelectedTask] = useState(null);
   const [adjustments, setAdjustments] = useState([]);
+  const [adjCategories, setAdjCategories] = useState([]);
   const [products, setProducts] = useState([]);
   const [selectedAdjustments, setSelectedAdjustments] = useState([]);
   const [selectedProducts, setSelectedProducts] = useState([]);
@@ -31,14 +32,22 @@ const [tasks, setTasks] = useState([]);
     }
   }, [shopId]);
 
-  // 🆕 追加：メニュー調整項目と店販商品の取得 [cite: 2026-03-08]
-  const fetchMasterData = async () => {
-    const { data: adj } = await supabase.from('admin_adjustments').select('*').eq('shop_id', shopId);
-    const { data: prod } = await supabase.from('products').select('*').eq('shop_id', shopId);
-    setAdjustments(adj || []);
-    setProducts(prod || []);
-  };
-  
+// 🆕 調整項目とカテゴリを並び順通りに取得 [cite: 2026-03-08]
+  const fetchMasterData = async () => {
+    // 1. 調整カテゴリを取得（is_adjustment_cat が true のもの） [cite: 2026-03-08]
+    const { data: catData } = await supabase.from('service_categories').select('*').eq('shop_id', shopId).eq('is_adjustment_cat', true).order('sort_order');
+    
+    // 2. 調整項目を取得 [cite: 2026-03-08]
+    const { data: adjData } = await supabase.from('admin_adjustments').select('*').eq('shop_id', shopId).is('service_id', null).order('sort_order');
+    
+    // 3. 店販商品を取得 [cite: 2026-03-08]
+    const { data: prodData } = await supabase.from('products').select('*').eq('shop_id', shopId);
+
+    setAdjCategories(catData || []);
+    setAdjustments(adjData || []);
+    setProducts(prodData || []);
+  };
+
   // 画面サイズ管理
   const [windowWidth, setWindowWidth] = useState(window.innerWidth);
   useEffect(() => {
@@ -63,29 +72,35 @@ const [tasks, setTasks] = useState([]);
 const fetchTodayTasks = async () => {
     setLoading(true);
     
-    // ✅ 日本時間の今日の日付（2026-03-07）をベースに範囲を作成 [cite: 2026-03-01]
-    const todayStr = new Date().toLocaleDateString('sv-SE'); 
-    const startOfToday = `${todayStr}T00:00:00.000Z`; 
-    const endOfToday = `${todayStr}T23:59:59.999Z`;
+    // 1. 日本時間の「今日」の日付を取得 (例: 2026-03-08) [cite: 2026-03-08]
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = String(today.getMonth() + 1).padStart(2, '0');
+    const day = String(today.getDate()).padStart(2, '0');
+    const todayStr = `${year}-${month}-${day}`;
+
+    // 2. 検索範囲を作成（あえて Z をつけず、DBの文字列に合わせます） [cite: 2026-03-08]
+    const startRange = `${todayStr}T00:00:00`; 
+    const endRange = `${todayStr}T23:59:59`;
 
     const { data, error } = await supabase
       .from('reservations')
       .select('*, customers(name, admin_name)') 
       .eq('shop_id', shopId)
-      // ✅ 修正ポイント：start_time か start_at、どちらかが「今日の範囲内」なら取得する [cite: 2026-03-01]
-      // or の中で and 条件（gte かつ lte）を2パターン記述します
-      .or(`and(start_time.gte.${startOfToday},start_time.lte.${endOfToday}),and(start_at.gte.${startOfToday},start_at.lte.${endOfToday})`)
+      // 🆕 三土手さんの or 構文を、より安全な変数名で実行 [cite: 2026-03-08]
+      .or(`and(start_time.gte.${startRange},start_time.lte.${endRange}),and(start_at.gte.${startRange},start_at.lte.${endRange})`)
       .in('status', ['confirmed', 'completed'])
       .order('start_time', { ascending: true });
 
     if (!error) {
       setTasks(data || []);
     } else {
+      // 💡 もしここで 400 エラーが出るなら、start_at 列がない証拠です [cite: 2026-03-08]
       console.error("取得エラー:", error.message);
     }
     setLoading(false);
   };
-  
+    
 const showMsg = (txt) => { setMessage(txt); setTimeout(() => setMessage(''), 3000); };
 
   // 🆕 追加：レジを開く（初期値をセット） [cite: 2026-03-08]
@@ -257,26 +272,47 @@ const showMsg = (txt) => { setMessage(txt); setTimeout(() => setMessage(''), 300
               <button onClick={() => setIsCheckoutOpen(false)} style={{ background: '#f1f5f9', border: 'none', width: '40px', height: '40px', borderRadius: '50%', cursor: 'pointer' }}>✕</button>
             </div>
 
-            {/* メニュー調整セクション */}
-            <label style={{ fontSize: '0.75rem', fontWeight: 'bold', color: '#4b2c85', display: 'block', marginBottom: '10px' }}>📋 メニュー調整（薬剤・割引）</label>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '25px' }}>
-              {adjustments.map(adj => {
-                const isSel = selectedAdjustments.find(a => a.id === adj.id);
-                return (
-                  <button 
-                    key={adj.id} 
-                    onClick={() => setSelectedAdjustments(prev => isSel ? prev.filter(a => a.id !== adj.id) : [...prev, adj])}
-                    style={{ padding: '10px 15px', borderRadius: '10px', border: `1px solid ${isSel ? themeColor : '#e2e8f0'}`, background: isSel ? themeColor : '#fff', color: isSel ? '#fff' : '#475569', fontWeight: 'bold', fontSize: '0.8rem', cursor: 'pointer' }}
-                  >
-                    {adj.name} {adj.is_minus ? '-' : '+'}{adj.is_percent ? `${adj.price}%` : `¥${adj.price}`}
-                  </button>
-                );
-              })}
+{/* 🆕 カテゴリごとに整理してボタンを表示 [cite: 2026-03-08] */}
+            <div style={{ marginBottom: '25px' }}>
+              <div style={{ fontSize: '0.75rem', fontWeight: 'bold', color: '#4b2c85', marginBottom: '15px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                📋 メニュー調整マスター（割引・加算）
+              </div>
+
+              {adjCategories.map(cat => (
+                <div key={cat.id} style={{ marginBottom: '15px', background: '#fdfbff', padding: '12px', borderRadius: '15px', border: '1px solid #f1f5f9' }}>
+                  {/* カテゴリの見出し [cite: 2026-03-08] */}
+                  <label style={{ fontSize: '0.7rem', fontWeight: 'bold', color: '#ef4444', display: 'block', marginBottom: '10px', borderLeft: '3px solid #ef4444', paddingLeft: '8px' }}>
+                    {cat.name}
+                  </label>
+                  
+                  {/* そのカテゴリに属するボタンだけを表示 [cite: 2026-03-08] */}
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                    {adjustments.filter(a => a.category === cat.name).map(adj => {
+                      const isSel = selectedAdjustments.find(a => a.id === adj.id);
+                      return (
+                        <button 
+                          key={adj.id} 
+                          onClick={() => setSelectedAdjustments(prev => isSel ? prev.filter(a => a.id !== adj.id) : [...prev, adj])}
+                          style={{ 
+                            padding: '10px 15px', borderRadius: '10px', 
+                            border: `1px solid ${isSel ? '#ef4444' : '#e2e8f0'}`, 
+                            background: isSel ? '#ef4444' : '#fff', 
+                            color: isSel ? '#fff' : '#475569', 
+                            fontWeight: 'bold', fontSize: '0.8rem', cursor: 'pointer' 
+                          }}
+                        >
+                          {adj.name} {adj.is_minus ? '-' : '+'}{adj.is_percent ? `${adj.price}%` : `¥${adj.price.toLocaleString()}`}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
             </div>
 
-            {/* 店販商品セクション */}
+            {/* 店販商品セクション（ここにつながります） */}
             <label style={{ fontSize: '0.75rem', fontWeight: 'bold', color: '#008000', display: 'block', marginBottom: '10px' }}>🧴 店販商品</label>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '25px' }}>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '25px' }}>
               {products.map(prod => {
                 const isSel = selectedProducts.find(p => p.id === prod.id);
                 return (
