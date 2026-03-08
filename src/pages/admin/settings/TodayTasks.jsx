@@ -11,9 +11,34 @@ const TodayTasks = () => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState('');
-  const [tasks, setTasks] = useState([]);
+const [tasks, setTasks] = useState([]);
   const [shopData, setShopData] = useState(null);
 
+  // 🆕 追加：レジ用の状態管理 [cite: 2026-03-08]
+  const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
+  const [selectedTask, setSelectedTask] = useState(null);
+  const [adjustments, setAdjustments] = useState([]);
+  const [products, setProducts] = useState([]);
+  const [selectedAdjustments, setSelectedAdjustments] = useState([]);
+  const [selectedProducts, setSelectedProducts] = useState([]);
+  const [finalPrice, setFinalPrice] = useState(0);
+
+  useEffect(() => {
+    if (shopId) {
+      fetchShopData();
+      fetchTodayTasks();
+      fetchMasterData(); // 🆕 マスター情報を取得 [cite: 2026-03-08]
+    }
+  }, [shopId]);
+
+  // 🆕 追加：メニュー調整項目と店販商品の取得 [cite: 2026-03-08]
+  const fetchMasterData = async () => {
+    const { data: adj } = await supabase.from('admin_adjustments').select('*').eq('shop_id', shopId);
+    const { data: prod } = await supabase.from('products').select('*').eq('shop_id', shopId);
+    setAdjustments(adj || []);
+    setProducts(prod || []);
+  };
+  
   // 画面サイズ管理
   const [windowWidth, setWindowWidth] = useState(window.innerWidth);
   useEffect(() => {
@@ -61,35 +86,74 @@ const fetchTodayTasks = async () => {
     setLoading(false);
   };
   
-  const showMsg = (txt) => { setMessage(txt); setTimeout(() => setMessage(''), 3000); };
+const showMsg = (txt) => { setMessage(txt); setTimeout(() => setMessage(''), 3000); };
 
-  // 🚀 汎用トリガー：サービス完了処理
-  const handleCompleteTask = async (reservationId, userId) => {
+  // 🆕 追加：レジを開く（初期値をセット） [cite: 2026-03-08]
+  const openQuickCheckout = (task) => {
+    setSelectedTask(task);
+    setSelectedAdjustments([]);
+    setSelectedProducts([]);
+    // 元々の予約時の金額（total_priceがない場合は0）を初期値にする [cite: 2026-03-08]
+    setFinalPrice(task.total_price || 0); 
+    setIsCheckoutOpen(true);
+  };
+
+  // 🆕 追加：調整項目や商品が選ばれるたびに金額を再計算する [cite: 2026-03-08]
+  useEffect(() => {
+    if (!selectedTask) return;
+    let total = selectedTask.total_price || 0;
+
+    // 薬剤追加や割引の計算 [cite: 2026-03-08]
+    selectedAdjustments.forEach(adj => {
+      if (adj.is_percent) total = total * (1 - (adj.price / 100));
+      else total += adj.is_minus ? -adj.price : adj.price;
+    });
+
+    // 店販商品の加算 [cite: 2026-03-08]
+    selectedProducts.forEach(prod => total += (prod.price || 0));
+    
+    setFinalPrice(Math.max(0, Math.round(total)));
+  }, [selectedAdjustments, selectedProducts, selectedTask]);
+
+  // 🚀 アップグレード：お会計確定 ＆ サービス完了（売上台帳へも記録） [cite: 2026-03-08]
+  const handleCompleteTask = async () => {
     try {
-      // 1. 予約ステータスを 'completed' に更新 [cite: 2026-03-01]
+      // 1. 予約ステータスを完了にし、最終金額で上書きする [cite: 2026-03-08]
       const { error: resError } = await supabase
         .from('reservations')
-        .update({ status: 'completed' })
-        .eq('id', reservationId);
+        .update({ 
+          status: 'completed', 
+          total_price: finalPrice,
+          // どんな調整をしたか履歴を残す（任意） [cite: 2026-03-08]
+          options: { ...selectedTask.options, quick_checkout: true, adjustments: selectedAdjustments } 
+        })
+        .eq('id', selectedTask.id);
 
       if (resError) throw resError;
 
-      // ---------------------------------------------------------
-      // 💡 肉付けポイント：ここに将来の報酬ロジックを追記します
-      // 例: await giveReward(userId); // 卵、称号、スタンプなど
-      // ---------------------------------------------------------
+      // 2. 売上管理（salesテーブル）に自動で1件記録を追加する [cite: 2026-03-08]
+      // これで AdminManagement.jsx の分析画面にも即時反映されます [cite: 2026-03-08]
+      const { error: saleError } = await supabase.from('sales').insert([{
+        shop_id: shopId,
+        reservation_id: selectedTask.id,
+        total_amount: finalPrice,
+        sale_date: new Date().toLocaleDateString('sv-SE') // 本日の日付 [cite: 2026-03-01]
+      }]);
 
-      showMsg("サービス完了を記録しました！✨");
-      fetchTodayTasks();
+      if (saleError) console.error("売上台帳への記録に失敗:", saleError.message);
+
+      showMsg("お会計とサービス完了を記録しました！✨");
+      setIsCheckoutOpen(false);
+      fetchTodayTasks(); // リストを最新にする
     } catch (err) {
-      alert("更新エラー: " + err.message);
+      alert("確定エラー: " + err.message);
     }
   };
 
   const themeColor = shopData?.theme_color || '#2563eb';
 
   if (loading) return <div style={{ textAlign: 'center', padding: '50px' }}>読み込み中...</div>;
-
+  
   return (
     <div style={{ maxWidth: '800px', margin: '0 auto', padding: '20px', paddingBottom: '100px', fontFamily: 'sans-serif' }}>
       
