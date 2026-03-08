@@ -208,13 +208,14 @@ const showMsg = (txt) => { setMessage(txt); setTimeout(() => setMessage(''), 300
                   </div>
                 </div>
 
-                {task.status === 'completed' ? (
+{task.status === 'completed' ? (
                   <div style={{ display: 'flex', alignItems: 'center', gap: '5px', color: '#10b981', fontWeight: 'bold', fontSize: '0.9rem' }}>
                     <CheckCircle size={20} /> 完了済み
                   </div>
                 ) : (
+                  /* ✅ 修正：即完了ではなく「クイックレジ」を開くように変更します [cite: 2026-03-08] */
                   <button 
-                    onClick={() => handleCompleteTask(task.id, task.user_id)}
+                    onClick={() => openQuickCheckout(task)} 
                     style={{ 
                       padding: '12px 24px', 
                       background: themeColor, 
@@ -226,15 +227,16 @@ const showMsg = (txt) => { setMessage(txt); setTimeout(() => setMessage(''), 300
                       boxShadow: `0 4px 12px ${themeColor}44`
                     }}
                   >
-                    サービス完了
+                    お会計 ＆ 完了
                   </button>
                 )}
-              </div>
+                              </div>
             </div>
           ))
         )}
       </div>
 
+{/* --- 省略 --- */}
       <div style={{ marginTop: '30px', padding: '20px', background: '#fefce8', borderRadius: '16px', border: '1px solid #fef08a', display: 'flex', gap: '12px' }}>
         <AlertCircle size={20} color="#a16207" />
         <p style={{ margin: 0, fontSize: '0.8rem', color: '#854d0e', lineHeight: '1.6' }}>
@@ -242,7 +244,72 @@ const showMsg = (txt) => { setMessage(txt); setTimeout(() => setMessage(''), 300
           施術が完了したら「サービス完了」を押してください。これがトリガーとなり、お客様のマイページにアクション（卵の付与など）が発生します。[cite: 2026-03-01, 2026-03-06]
         </p>
       </div>
-    </div>
+
+      {/* ✅ 追記：ここにお会計パネルを追加します [cite: 2026-03-08] */}
+      {isCheckoutOpen && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 2000, display: 'flex', alignItems: 'flex-end' }}>
+          <div style={{ background: '#fff', width: '100%', borderTopLeftRadius: '30px', borderTopRightRadius: '30px', padding: '30px', maxHeight: '85vh', overflowY: 'auto', boxShadow: '0 -10px 25px rgba(0,0,0,0.2)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '1.2rem' }}>{selectedTask?.customers?.admin_name || selectedTask?.customer_name} 様</h3>
+                <p style={{ margin: 0, fontSize: '0.8rem', color: '#64748b' }}>レジ・お会計確定</p>
+              </div>
+              <button onClick={() => setIsCheckoutOpen(false)} style={{ background: '#f1f5f9', border: 'none', width: '40px', height: '40px', borderRadius: '50%', cursor: 'pointer' }}>✕</button>
+            </div>
+
+            {/* メニュー調整セクション */}
+            <label style={{ fontSize: '0.75rem', fontWeight: 'bold', color: '#4b2c85', display: 'block', marginBottom: '10px' }}>📋 メニュー調整（薬剤・割引）</label>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '25px' }}>
+              {adjustments.map(adj => {
+                const isSel = selectedAdjustments.find(a => a.id === adj.id);
+                return (
+                  <button 
+                    key={adj.id} 
+                    onClick={() => setSelectedAdjustments(prev => isSel ? prev.filter(a => a.id !== adj.id) : [...prev, adj])}
+                    style={{ padding: '10px 15px', borderRadius: '10px', border: `1px solid ${isSel ? themeColor : '#e2e8f0'}`, background: isSel ? themeColor : '#fff', color: isSel ? '#fff' : '#475569', fontWeight: 'bold', fontSize: '0.8rem', cursor: 'pointer' }}
+                  >
+                    {adj.name} {adj.is_minus ? '-' : '+'}{adj.is_percent ? `${adj.price}%` : `¥${adj.price}`}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* 店販商品セクション */}
+            <label style={{ fontSize: '0.75rem', fontWeight: 'bold', color: '#008000', display: 'block', marginBottom: '10px' }}>🧴 店販商品</label>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '25px' }}>
+              {products.map(prod => {
+                const isSel = selectedProducts.find(p => p.id === prod.id);
+                return (
+                  <button 
+                    key={prod.id} 
+                    onClick={() => setSelectedProducts(prev => isSel ? prev.filter(p => p.id !== prod.id) : [...prev, prod])}
+                    style={{ padding: '10px 15px', borderRadius: '10px', border: `1px solid ${isSel ? '#008000' : '#e2e8f0'}`, background: isSel ? '#008000' : '#fff', color: isSel ? '#fff' : '#475569', fontWeight: 'bold', fontSize: '0.8rem', cursor: 'pointer' }}
+                  >
+                    {prod.name} ¥{prod.price}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* 合計表示エリア */}
+            <div style={{ background: '#f8fafc', padding: '20px', borderRadius: '20px', marginBottom: '25px', border: '1px solid #e2e8f0' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontWeight: 'bold', color: '#1e293b' }}>最終合計金額</span>
+                <span style={{ fontSize: '2.2rem', fontWeight: '900', color: themeColor }}>¥{finalPrice.toLocaleString()}</span>
+              </div>
+            </div>
+
+            {/* 確定ボタン */}
+            <button 
+              onClick={handleCompleteTask} 
+              style={{ width: '100%', padding: '20px', background: themeColor, color: '#fff', border: 'none', borderRadius: '18px', fontWeight: 'bold', fontSize: '1.2rem', boxShadow: `0 10px 20px ${themeColor}44`, cursor: 'pointer' }}
+            >
+              確定して完了 ✓
+            </button>
+          </div>
+        </div>
+      )}
+    </div> // 👈 一番外側の div
   );
 };
 
