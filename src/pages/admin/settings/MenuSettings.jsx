@@ -4,7 +4,7 @@ import { supabase } from "../../../supabaseClient";
 import { 
   ArrowLeft, Sparkles, Save, Menu as MenuIcon, 
   Settings2, Plus, Edit2, Trash2, ArrowUp, ArrowDown,
-  Layers, Link2, AlertCircle, CheckCircle2
+  Layers, Link2, AlertCircle, CheckCircle2, ShoppingBag // 🆕 ShoppingBagを追加
 } from 'lucide-react';
 
 const MenuSettings = () => {
@@ -67,11 +67,22 @@ const [optPrice, setOptPrice] = useState(0);
   const [newAdjName, setNewAdjName] = useState('');         // 登録用：ボタン名
   const [adjType, setAdjType] = useState('minus');          // 登録用：効果(＋－％)
   const [adjValue, setAdjValue] = useState(0);              // 登録用：数値
-  const [editingAdjId, setEditingAdjId] = useState(null);
+const [editingAdjId, setEditingAdjId] = useState(null);
+
+  /* ==========================================
+      🆕 追加：店販商品マスター用の箱 [cite: 2026-03-08]
+     ========================================== */
+  const [products, setProducts] = useState([]);            // 商品リスト
+  const [productCategories, setProductCategories] = useState([]); // 商品カテゴリ
+  const [newProdCatName, setNewProdCatName] = useState('');
+  const [editingProdCatId, setEditingProdCatId] = useState(null);
+  const [selectedProdCat, setSelectedProdCat] = useState('');
+  const [newProdName, setNewProdName] = useState('');
+  const [newProdPrice, setNewProdPrice] = useState(0);
+  const [editingProdId, setEditingProdId] = useState(null);
 
   const themeColor = shopData?.theme_color || '#2563eb';
-  // --- 2. データ取得系 ---
-  useEffect(() => {
+    useEffect(() => {
     if (shopId) {
       fetchInitialShopData();
       fetchMenuDetails();
@@ -88,23 +99,30 @@ const [optPrice, setOptPrice] = useState(0);
   };
 
 const fetchMenuDetails = async () => {
-    // 1. 通常カテゴリを取得 [cite: 2026-03-08]
+    // 1. 通常カテゴリを取得
     const catRes = await supabase.from('service_categories').select('*').eq('shop_id', shopId).or('is_adjustment_cat.is.null,is_adjustment_cat.eq.false').order('sort_order');
-    // 2. 調整用カテゴリを取得 [cite: 2026-03-08]
+    // 2. 調整用カテゴリを取得
     const adjCatRes = await supabase.from('service_categories').select('*').eq('shop_id', shopId).eq('is_adjustment_cat', true).order('sort_order');
     
     const servRes = await supabase.from('services').select('*').eq('shop_id', shopId).order('sort_order');
     const optRes = await supabase.from('service_options').select('*'); 
-    // 3. 調整項目（ボタン本体）を取得 [cite: 2026-03-08]
+    // 3. 調整項目を取得
     const adjRes = await supabase.from('admin_adjustments').select('*').eq('shop_id', shopId).is('service_id', null).order('sort_order');
 
+    // 🆕 4. 商品カテゴリと商品データを取得 [cite: 2026-03-08]
+    const prodCatRes = await supabase.from('service_categories').select('*').eq('shop_id', shopId).eq('is_product_cat', true).order('sort_order');
+    const prodRes = await supabase.from('products').select('*').eq('shop_id', shopId).order('sort_order');
+
     if (catRes.data) setCategories(catRes.data);
-    if (adjCatRes.data) setAdjCategories(adjCatRes.data); // 調整カテゴリをセット [cite: 2026-03-08]
+    if (adjCatRes.data) setAdjCategories(adjCatRes.data);
     if (servRes.data) setServices(servRes.data);
     if (optRes.data) setOptions(optRes.data);
-    if (adjRes.data) setAdjustments(adjRes.data); // 調整項目をセット [cite: 2026-03-08]
+    if (adjRes.data) setAdjustments(adjRes.data);
+    // 🆕 取得した商品データをセット
+    if (prodCatRes.data) setProductCategories(prodCatRes.data);
+    if (prodRes.data) setProducts(prodRes.data);
   };
-  const showMsg = (txt) => { setMessage(txt); setTimeout(() => setMessage(''), 3000); };
+    const showMsg = (txt) => { setMessage(txt); setTimeout(() => setMessage(''), 3000); };
 
   // --- 3. アクション系ロジック (完全維持) ---
   const moveItem = async (type, list, id, direction) => {
@@ -260,6 +278,47 @@ showMsg(editingOptionId ? '枝メニューを更新しました' : '枝メニュ
     setNewAdjName(''); setAdjValue(0); setEditingAdjId(null); 
     fetchMenuDetails(); // 画面を更新 [cite: 2026-03-08]
     showMsg('調整項目を保存しました');
+  };
+
+  /* ==========================================
+      🆕 追加：店販商品の保存関数 [cite: 2026-03-08]
+     ========================================== */
+
+  // 1. 商品カテゴリを保存 [cite: 2026-03-08]
+  const handleProdCatSubmit = async (e) => {
+    e.preventDefault();
+    const payload = { name: newProdCatName, shop_id: shopId, is_product_cat: true };
+    
+    if (editingProdCatId) {
+      await supabase.from('service_categories').update(payload).eq('id', editingProdCatId);
+    } else {
+      await supabase.from('service_categories').insert([{ ...payload, sort_order: productCategories.length }]);
+    }
+    
+    setNewProdCatName(''); 
+    setEditingProdCatId(null); 
+    fetchMenuDetails();
+    showMsg('商品カテゴリを保存しました');
+  };
+
+  // 2. 商品本体を保存 [cite: 2026-03-08]
+  const handleProductSubmit = async (e) => {
+    e.preventDefault();
+    // カテゴリが未選択なら最初のカテゴリ、それもなければ '未分類' をセット
+    const finalCat = selectedProdCat || (productCategories[0]?.name || '未分類');
+    const payload = { shop_id: shopId, category: finalCat, name: newProdName, price: Number(newProdPrice) };
+    
+    if (editingProdId) {
+      await supabase.from('products').update(payload).eq('id', editingProdId);
+    } else {
+      await supabase.from('products').insert([{ ...payload, sort_order: products.length }]);
+    }
+    
+    setNewProdName(''); 
+    setNewProdPrice(0); 
+    setEditingProdId(null); 
+    fetchMenuDetails();
+    showMsg('商品を登録しました');
   };
 
   // --- 4. スタイル設定 ---
@@ -574,10 +633,71 @@ showMsg(editingOptionId ? '枝メニューを更新しました' : '枝メニュ
             ))}
 </div>
         ))}
+</div>
+
+      {/* ==========================================
+          🆕 店販商品マスター管理 [cite: 2026-03-08]
+         ========================================== */}
+      <div style={{ marginTop: '60px', borderTop: '6px solid #008000', paddingTop: '40px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '30px' }}>
+          <div style={{ background: '#008000', color: '#fff', padding: '8px', borderRadius: '10px' }}><ShoppingBag size={24} /></div>
+          <h2 style={{ fontSize: '1.5rem', color: '#1e293b', margin: 0, fontWeight: '900' }}>店販商品マスター管理</h2>
+        </div>
+
+        {/* 1. 商品カテゴリ作成 */}
+        <section style={{ ...cardStyle, background: '#f0fdf4', border: '2px solid #bbf7d0' }}>
+          <h3 style={{ marginTop: 0, fontSize: '1rem', color: '#008000', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '15px' }}><Layers size={18} /> 商品カテゴリの作成</h3>
+          <form onSubmit={handleProdCatSubmit} style={{ display: 'flex', gap: '10px' }}>
+            <input placeholder="例：シャンプー, スタイリング剤" value={newProdCatName} onChange={(e) => setNewProdCatName(e.target.value)} style={inputStyle} required />
+            <button type="submit" style={{ padding: '0 25px', background: '#008000', color: 'white', border: 'none', borderRadius: '12px', fontWeight: 'bold', cursor: 'pointer' }}>
+              {editingProdCatId ? '更新' : '＋作成'}
+            </button>
+          </form>
+        </section>
+
+        {/* 2. 商品登録フォーム */}
+        <section style={{ ...cardStyle, border: '2px solid #008000' }}>
+          <h3 style={{ marginTop: 0, fontSize: '1rem', color: '#008000', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '15px' }}><Plus size={20} /> 商品の新規登録</h3>
+          <form onSubmit={handleProductSubmit}>
+            <div style={{ marginBottom: '15px' }}>
+              <label style={{ fontSize: '0.8rem', fontWeight: 'bold', color: '#64748b', display: 'block', marginBottom: '8px' }}>所属カテゴリ</label>
+              <select value={selectedProdCat} onChange={(e) => setSelectedProdCat(e.target.value)} style={inputStyle} required>
+                <option value="">-- カテゴリを選択 --</option>
+                {productCategories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+              </select>
+            </div>
+            <div style={{ display: 'flex', gap: '10px', marginBottom: '15px' }}>
+              <div style={{ flex: 2 }}><input placeholder="商品名" value={newProdName} onChange={(e) => setNewProdName(e.target.value)} style={inputStyle} required /></div>
+              <div style={{ flex: 1 }}><input type="number" placeholder="金額" value={newProdPrice} onChange={(e) => setNewProdPrice(e.target.value)} style={inputStyle} required /></div>
+            </div>
+            <button type="submit" style={{ width: '100%', padding: '16px', background: '#008000', color: 'white', border: 'none', borderRadius: '16px', fontWeight: 'bold', fontSize: '1rem' }}>
+              {editingProdId ? '商品を更新する' : '商品を新規登録'}
+            </button>
+          </form>
+        </section>
+
+        {/* 3. 商品一覧 */}
+        {productCategories.map(cat => (
+          <div key={cat.id} style={{ marginBottom: '30px' }}>
+            <h4 style={{ color: '#008000', fontSize: '0.9rem', marginBottom: '15px', borderLeft: '5px solid #008000', paddingLeft: '12px', fontWeight: 'bold' }}>{cat.name}</h4>
+            {products.filter(p => p.category === cat.name).map((p) => (
+              <div key={p.id} style={{ ...cardStyle, padding: '18px 25px', marginBottom: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', border: '1px solid #bbf7d0' }}>
+                <div>
+                  <div style={{ fontWeight: 'bold', color: '#1e293b' }}>{p.name}</div>
+                  <div style={{ fontSize: '0.95rem', color: '#008000', fontWeight: 'bold', marginTop: '4px' }}>¥{(p.price || 0).toLocaleString()}</div>
+                </div>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button onClick={() => { setEditingProdId(p.id); setNewProdName(p.name); setNewProdPrice(p.price); setSelectedProdCat(p.category); }} style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '6px', color: '#3b82f6' }}><Edit2 size={20} /></button>
+                  <button onClick={async () => { if(window.confirm('削除しますか？')) { await supabase.from('products').delete().eq('id', p.id); fetchMenuDetails(); } }} style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '6px', color: '#ef4444' }}><Trash2 size={20} /></button>
+                </div>
+              </div>
+            ))}
+          </div>
+        ))}
       </div>
 
       <div style={{ marginTop: '60px', borderTop: '6px solid #ef4444', paddingTop: '40px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '30px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '30px' }}>
           <div style={{ background: '#ef4444', color: '#fff', padding: '8px', borderRadius: '10px' }}><Settings2 size={24} /></div>
           <h2 style={{ fontSize: '1.5rem', color: '#1e293b', margin: 0, fontWeight: '900' }}>お会計調整マスター管理</h2>
         </div>
