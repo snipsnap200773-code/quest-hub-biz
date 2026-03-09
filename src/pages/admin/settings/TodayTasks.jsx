@@ -26,6 +26,11 @@ const [shopData, setShopData] = useState(null);
   const [selectedAdjustments, setSelectedAdjustments] = useState([]);
   const [selectedProducts, setSelectedProducts] = useState([]);
   const [finalPrice, setFinalPrice] = useState(0);
+  const [openAdjCatId, setOpenAdjCatId] = useState(null);
+  const [productCategories, setProductCategories] = useState([]); 
+  const [openProdCatId, setOpenProdCatId] = useState(null);
+  // 🆕 追加：お客様提示モードの開閉フラグ [cite: 2026-03-08]
+  const [isCustomerModeOpen, setIsCustomerModeOpen] = useState(false);
 
   useEffect(() => {
     if (shopId) {
@@ -37,20 +42,22 @@ const [shopData, setShopData] = useState(null);
 
 // 🆕 調整項目とカテゴリを並び順通りに取得 [cite: 2026-03-08]
 const fetchMasterData = async () => {
-    // 調整、店販などを取得
-    const [catRes, adjRes, prodRes, servRes, optRes] = await Promise.all([
+    // カテゴリ（調整用・商品用）、調整、店販、メニュー、オプションをすべて並列で取得 [cite: 2026-03-08]
+    const [adjCatRes, prodCatRes, adjRes, prodRes, servRes, optRes] = await Promise.all([
       supabase.from('service_categories').select('*').eq('shop_id', shopId).eq('is_adjustment_cat', true).order('sort_order'),
+      supabase.from('service_categories').select('*').eq('shop_id', shopId).eq('is_product_cat', true).order('sort_order'), // 🆕 追加：商品カテゴリを取得
       supabase.from('admin_adjustments').select('*').eq('shop_id', shopId).is('service_id', null).order('sort_order'),
-      supabase.from('products').select('*').eq('shop_id', shopId),
-      supabase.from('services').select('*').eq('shop_id', shopId), // 🆕 メニューマスター
-      supabase.from('service_options').select('*') // 🆕 枝分かれオプション
+      supabase.from('products').select('*').eq('shop_id', shopId).order('sort_order'),
+      supabase.from('services').select('*').eq('shop_id', shopId),
+      supabase.from('service_options').select('*')
     ]);
 
-    setAdjCategories(catRes.data || []);
+    setAdjCategories(adjCatRes.data || []);
+    setProductCategories(prodCatRes.data || []); // 🆕 追加：商品カテゴリをセット
     setAdjustments(adjRes.data || []);
     setProducts(prodRes.data || []);
-    setServices(servRes.data || []); // 🆕 セット
-    setServiceOptions(optRes.data || []); // 🆕 セット
+    setServices(servRes.data || []);
+    setServiceOptions(optRes.data || []);
   };
 
   // 画面サイズ管理
@@ -252,9 +259,13 @@ const calculateInitialPrice = (task) => {
   {new Date(task.start_time || task.start_at).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })} 〜
 </span>
                   </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#475569' }}>
+<div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#475569' }}>
                     <User size={16} />
                     <span style={{ fontWeight: 'bold' }}>{task.customer_name || 'お客様'} 様</span>
+                  </div>
+                  {/* 🆕 追加：カードに予約メニューを表示 [cite: 2026-03-08] */}
+                  <div style={{ fontSize: '0.85rem', color: themeColor, marginTop: '8px', fontWeight: 'bold', paddingLeft: '24px' }}>
+                    {task.menu_name || 'メニュー未設定'}
                   </div>
                 </div>
 
@@ -295,11 +306,17 @@ const calculateInitialPrice = (task) => {
         </p>
       </div>
 
-      {/* ✅ 追記：ここにお会計パネルを追加します [cite: 2026-03-08] */}
+{/* ✅ 修正：外側タップで閉じる機能を追加 [cite: 2026-03-08] */}
       {isCheckoutOpen && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 2000, display: 'flex', alignItems: 'flex-end' }}>
-          <div style={{ background: '#fff', width: '100%', borderTopLeftRadius: '30px', borderTopRightRadius: '30px', padding: '30px', maxHeight: '85vh', overflowY: 'auto', boxShadow: '0 -10px 25px rgba(0,0,0,0.2)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+        <div 
+          onClick={() => setIsCheckoutOpen(false)} // 💡 外側をタップしたら閉じる
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 2000, display: 'flex', alignItems: 'flex-end' }}
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()} // 💡 中身をタップしても閉じないようにする
+            style={{ background: '#fff', width: '100%', borderTopLeftRadius: '30px', borderTopRightRadius: '30px', padding: '30px', maxHeight: '85vh', overflowY: 'auto', boxShadow: '0 -10px 25px rgba(0,0,0,0.2)' }}
+          >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
               <div>
                 <h3 style={{ margin: 0, fontSize: '1.2rem' }}>{selectedTask?.customers?.admin_name || selectedTask?.customer_name} 様</h3>
                 <p style={{ margin: 0, fontSize: '0.8rem', color: '#64748b' }}>レジ・お会計確定</p>
@@ -310,61 +327,200 @@ const calculateInitialPrice = (task) => {
 {/* 🆕 カテゴリごとに整理してボタンを表示 [cite: 2026-03-08] */}
             <div style={{ marginBottom: '25px' }}>
               <div style={{ fontSize: '0.75rem', fontWeight: 'bold', color: '#4b2c85', marginBottom: '15px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                📋 メニュー調整マスター（割引・加算）
+                メニュー調整マスター（割引・加算）
               </div>
 
+{/* 🆕 Step 1: カテゴリを2列のスリムなタイルカードで表示 */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '25px' }}>
               {adjCategories.map(cat => (
-                <div key={cat.id} style={{ marginBottom: '15px', background: '#fdfbff', padding: '12px', borderRadius: '15px', border: '1px solid #f1f5f9' }}>
-                  {/* カテゴリの見出し [cite: 2026-03-08] */}
-                  <label style={{ fontSize: '0.7rem', fontWeight: 'bold', color: '#ef4444', display: 'block', marginBottom: '10px', borderLeft: '3px solid #ef4444', paddingLeft: '8px' }}>
+                <div 
+                  key={cat.id} 
+                  onClick={() => setOpenAdjCatId(cat.id)}
+                  style={{ 
+                    height: '48px', background: '#fff', borderRadius: '12px', textAlign: 'center',
+                    border: '1px solid #e2e8f0', cursor: 'pointer', boxShadow: '0 2px 4px rgba(0,0,0,0.05)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 10px'
+                  }}
+                >
+                  <span style={{ fontSize: '0.85rem', fontWeight: 'bold', color: '#1e293b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                     {cat.name}
-                  </label>
-                  
-                  {/* そのカテゴリに属するボタンだけを表示 [cite: 2026-03-08] */}
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                    {adjustments.filter(a => a.category === cat.name).map(adj => {
-                      const isSel = selectedAdjustments.find(a => a.id === adj.id);
-                      return (
-                        <button 
-                          key={adj.id} 
-                          onClick={() => setSelectedAdjustments(prev => isSel ? prev.filter(a => a.id !== adj.id) : [...prev, adj])}
-                          style={{ 
-                            padding: '10px 15px', borderRadius: '10px', 
-                            border: `1px solid ${isSel ? '#ef4444' : '#e2e8f0'}`, 
-                            background: isSel ? '#ef4444' : '#fff', 
-                            color: isSel ? '#fff' : '#475569', 
-                            fontWeight: 'bold', fontSize: '0.8rem', cursor: 'pointer' 
-                          }}
-                        >
-                          {adj.name} {adj.is_minus ? '-' : '+'}{adj.is_percent ? `${adj.price}%` : `¥${adj.price.toLocaleString()}`}
-                        </button>
-                      );
-                    })}
-                  </div>
+                  </span>
                 </div>
               ))}
             </div>
 
-            {/* 店販商品セクション（ここにつながります） */}
-            <label style={{ fontSize: '0.75rem', fontWeight: 'bold', color: '#008000', display: 'block', marginBottom: '10px' }}>🧴 店販商品</label>
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '25px' }}>
-              {products.map(prod => {
-                const isSel = selectedProducts.find(p => p.id === prod.id);
-                return (
-                  <button 
-                    key={prod.id} 
-                    onClick={() => setSelectedProducts(prev => isSel ? prev.filter(p => p.id !== prod.id) : [...prev, prod])}
-                    style={{ padding: '10px 15px', borderRadius: '10px', border: `1px solid ${isSel ? '#008000' : '#e2e8f0'}`, background: isSel ? '#008000' : '#fff', color: isSel ? '#fff' : '#475569', fontWeight: 'bold', fontSize: '0.8rem', cursor: 'pointer' }}
-                  >
-                    {prod.name} ¥{prod.price}
-                  </button>
-                );
-              })}
+            {/* 🆕 Step 2: カテゴリ専用の調整項目ポップアップ */}
+            {openAdjCatId && (
+              <div 
+                onClick={() => setOpenAdjCatId(null)} // 💡 追加：外側タップで閉じる
+                style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 3000, display: 'flex', alignItems: 'flex-end', backdropFilter: 'blur(4px)' }}
+              >
+                <div 
+                  onClick={(e) => e.stopPropagation()} // 💡 追加：中身のタップでは閉じないようにする
+                  style={{ background: '#fff', width: '100%', borderTopLeftRadius: '30px', borderTopRightRadius: '30px', maxHeight: '80vh', display: 'flex', flexDirection: 'column', boxShadow: '0 -10px 25px rgba(0,0,0,0.2)' }}
+                >
+                  
+                  {/* 【固定ヘッダー】スクロールしても常に表示 */}
+                  <div style={{ padding: '20px 25px', borderBottom: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 'bold' }}>
+                      {adjCategories.find(c => c.id === openAdjCatId)?.name} を選択
+                    </h3>
+                    {/* 右上の閉じるボタン */}
+                    <button onClick={() => setOpenAdjCatId(null)} style={{ background: '#f1f5f9', border: 'none', width: '36px', height: '36px', borderRadius: '50%', cursor: 'pointer', color: '#64748b' }}>✕</button>
+                  </div>
+
+                  {/* 【スクロールエリア】項目を縦1列に並べる */}
+                  <div style={{ flex: 1, overflowY: 'auto', padding: '15px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    {adjustments
+                      .filter(a => a.category === adjCategories.find(c => c.id === openAdjCatId)?.name)
+                      .map(adj => {
+                        const isSel = selectedAdjustments.find(a => a.id === adj.id);
+                        return (
+                          <button 
+                            key={adj.id} 
+                            onClick={() => setSelectedAdjustments(prev => isSel ? prev.filter(a => a.id !== adj.id) : [...prev, adj])}
+                            style={{ 
+                              width: '100%', padding: '18px', borderRadius: '15px', textAlign: 'left',
+                              border: `2px solid ${isSel ? themeColor : '#f1f5f9'}`, 
+                              background: isSel ? `${themeColor}15` : '#fff', 
+                              color: isSel ? themeColor : '#475569', 
+                              fontWeight: 'bold', fontSize: '0.9rem', cursor: 'pointer',
+                              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                              boxShadow: '0 2px 4px rgba(0,0,0,0.03)'
+                            }}
+                          >
+                            <span>{isSel ? '✅ ' : ''}{adj.name}</span>
+                            <span style={{ fontWeight: '900' }}>
+                              {adj.is_minus ? '-' : '+'}{adj.is_percent ? `${adj.price}%` : `¥${adj.price.toLocaleString()}`}
+                            </span>
+                          </button>
+                        );
+                    })}
+                  </div>
+
+                  {/* 【固定フッター】常に表示される完了ボタン */}
+                  <div style={{ padding: '15px 20px', borderTop: '1px solid #f1f5f9', background: '#fff' }}>
+                    <button 
+                      onClick={() => setOpenAdjCatId(null)} 
+                      style={{ width: '100%', padding: '16px', background: '#1e293b', color: '#fff', border: 'none', borderRadius: '12px', fontWeight: 'bold', fontSize: '1rem', cursor: 'pointer', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
+                    >
+                      選択を完了して閉じる
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+                                      </div>
+
+{/* 🆕 Step 1: 店販商品カテゴリを2列のスリムなタイルカードで表示 [cite: 2026-03-08] */}
+            <div style={{ fontSize: '0.75rem', fontWeight: 'bold', color: '#008000', marginBottom: '12px' }}>店販商品</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '25px' }}>
+              {productCategories.map(cat => (
+                <div 
+                  key={cat.id} 
+                  onClick={() => setOpenProdCatId(cat.id)}
+                  style={{ 
+                    height: '48px', background: '#fff', borderRadius: '12px', textAlign: 'center',
+                    border: '1px solid #e2e8f0', cursor: 'pointer', boxShadow: '0 2px 4px rgba(0,0,0,0.05)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 10px'
+                  }}
+                >
+                  <span style={{ fontSize: '0.85rem', fontWeight: 'bold', color: '#1e293b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {cat.name}
+                  </span>
+                </div>
+              ))}
             </div>
 
+            {/* 🆕 Step 2: 商品カテゴリ専用の選択ポップアップ [cite: 2026-03-08] */}
+{openProdCatId && (
+              <div 
+                onClick={() => setOpenProdCatId(null)} // 💡 追加：外側タップで閉じる
+                style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 3000, display: 'flex', alignItems: 'flex-end', backdropFilter: 'blur(4px)' }}
+              >
+                <div 
+                  onClick={(e) => e.stopPropagation()} // 💡 追加：中身のタップでは閉じないようにする
+                  style={{ background: '#fff', width: '100%', borderTopLeftRadius: '30px', borderTopRightRadius: '30px', maxHeight: '80vh', display: 'flex', flexDirection: 'column', boxShadow: '0 -10px 25px rgba(0,0,0,0.2)' }}
+                >                  
+                  <div style={{ padding: '20px 25px', borderBottom: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 'bold', color: '#008000' }}>
+                      {productCategories.find(c => c.id === openProdCatId)?.name} を選択
+                    </h3>
+                    <button onClick={() => setOpenProdCatId(null)} style={{ background: '#f1f5f9', border: 'none', width: '36px', height: '36px', borderRadius: '50%', cursor: 'pointer', color: '#64748b' }}>✕</button>
+                  </div>
+
+                  <div style={{ flex: 1, overflowY: 'auto', padding: '15px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    {products
+                      .filter(p => p.category === productCategories.find(c => c.id === openProdCatId)?.name)
+                      .map(prod => {
+                        const isSel = selectedProducts.find(p => p.id === prod.id);
+                        return (
+                          <button 
+                            key={prod.id} 
+                            onClick={() => setSelectedProducts(prev => isSel ? prev.filter(p => p.id !== prod.id) : [...prev, prod])}
+                            style={{ 
+                              width: '100%', padding: '18px', borderRadius: '15px', textAlign: 'left',
+                              border: `2px solid ${isSel ? '#008000' : '#f1f5f9'}`, 
+                              background: isSel ? '#f0fdf4' : '#fff', 
+                              color: isSel ? '#008000' : '#475569', 
+                              fontWeight: 'bold', fontSize: '0.9rem', cursor: 'pointer',
+                              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                              boxShadow: '0 2px 4px rgba(0,0,0,0.03)'
+                            }}
+                          >
+                            <span>{isSel ? '✅ ' : ''}{prod.name}</span>
+                            <span style={{ fontWeight: '900' }}>¥{(prod.price || 0).toLocaleString()}</span>
+                          </button>
+                        );
+                    })}
+                  </div>
+
+                  <div style={{ padding: '15px 20px', borderTop: '1px solid #f1f5f9', background: '#fff' }}>
+                    <button 
+                      onClick={() => setOpenProdCatId(null)} 
+                      style={{ width: '100%', padding: '16px', background: '#008000', color: '#fff', border: 'none', borderRadius: '12px', fontWeight: 'bold', fontSize: '1rem', cursor: 'pointer', boxShadow: '0 4px 12px rgba(0,128,0,0.1)' }}
+                    >
+                      商品の選択を完了して閉じる
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* 合計表示エリア */}
+{/* 🆕 選択内容の内訳サマリー [cite: 2026-03-08] */}
+            <div style={{ marginBottom: '20px', padding: '18px', background: '#f9fafb', borderRadius: '18px', border: '1px dashed #cbd5e1', fontSize: '0.85rem', color: '#475569' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                <span style={{ fontWeight: 'bold' }}>メニュー:</span>
+                <span style={{ color: '#1e293b' }}>{selectedTask?.menu_name || '未設定'}</span>
+              </div>
+              
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', alignItems: 'flex-start' }}>
+                <span style={{ fontWeight: 'bold', whiteSpace: 'nowrap', marginRight: '10px' }}>調整メニュー:</span>
+                <span style={{ textAlign: 'right', color: '#1e293b' }}>
+                  {selectedAdjustments.length > 0 ? selectedAdjustments.map(a => a.name).join(', ') : 'なし'}
+                </span>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                <span style={{ fontWeight: 'bold', whiteSpace: 'nowrap', marginRight: '10px' }}>店販商品:</span>
+                <span style={{ textAlign: 'right', color: '#1e293b' }}>
+                  {selectedProducts.length > 0 ? selectedProducts.map(p => p.name).join(', ') : 'なし'}
+                </span>
+              </div>
+            </div>
+
+{/* 🆕 追加：お客様提示ボタン [cite: 2026-03-08] */}
+            <button 
+              onClick={() => setIsCustomerModeOpen(true)}
+              style={{ width: '100%', marginBottom: '15px', padding: '10px', background: '#fff', color: themeColor, border: `1px solid ${themeColor}`, borderRadius: '12px', fontWeight: 'bold', fontSize: '0.85rem', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
+            >
+              お客様に金額を提示する
+            </button>
+
+            {/* 合計表示エリア（ここは維持） */}
             <div style={{ background: '#f8fafc', padding: '20px', borderRadius: '20px', marginBottom: '25px', border: '1px solid #e2e8f0' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span style={{ fontWeight: 'bold', color: '#1e293b' }}>最終合計金額</span>
                 <span style={{ fontSize: '2.2rem', fontWeight: '900', color: themeColor }}>¥{finalPrice.toLocaleString()}</span>
               </div>
@@ -377,11 +533,74 @@ const calculateInitialPrice = (task) => {
             >
               確定して完了 ✓
             </button>
+</div>
+          </div>
+        )}
+
+      {/* 🆕 Step 3: お客様提示用 フルスクリーン横向き画面 [cite: 2026-03-08] */}
+      {/* 項目がない場合は表示しないロジックを組み込んでいます */}
+      {isCustomerModeOpen && (
+        <div 
+          onClick={() => setIsCustomerModeOpen(false)} // 💡 外側タップでレジに戻る
+          style={{ position: 'fixed', inset: 0, background: '#fff', zIndex: 6000, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}
+        >
+          {/* スマホを縦に持ったまま「横表示」にするための回転コンテナ [cite: 2026-03-08] */}
+          <div 
+            onClick={(e) => e.stopPropagation()} 
+            style={{ width: '90vh', height: '80vw', transform: 'rotate(90deg)', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}
+          >
+            
+            <div style={{ borderBottom: `4px solid ${themeColor}`, paddingBottom: '15px', marginBottom: '30px', textAlign: 'center' }}>
+              <h2 style={{ margin: 0, fontSize: '1.2rem', color: '#64748b' }}>お会計内容のご確認</h2>
+            </div>
+
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '20px' }}>
+              {/* ✅ メニュー：存在する場合のみ表示 [cite: 2026-03-08] */}
+              {selectedTask?.menu_name && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '1.4rem' }}>
+                  <span style={{ fontWeight: 'bold', color: '#64748b' }}>メニュー</span>
+                  <span style={{ fontWeight: '900' }}>{selectedTask.menu_name}</span>
+                </div>
+              )}
+
+              {/* ✅ 調整メニュー：存在する場合のみ表示 [cite: 2026-03-08] */}
+              {selectedAdjustments.length > 0 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '1.4rem' }}>
+                  <span style={{ fontWeight: 'bold', color: '#64748b' }}>調整・割引</span>
+                  <span style={{ fontWeight: '900', color: '#ef4444' }}>
+                    {selectedAdjustments.map(a => a.name).join(', ')}
+                  </span>
+                </div>
+              )}
+
+              {/* ✅ 店販商品：存在する場合のみ表示 [cite: 2026-03-08] */}
+              {selectedProducts.length > 0 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '1.4rem' }}>
+                  <span style={{ fontWeight: 'bold', color: '#64748b' }}>店販商品</span>
+                  <span style={{ fontWeight: '900', color: '#008000' }}>
+                    {selectedProducts.map(p => p.name).join(', ')}
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {/* 合計金額：巨大な文字で表示 [cite: 2026-03-08] */}
+            <div style={{ marginTop: '40px', padding: '30px', background: '#f8fafc', borderRadius: '25px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontSize: '1.5rem', fontWeight: 'bold' }}>合計金額</span>
+              <span style={{ fontSize: '4rem', fontWeight: '900', color: themeColor }}>¥{finalPrice.toLocaleString()}</span>
+            </div>
+
+            <button 
+              onClick={() => setIsCustomerModeOpen(false)}
+              style={{ marginTop: '30px', padding: '10px', background: 'none', border: 'none', color: '#cbd5e1', fontSize: '0.8rem', cursor: 'pointer' }}
+            >
+              タップしてレジに戻る
+            </button>
           </div>
         </div>
       )}
+
     </div> // 👈 一番外側の div
   );
 };
-
 export default TodayTasks;
