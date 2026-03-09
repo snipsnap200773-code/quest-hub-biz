@@ -29,11 +29,15 @@ const [shopData, setShopData] = useState(null);
   const [openAdjCatId, setOpenAdjCatId] = useState(null);
   const [productCategories, setProductCategories] = useState([]); 
   const [openProdCatId, setOpenProdCatId] = useState(null);
-  // 🆕 追加：お客様提示モードの開閉フラグ [cite: 2026-03-08]
+  
   const [isCustomerModeOpen, setIsCustomerModeOpen] = useState(false);
+  // 🆕 追加：メニュー変更ポップアップの管理 [cite: 2026-03-08]
+  const [isMenuEditOpen, setIsMenuEditOpen] = useState(false);
+  const [selectedServices, setSelectedServices] = useState([]); 
+  const [selectedOptions, setSelectedOptions] = useState({});
 
   useEffect(() => {
-    if (shopId) {
+      if (shopId) {
       fetchShopData();
       fetchTodayTasks();
       fetchMasterData(); // 🆕 マスター情報を取得 [cite: 2026-03-08]
@@ -143,28 +147,58 @@ const calculateInitialPrice = (task) => {
   // 2. 枝分かれオプション（シャンプー等）の追加料金を集計
   const optPrice = subItems.reduce((sum, o) => sum + (Number(o.additional_price) || 0), 0);
 
+// (126行目付近)
   return basePrice + optPrice;
 };
 
-// 🆕 レジを開く時
+/* ==========================================
+    🆕 追加：変更を即座にSupabaseへ同期する関数 [cite: 2026-03-08]
+   ========================================== */
+const syncReservationToSupabase = async (newSvcs, newOpts) => {
+  if (!selectedTask) return;
+  const newMenuName = newSvcs.map(s => s.name).join(', ');
+  
+  // 💡 変更があった瞬間にDBを更新することで、戻ってもリセットされなくなります [cite: 2026-03-08]
+  const { error } = await supabase.from('reservations').update({ 
+    menu_name: newMenuName,
+    options: { ...selectedTask.options, services: newSvcs, options: newOpts } 
+  }).eq('id', selectedTask.id);
+
+  if (error) console.error("自動保存エラー:", error.message);
+  fetchTodayTasks(); // リスト表示も最新に更新
+};
+
+// 🆕 レジを開く時 [cite: 2026-03-08]
   const openQuickCheckout = (task) => {
     setSelectedTask(task);
     setSelectedAdjustments([]);
     setSelectedProducts([]);
     
-    // 💡 修正：集計関数を使って正しい初期値をセット
+    // 🆕 予約データのJSONから、現在選ばれているメニューを抽出してセット [cite: 2026-03-08]
+    const opt = typeof task.options === 'string' ? JSON.parse(task.options) : (task.options || {});
+const initialSvcs = opt.services || (opt.people ? opt.people.flatMap(p => p.services || []) : []);
+    setSelectedServices(initialSvcs);
+
+    // 🆕 追加：既存の枝分かれオプションを読み込む [cite: 2026-03-08]
+    const initialOpts = opt.options || (opt.people ? opt.people[0]?.options : {});
+    setSelectedOptions(initialOpts || {});
+
     const initialPrice = calculateInitialPrice(task);
     setFinalPrice(initialPrice); 
-    
     setIsCheckoutOpen(true);
   };
-
-// 🆕 追加：調整項目や商品が選ばれるたびに金額を再計算する [cite: 2026-03-08]
+  
+// 🆕 修正：有効なオプションのみを集計するロジック [cite: 2026-03-08]
   useEffect(() => {
     if (!selectedTask) return;
     
-    // 💡 修正：ここも集計関数をベースに計算を開始
-    let total = calculateInitialPrice(selectedTask);
+    // 💡 選択中のメニューIDに含まれるオプションだけを抽出（ゴミデータを計算に入れない） [cite: 2026-03-08]
+    const validOptions = Object.entries(selectedOptions).filter(([key]) => 
+      selectedServices.some(s => key.startsWith(`${s.id}-`))
+    ).map(([_, val]) => val);
+
+    const optPrice = validOptions.reduce((sum, o) => sum + (Number(o.additional_price) || 0), 0);
+    let total = selectedServices.reduce((sum, s) => sum + (Number(s.price) || 0), 0) + optPrice;
 
     selectedAdjustments.forEach(adj => {
       if (adj.is_percent) total = total * (1 - (adj.price / 100));
@@ -173,18 +207,27 @@ const calculateInitialPrice = (task) => {
 
     selectedProducts.forEach(prod => total += (prod.price || 0));
     setFinalPrice(Math.max(0, Math.round(total)));
-  }, [selectedAdjustments, selectedProducts, selectedTask, services]); // 💡 servicesも監視 [cite: 2026-03-08]
-
+  }, [selectedServices, selectedOptions, selectedAdjustments, selectedProducts, selectedTask]);
+  
   // 🚀 アップグレード：お会計確定 ＆ サービス完了（売上台帳へも記録） [cite: 2026-03-08]
   const handleCompleteTask = async () => {
     try {
-      // 1. 予約ステータスを完了にし、最終金額で上書きする [cite: 2026-03-08]
+// 1. 予約ステータスを完了にし、変更後のメニューと金額で上書き [cite: 2026-03-08]
+      const newMenuName = selectedServices.map(s => s.name).join(', ');
       const { error: resError } = await supabase
         .from('reservations')
         .update({ 
           status: 'completed', 
           total_price: finalPrice,
-          options: { ...selectedTask.options, quick_checkout: true, adjustments: selectedAdjustments } 
+          menu_name: newMenuName, // 🆕 メニュー名も最新版に更新 [cite: 2026-03-08]
+          options: { 
+            ...selectedTask.options, 
+            services: selectedServices,
+            options: selectedOptions,
+            adjustments: selectedAdjustments,
+            products: selectedProducts,
+            quick_checkout: true 
+          } 
         })
         .eq('id', selectedTask.id);
 
@@ -207,8 +250,29 @@ const calculateInitialPrice = (task) => {
       alert("確定エラー: " + err.message);
     }
   };
-  const themeColor = shopData?.theme_color || '#2563eb';
+/* ==========================================
+      🆕 追加：完了を取り消してレジをやり直す関数
+     ========================================== */
+  const handleRevertTask = async (task) => {
+    if (!window.confirm(`${task.customer_name} 様の「完了」を取り消して、お会計をやり直しますか？`)) return;
 
+    try {
+      // 1. 売上台帳（salesテーブル）から、この予約に紐づく記録を削除
+      await supabase.from('sales').delete().eq('reservation_id', task.id);
+
+      // 2. 予約ステータスを 'confirmed' に戻す
+      const { error } = await supabase.from('reservations').update({ status: 'confirmed' }).eq('id', task.id);
+      if (error) throw error;
+
+      // ✅ 修正：余計なタグを消しました
+      showMsg("完了を取り消しました。お会計を修正できます。");
+      fetchTodayTasks(); 
+    } catch (err) {
+      alert("取り消しエラー: " + err.message);
+    }
+  };
+
+  const themeColor = shopData?.theme_color || '#2563eb';
   if (loading) return <div style={{ textAlign: 'center', padding: '50px' }}>読み込み中...</div>;
   
   return (
@@ -270,11 +334,22 @@ const calculateInitialPrice = (task) => {
                 </div>
 
 {task.status === 'completed' ? (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '5px', color: '#10b981', fontWeight: 'bold', fontSize: '0.9rem' }}>
-                    <CheckCircle size={20} /> 完了済み
-                  </div>
-                ) : (
-                  /* ✅ 修正：即完了ではなく「クイックレジ」を開くように変更します [cite: 2026-03-08] */
+  /* 💡 完了済みバッジの横に、取り消し用のボタンを配置 [cite: 2026-03-08] */
+  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '8px' }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: '5px', color: '#10b981', fontWeight: 'bold', fontSize: '0.9rem' }}>
+      <CheckCircle size={20} /> 完了済み
+    </div>
+    {/* 🆕 修正用ボタンを追加 [cite: 2026-03-08] */}
+    <button 
+      onClick={() => handleRevertTask(task)}
+      style={{ background: 'none', border: 'none', color: '#94a3b8', fontSize: '0.75rem', cursor: 'pointer', textDecoration: 'underline', padding: '4px' }}
+    >
+      修正する（お会計を戻す）
+    </button>
+  </div>
+) : (
+  
+  /* ✅ 修正：即完了ではなく「クイックレジ」を開くように変更します [cite: 2026-03-08] */
                   <button 
                     onClick={() => openQuickCheckout(task)} 
                     style={{ 
@@ -490,10 +565,25 @@ const calculateInitialPrice = (task) => {
             {/* 合計表示エリア */}
 {/* 🆕 選択内容の内訳サマリー [cite: 2026-03-08] */}
             <div style={{ marginBottom: '20px', padding: '18px', background: '#f9fafb', borderRadius: '18px', border: '1px dashed #cbd5e1', fontSize: '0.85rem', color: '#475569' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-                <span style={{ fontWeight: 'bold' }}>メニュー:</span>
-                <span style={{ color: '#1e293b' }}>{selectedTask?.menu_name || '未設定'}</span>
-              </div>
+              
+              {/* 💡 ここ！メニュー名の横に変更ボタンを設置しました [cite: 2026-03-08] */}
+              {selectedServices.length > 0 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', alignItems: 'center' }}>
+                  <span style={{ fontWeight: 'bold' }}>メニュー:</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ color: '#1e293b', fontWeight: 'bold' }}>
+                      {selectedServices.map(s => s.name).join(', ')}
+                    </span>
+                    {/* 🆕 このボタンがメニュー変更ポップアップを呼び出します [cite: 2026-03-08] */}
+                    <button 
+                      onClick={() => setIsMenuEditOpen(true)} 
+                      style={{ padding: '4px 10px', background: themeColor, color: '#fff', border: 'none', borderRadius: '6px', fontSize: '0.75rem', fontWeight: 'bold', cursor: 'pointer' }}
+                    >
+                      変更
+                    </button>
+                  </div>
+                </div>
+              )}
               
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', alignItems: 'flex-start' }}>
                 <span style={{ fontWeight: 'bold', whiteSpace: 'nowrap', marginRight: '10px' }}>調整メニュー:</span>
@@ -527,80 +617,185 @@ const calculateInitialPrice = (task) => {
             </div>
 
             {/* 確定ボタン */}
-            <button 
-              onClick={handleCompleteTask} 
-              style={{ width: '100%', padding: '20px', background: themeColor, color: '#fff', border: 'none', borderRadius: '18px', fontWeight: 'bold', fontSize: '1.2rem', boxShadow: `0 10px 20px ${themeColor}44`, cursor: 'pointer' }}
-            >
-              確定して完了 ✓
-            </button>
-</div>
-          </div>
-        )}
-
-      {/* 🆕 Step 3: お客様提示用 フルスクリーン横向き画面 [cite: 2026-03-08] */}
-      {/* 項目がない場合は表示しないロジックを組み込んでいます */}
-      {isCustomerModeOpen && (
-        <div 
-          onClick={() => setIsCustomerModeOpen(false)} // 💡 外側タップでレジに戻る
-          style={{ position: 'fixed', inset: 0, background: '#fff', zIndex: 6000, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}
-        >
-          {/* スマホを縦に持ったまま「横表示」にするための回転コンテナ [cite: 2026-03-08] */}
-          <div 
-            onClick={(e) => e.stopPropagation()} 
-            style={{ width: '90vh', height: '80vw', transform: 'rotate(90deg)', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}
-          >
-            
-            <div style={{ borderBottom: `4px solid ${themeColor}`, paddingBottom: '15px', marginBottom: '30px', textAlign: 'center' }}>
-              <h2 style={{ margin: 0, fontSize: '1.2rem', color: '#64748b' }}>お会計内容のご確認</h2>
-            </div>
-
-            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '20px' }}>
-              {/* ✅ メニュー：存在する場合のみ表示 [cite: 2026-03-08] */}
-              {selectedTask?.menu_name && (
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '1.4rem' }}>
-                  <span style={{ fontWeight: 'bold', color: '#64748b' }}>メニュー</span>
-                  <span style={{ fontWeight: '900' }}>{selectedTask.menu_name}</span>
-                </div>
-              )}
-
-              {/* ✅ 調整メニュー：存在する場合のみ表示 [cite: 2026-03-08] */}
-              {selectedAdjustments.length > 0 && (
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '1.4rem' }}>
-                  <span style={{ fontWeight: 'bold', color: '#64748b' }}>調整・割引</span>
-                  <span style={{ fontWeight: '900', color: '#ef4444' }}>
-                    {selectedAdjustments.map(a => a.name).join(', ')}
-                  </span>
-                </div>
-              )}
-
-              {/* ✅ 店販商品：存在する場合のみ表示 [cite: 2026-03-08] */}
-              {selectedProducts.length > 0 && (
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '1.4rem' }}>
-                  <span style={{ fontWeight: 'bold', color: '#64748b' }}>店販商品</span>
-                  <span style={{ fontWeight: '900', color: '#008000' }}>
-                    {selectedProducts.map(p => p.name).join(', ')}
-                  </span>
-                </div>
-              )}
-            </div>
-
-            {/* 合計金額：巨大な文字で表示 [cite: 2026-03-08] */}
-            <div style={{ marginTop: '40px', padding: '30px', background: '#f8fafc', borderRadius: '25px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: '1.5rem', fontWeight: 'bold' }}>合計金額</span>
-              <span style={{ fontSize: '4rem', fontWeight: '900', color: themeColor }}>¥{finalPrice.toLocaleString()}</span>
-            </div>
-
-            <button 
-              onClick={() => setIsCustomerModeOpen(false)}
-              style={{ marginTop: '30px', padding: '10px', background: 'none', border: 'none', color: '#cbd5e1', fontSize: '0.8rem', cursor: 'pointer' }}
-            >
-              タップしてレジに戻る
-            </button>
+<button onClick={handleCompleteTask} style={{ width: '100%', padding: '20px', background: themeColor, color: '#fff', border: 'none', borderRadius: '18px', fontWeight: 'bold', fontSize: '1.2rem', boxShadow: `0 10px 20px ${themeColor}44`, cursor: 'pointer' }}>確定して完了 ✓</button>
           </div>
         </div>
       )}
 
-    </div> // 👈 一番外側の div
+{/* ==========================================
+          🆕 Step 6: メニュー追加・変更専用ポップアップ [cite: 2026-03-08]
+          ========================================== */}
+      {isMenuEditOpen && (
+        <div 
+          onClick={() => setIsMenuEditOpen(false)} 
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 4000, display: 'flex', alignItems: 'flex-end', backdropFilter: 'blur(4px)' }}
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()} 
+            style={{ background: '#fff', width: '100%', borderTopLeftRadius: '30px', borderTopRightRadius: '30px', maxHeight: '85vh', display: 'flex', flexDirection: 'column', boxShadow: '0 -10px 25px rgba(0,0,0,0.2)' }}
+          >
+            {/* ポップアップヘッダー */}
+            <div style={{ padding: '20px 25px', borderBottom: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 'bold' }}>メニューの追加・変更</h3>
+              <button onClick={() => setIsMenuEditOpen(false)} style={{ background: '#f1f5f9', border: 'none', width: '36px', height: '36px', borderRadius: '50%', cursor: 'pointer', color: '#64748b' }}>✕</button>
+            </div>
+
+            <div style={{ flex: 1, overflowY: 'auto', padding: '15px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+              {Array.from(new Set(services.map(s => s.category))).map(catName => (
+                <div key={catName}>
+                  <p style={{ fontSize: '0.75rem', fontWeight: 'bold', color: '#64748b', marginBottom: '10px' }}>📁 {catName}</p>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                    {services.filter(s => s.category === catName).map(svc => {
+                      const isSel = selectedServices.find(s => s.id === svc.id);
+                      return (
+                        <div key={svc.id} style={{ display: 'flex', flexDirection: 'column' }}>
+                          
+                          {/* 💡 ここが 3. メニュー選択のロジック更新部分です [cite: 2026-03-08] */}
+                          <button 
+                            onClick={async () => {
+                              let nextSvcs;
+                              let nextOpts = { ...selectedOptions };
+
+                              if (isSel) {
+                                // 【解除時】メニューを消し、そのメニュー用の枝分かれデータも完全に削除します [cite: 2026-03-08]
+                                nextSvcs = selectedServices.filter(s => s.id !== svc.id);
+                                Object.keys(nextOpts).forEach(key => {
+                                  if (key.startsWith(`${svc.id}-`)) delete nextOpts[key];
+                                });
+                              } else {
+                                // 【追加時】メニューをリストに追加します
+                                nextSvcs = [...selectedServices, svc];
+                              }
+
+                              setSelectedServices(nextSvcs);
+                              setSelectedOptions(nextOpts);
+                              // 💡 ここでDBに即保存！ [cite: 2026-03-08]
+                              await syncReservationToSupabase(nextSvcs, nextOpts);
+                            }}
+                            style={{ 
+                              width: '100%', padding: '15px 10px', borderRadius: isSel ? '12px 12px 0 0' : '12px',
+                              border: `2px solid ${isSel ? themeColor : '#f1f5f9'}`, 
+                              background: isSel ? `${themeColor}15` : '#fff', 
+                              color: isSel ? themeColor : '#1e293b', 
+                              fontWeight: 'bold', fontSize: '0.8rem', cursor: 'pointer' 
+                            }}
+                          >
+                            {isSel ? '✅ ' : ''}{svc.name}<br />
+                            <span style={{ fontSize: '0.7rem', opacity: 0.6 }}>¥{svc.price?.toLocaleString()}</span>
+                          </button>
+
+                          {/* 枝分かれオプション（選択時のみ表示） [cite: 2026-03-08] */}
+                          {isSel && (
+                            <div style={{ padding: '10px', background: '#f8fafc', border: `2px solid ${themeColor}`, borderTop: 'none', borderRadius: '0 0 12px 12px', marginBottom: '10px' }}>
+                              {Array.from(new Set(serviceOptions.filter(o => o.service_id === svc.id).map(o => o.group_name))).map(groupName => (
+                                <div key={groupName} style={{ marginBottom: '10px' }}>
+                                  <p style={{ fontSize: '0.6rem', color: '#94a3b8', margin: '0 0 4px 0' }}>└ {groupName}</p>
+                                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                                    {serviceOptions.filter(o => o.service_id === svc.id && o.group_name === groupName).map(opt => {
+                                      const isOptSel = selectedOptions[`${svc.id}-${groupName}`]?.id === opt.id;
+                                      return (
+                                        <button 
+                                          key={opt.id} 
+                                          /* 💡 ここが 枝分かれ選択のロジック更新部分です [cite: 2026-03-08] */
+                                          onClick={async () => {
+                                            const nextOpts = { ...selectedOptions, [`${svc.id}-${groupName}`]: opt };
+                                            setSelectedOptions(nextOpts);
+                                            // 💡 枝分かれを選んだ瞬間もDBに即保存！ [cite: 2026-03-08]
+                                            await syncReservationToSupabase(selectedServices, nextOpts);
+                                          }}
+                                          style={{ padding: '6px 10px', borderRadius: '8px', fontSize: '0.7rem', fontWeight: 'bold', border: `1px solid ${isOptSel ? themeColor : '#cbd5e1'}`, background: isOptSel ? themeColor : '#fff', color: isOptSel ? '#fff' : '#475569', cursor: 'pointer' }}
+                                        >
+                                          {opt.option_name} {opt.additional_price > 0 ? `(+¥${opt.additional_price})` : ''}
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div style={{ padding: '15px 20px', borderTop: '1px solid #f1f5f9', background: '#fff' }}>
+              <button onClick={() => setIsMenuEditOpen(false)} style={{ width: '100%', padding: '16px', background: themeColor, color: '#fff', border: 'none', borderRadius: '12px', fontWeight: 'bold', fontSize: '1rem', cursor: 'pointer' }}>
+                メニューの選択を完了して閉じる
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+{/* ==========================================
+          📱 Step 3: お客様提示用 フルスクリーン横向き画面（スクロール修正版） [cite: 2026-03-08]
+          ========================================== */}
+      {isCustomerModeOpen && (
+        <div 
+          onClick={() => setIsCustomerModeOpen(false)} 
+          style={{ position: 'fixed', inset: 0, background: '#fff', zIndex: 6000, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}
+        >
+          {/* 回転コンテナ：高さ(height)を画面幅(85vw)に制限して固定します [cite: 2026-03-08] */}
+          <div 
+            onClick={(e) => e.stopPropagation()} 
+            style={{ width: '90vh', height: '85vw', transform: 'rotate(90deg)', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', padding: '10px 0' }}
+          >
+            {/* 【固定ヘッダー】 */}
+            <div style={{ borderBottom: `4px solid ${themeColor}`, paddingBottom: '10px', marginBottom: '10px', textAlign: 'center' }}>
+              <h2 style={{ margin: 0, fontSize: '1.2rem', color: '#1e293b', fontWeight: '900' }}>お会計内容のご確認</h2>
+            </div>
+
+            {/* 💡 【スクロールエリア】項目が増えてもここだけが動きます [cite: 2026-03-08] */}
+            <div style={{ flex: 1, overflowY: 'auto', padding: '0 20px', display: 'flex', flexDirection: 'column', gap: '15px' }}>
+              {selectedServices.length > 0 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '1.4rem' }}>
+                  <span style={{ fontWeight: 'bold', color: '#64748b' }}>メニュー</span>
+                  <span style={{ fontWeight: '900', color: '#1e293b', textAlign: 'right' }}>
+                    {selectedServices.map(s => s.name).join(', ')}
+                    {/* 🆕 枝分かれも表示 [cite: 2026-03-08] */}
+                    {Object.values(selectedOptions).map(o => `(${o.option_name})`).join('')}
+                  </span>
+                </div>
+              )}
+
+              {selectedAdjustments.length > 0 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '1.4rem' }}>
+                  <span style={{ fontWeight: 'bold', color: '#64748b' }}>調整・割引</span>
+                  <span style={{ fontWeight: '900', color: '#ef4444', textAlign: 'right' }}>{selectedAdjustments.map(a => a.name).join(', ')}</span>
+                </div>
+              )}
+
+              {selectedProducts.length > 0 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '1.4rem' }}>
+                  <span style={{ fontWeight: 'bold', color: '#64748b' }}>店販商品</span>
+                  <span style={{ fontWeight: '900', color: '#008000', textAlign: 'right' }}>{selectedProducts.map(p => p.name).join(', ')}</span>
+                </div>
+              )}
+            </div>
+
+            {/* 【固定フッター】金額と戻るボタンが絶対に隠れないようにします [cite: 2026-03-08] */}
+            <div style={{ borderTop: '1px solid #f1f5f9', paddingTop: '10px', background: '#fff' }}>
+              <div style={{ padding: '20px', background: '#f8fafc', borderRadius: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', border: '1px solid #e2e8f0' }}>
+                <span style={{ fontSize: '1.6rem', fontWeight: 'bold', color: '#1e293b' }}>合計金額</span>
+                <span style={{ fontSize: '3.8rem', fontWeight: '900', color: themeColor }}>¥{finalPrice.toLocaleString()}</span>
+              </div>
+
+              <button 
+                onClick={() => setIsCustomerModeOpen(false)}
+                style={{ width: '100%', marginTop: '15px', padding: '10px', background: 'none', border: 'none', color: '#cbd5e1', fontSize: '0.9rem', cursor: 'pointer', fontWeight: 'bold' }}
+              >
+                タップしてレジに戻る
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+    </div> // 👈 ここがファイル一番最後の一番外側の div です
   );
 };
+
 export default TodayTasks;
