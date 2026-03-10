@@ -101,16 +101,17 @@ const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [isDragging, setIsDragging] = useState(false);
   const [startX, setStartX] = useState(0);
   const [scrollLeft, setScrollLeft] = useState(0);
+// --- [100行目付近] ---
   const [hasMoved, setHasMoved] = useState(false);
 
-  // ✅ 🆕 画面サイズ管理（エラー解消用）
+  // ✅ 🆕 追加：この変数が抜けていたためエラーが出ていました
   const [windowWidth, setWindowWidth] = useState(window.innerWidth);
   useEffect(() => {
     const handleResize = () => setWindowWidth(window.innerWidth);
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
-  const isPC = windowWidth > 1024; // ✅ これで isPC エラーが消えます
+  const isPC = windowWidth > 1024; 
 
   useEffect(() => { fetchData(); }, [shopId, selectedDate]);
 
@@ -371,19 +372,22 @@ const handleSavePrivateTask = async () => {
 
   // --- 予約の削除 ---
   const deleteRes = async (id) => {
-
-
-  const isPrivate = selectedRes?.res_type === 'private_task';
-  const msg = isPrivate ? 'このプライベート予定を削除しますか？' : 'この予約データを消去して予約を「可能」に戻しますか？';
-  
-  if (window.confirm(msg)) {
-    // ✅ テーブルの使い分け
-    const table = isPrivate ? 'private_tasks' : 'reservations';
-    const { error } = await supabase.from(table).delete().eq('id', id);
-    if (error) alert('削除失敗');
-    else { setShowDetailModal(false); fetchData(); }
-  }
-};
+    const isPrivate = selectedRes?.res_type === 'private_task';
+    const msg = isPrivate ? 'このプライベート予定を削除しますか？' : 'この予約データを消去して予約を「可能」に戻しますか？';
+    
+    if (window.confirm(msg)) {
+      // ✅ 🆕 修正：ここも reservations 固定ではなく targetTable を使う
+      const targetTable = isPrivate ? 'private_tasks' : 'reservations';
+      const { error } = await supabase.from(targetTable).delete().eq('id', id);
+      
+      if (error) {
+        alert('削除失敗: ' + error.message);
+      } else {
+        setShowDetailModal(false); 
+        fetchData();
+      }
+    }
+  };
 
   // --- 臨時休業（ブロック）の設定 ---
   const handleBlockTime = async () => {

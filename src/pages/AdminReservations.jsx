@@ -473,17 +473,26 @@ const openDetail = async (res) => {
     }
   };
 
+// --- [330行目付近] ---
   const deleteRes = async (id) => {
-    
+    const isPrivate = selectedRes?.res_type === 'private_task';
     const isBlock = selectedRes?.res_type === 'blocked';
-    const msg = isBlock ? 'このブロックを解除して予約を「可能」に戻しますか？' : 'この予約データを消去して予約を「可能」に戻しますか？';
+    
+    // メッセージの出し分け
+    let msg = 'この予約データを消去して予約を「可能」に戻しますか？';
+    if (isPrivate) msg = 'このプライベート予定を削除しますか？';
+    if (isBlock) msg = 'このブロックを解除して予約を「可能」に戻しますか？';
     
     if (window.confirm(msg)) {
-      const { customer_name, res_type } = selectedRes;
-      const { error: deleteError } = await supabase.from('reservations').delete().eq('id', id);
+      // ✅ 🆕 修正：テーブルを使い分ける
+      const targetTable = isPrivate ? 'private_tasks' : 'reservations';
+      const { error: deleteError } = await supabase.from(targetTable).delete().eq('id', id);
+
       if (deleteError) { alert('削除に失敗しました: ' + deleteError.message); return; }
 
-      if (res_type === 'normal') {
+      // 予約（normal）の場合のみ、顧客マスタの来店回数を減らすロジック（既存）
+      if (!isPrivate && selectedRes.res_type === 'normal') {
+        const { customer_name } = selectedRes;
         const { count } = await supabase.from('reservations').select('*', { count: 'exact', head: true }).eq('shop_id', shopId).eq('customer_name', customer_name);
         if (count === 0) {
           await supabase.from('customers').delete().eq('shop_id', shopId).eq('name', customer_name);
@@ -494,10 +503,13 @@ const openDetail = async (res) => {
           }
         }
       }
-      setShowDetailModal(false); fetchData();
+      
+      setShowDetailModal(false); 
+      fetchData(); // 再読み込み
+      showMsg(isPrivate ? "予定を削除しました" : "予約を削除しました");
     }
   };
-
+  
   const checkIsRegularHoliday = (date) => {
     if (!shop?.business_hours?.regular_holidays) return false;
     const holidays = shop.business_hours.regular_holidays;
