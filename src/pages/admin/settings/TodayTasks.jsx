@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from "../../../supabaseClient";
 import { 
@@ -11,8 +12,16 @@ const TodayTasks = () => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState('');
-const [tasks, setTasks] = useState([]);
-const [shopData, setShopData] = useState(null);
+
+  // 🆕 お客様情報ポップアップ用の状態 [cite: 2026-03-08]
+  const [showCustomerModal, setShowCustomerModal] = useState(false);
+  const [selectedCustomer, setSelectedCustomer] = useState(null);
+  const [customerHistory, setCustomerHistory] = useState([]);
+  const [customerMemo, setCustomerMemo] = useState('');
+  const [isSavingMemo, setIsSavingMemo] = useState(false);
+
+  const [tasks, setTasks] = useState([]);
+  const [shopData, setShopData] = useState(null);
   // 🆕 金額計算のためにマスターを保持する箱を追加
   const [services, setServices] = useState([]);
   const [serviceOptions, setServiceOptions] = useState([]);
@@ -267,12 +276,81 @@ const initialSvcs = opt.services || (opt.people ? opt.people.flatMap(p => p.serv
       // ✅ 修正：余計なタグを消しました
       showMsg("完了を取り消しました。お会計を修正できます。");
       fetchTodayTasks(); 
-    } catch (err) {
+} catch (err) {
       alert("取り消しエラー: " + err.message);
     }
   };
 
+  /* ==========================================
+      🆕 お客様の詳細情報（履歴とメモ）を取得する
+     ========================================== */
+  const openCustomerInfo = async (task) => {
+    // 🔍 IDがない場合は「未登録」として処理
+    if (!task.customer_id) {
+      setSelectedCustomer({ name: task.customer_name, id: null });
+      setCustomerMemo('');
+      setCustomerHistory([]);
+      setShowCustomerModal(true);
+      return;
+    }
+
+    try {
+      // 1. 顧客マスタからメモを取得
+      const { data: customer } = await supabase
+        .from('customers')
+        .select('*')
+        .eq('shop_id', shopId)
+        .eq('id', task.customer_id)
+        .maybeSingle();
+
+      setSelectedCustomer(customer || { name: task.customer_name, id: task.customer_id });
+      setCustomerMemo(customer?.memo || '');
+
+      // 2. 過去の来店履歴を取得（エラーの原因だった紐付けを外して単体で取得）
+      const { data: history, error: hError } = await supabase
+        .from('reservations')
+        .select('*') // 💡 salesを外してシンプルに！
+        .eq('shop_id', shopId)
+        .eq('customer_id', task.customer_id)
+        .eq('status', 'completed')
+        .order('start_time', { ascending: false })
+        .limit(10);
+
+      if (hError) throw hError;
+
+      setCustomerHistory(history || []);
+      setShowCustomerModal(true);
+    } catch (err) {
+      console.error("履歴取得エラー:", err.message);
+      // 万が一エラーでもモーダルだけは開くようにする
+      setShowCustomerModal(true);
+    }
+  };
+
+  // 🆕 顧客メモを保存する
+  const handleSaveMemo = async () => {
+    if (!selectedCustomer?.id) {
+      alert("このお客様は名簿に登録されていません。予約管理画面で名寄せが必要です。");
+      return;
+    }
+    setIsSavingMemo(true);
+    try {
+      const { error } = await supabase
+        .from('customers')
+        .update({ memo: customerMemo, updated_at: new Date().toISOString() })
+        .eq('id', selectedCustomer.id);
+      
+      if (error) throw error;
+      showMsg("メモを保存しました！✨");
+    } catch (err) {
+      alert("メモの保存に失敗しました: " + err.message);
+    } finally {
+      setIsSavingMemo(false);
+    }
+  };
+
   const themeColor = shopData?.theme_color || '#2563eb';
+
   if (loading) return <div style={{ textAlign: 'center', padding: '50px' }}>読み込み中...</div>;
   
   return (
@@ -348,25 +426,23 @@ const initialSvcs = opt.services || (opt.people ? opt.people.flatMap(p => p.serv
     </button>
   </div>
 ) : (
-  
-  /* ✅ 修正：即完了ではなく「クイックレジ」を開くように変更します [cite: 2026-03-08] */
-                  <button 
-                    onClick={() => openQuickCheckout(task)} 
-                    style={{ 
-                      padding: '12px 24px', 
-                      background: themeColor, 
-                      color: '#fff', 
-                      border: 'none', 
-                      borderRadius: '12px', 
-                      fontWeight: 'bold', 
-                      cursor: 'pointer',
-                      boxShadow: `0 4px 12px ${themeColor}44`
-                    }}
-                  >
-                    お会計 ＆ 完了
-                  </button>
-                )}
-                              </div>
+  /* ✅ 修正：2列ボタンにして、左側にお客様情報ボタンを配置 [cite: 2026-03-08] */
+  <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
+    <button
+      onClick={() => openCustomerInfo(task)}
+      style={{ flex: 1, padding: '12px', background: '#f1f5f9', color: '#475569', border: '1px solid #e2e8f0', borderRadius: '12px', fontWeight: 'bold', cursor: 'pointer', fontSize: '0.85rem' }}
+    >
+      履歴
+    </button>
+    <button
+      onClick={() => openQuickCheckout(task)}
+      style={{ flex: 2, padding: '12px', background: themeColor, color: '#fff', border: 'none', borderRadius: '12px', fontWeight: 'bold', cursor: 'pointer', fontSize: '0.9rem', boxShadow: `0 4px 12px ${themeColor}44` }}
+    >
+      お会計 ＆ 完了
+    </button>
+  </div>
+)}
+               </div>
             </div>
           ))
         )}
@@ -794,8 +870,56 @@ const initialSvcs = opt.services || (opt.people ? opt.people.flatMap(p => p.serv
         </div>
       )}
 
-    </div> // 👈 ここがファイル一番最後の一番外側の div です
+{/* 🆕 追加：お客様情報 ＆ 来店履歴 ＆ メモのポップアップ [cite: 2026-03-08] */}
+      <AnimatePresence>
+        {showCustomerModal && (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 4000, display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(8px)', padding: '20px' }} onClick={() => setShowCustomerModal(false)}>
+            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 20 }} onClick={e => e.stopPropagation()} style={{ background: '#fff', width: '100%', maxWidth: '500px', borderRadius: '25px', padding: '25px', maxHeight: '85vh', overflowY: 'auto' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}>
+                <h3 style={{ margin: 0, fontSize: '1.2rem', fontWeight: '900' }}>👤 {selectedCustomer?.name} 様</h3>
+                <button onClick={() => setShowCustomerModal(false)} style={{ background: '#f1f5f9', border: 'none', width: '36px', height: '36px', borderRadius: '50%', cursor: 'pointer', color: '#94a3b8' }}>✕</button>
+              </div>
+
+              {/* ✍️ メモエリア：AdminReservations / AdminManagement と共通です [cite: 2026-03-08] */}
+              <div style={{ marginBottom: '25px' }}>
+                <label style={{ fontSize: '0.75rem', fontWeight: 'bold', color: '#64748b', display: 'block', marginBottom: '8px' }}>📝 顧客メモ（マスタ共通）</label>
+                <textarea 
+                  value={customerMemo} 
+                  onChange={(e) => setCustomerMemo(e.target.value)} 
+                  style={{ width: '100%', height: '100px', padding: '12px', borderRadius: '12px', border: '1px solid #e2e8f0', background: '#f8fafc', fontSize: '0.9rem', boxSizing: 'border-box', lineHeight: '1.5' }}
+                  placeholder="カラーの配合や、前回の会話内容、注意事項など..."
+                />
+                <button onClick={handleSaveMemo} disabled={isSavingMemo} style={{ width: '100%', marginTop: '8px', padding: '10px', background: themeColor, color: '#fff', border: 'none', borderRadius: '10px', fontWeight: 'bold', cursor: 'pointer', fontSize: '0.85rem' }}>
+                  {isSavingMemo ? '保存中...' : 'メモを保存する'}
+                </button>
+              </div>
+
+              {/* 🕒 履歴エリア：売上金額付き [cite: 2026-03-08] */}
+              <h4 style={{ fontSize: '0.9rem', color: '#64748b', marginBottom: '12px', borderLeft: `4px solid ${themeColor}`, paddingLeft: '10px', fontWeight: 'bold' }}>🕒 直近の来店履歴</h4>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                {customerHistory.length > 0 ? customerHistory.map(h => (
+                  <div key={h.id} style={{ padding: '12px', background: '#f8fafc', borderRadius: '12px', border: '1px solid #f1f5f9' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', fontSize: '0.85rem' }}>
+                      <span style={{ color: '#1e293b' }}>📅 {new Date(h.start_time).toLocaleDateString('ja-JP')}</span>
+                      {/* ✅ 修正：予約データの total_price を直接見るようにしました [cite: 2026-03-10] */}
+                      <span style={{ color: '#d34817' }}>¥{(h.total_price || 0).toLocaleString()}</span>
+                    </div>
+                    <div style={{ fontSize: '0.8rem', color: themeColor, marginTop: '4px', fontWeight: 'bold' }}>
+                      {h.menu_name || 'メニュー記録なし'}
+                    </div>
+                  </div>
+                )) : (
+                  <div style={{ textAlign: 'center', padding: '30px', background: '#f8fafc', borderRadius: '12px', color: '#94a3b8', fontSize: '0.85rem' }}>
+                    来店履歴はありません
+                  </div>
+                )}
+              </div>
+              </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+    </div> // 👈 ファイルの最後、一番外側の div
   );
 };
-
 export default TodayTasks;
