@@ -45,6 +45,8 @@ const TodayTasks = () => {
   const [selectedServices, setSelectedServices] = useState([]); 
   const [selectedOptions, setSelectedOptions] = useState({});
 
+  const [categories, setCategories] = useState([]);
+
   useEffect(() => {
       if (shopId) {
       fetchShopData();
@@ -53,26 +55,36 @@ const TodayTasks = () => {
     }
   }, [shopId]);
 
-// 🆕 調整項目とカテゴリを並び順通りに取得 [cite: 2026-03-08]
+// 🆕 調整項目とカテゴリを並び順通りに取得（NULL/falseの揺れに強い版）
 const fetchMasterData = async () => {
-    // カテゴリ（調整用・商品用）、調整、店販、メニュー、オプションをすべて並列で取得 [cite: 2026-03-08]
-    const [adjCatRes, prodCatRes, adjRes, prodRes, servRes, optRes] = await Promise.all([
-      supabase.from('service_categories').select('*').eq('shop_id', shopId).eq('is_adjustment_cat', true).order('sort_order'),
-      supabase.from('service_categories').select('*').eq('shop_id', shopId).eq('is_product_cat', true).order('sort_order'), // 🆕 追加：商品カテゴリを取得
+    // 1. カテゴリ、調整、店販、メニュー、オプションを並列で取得
+    const [allCatsRes, adjRes, prodRes, servRes, optRes] = await Promise.all([
+      // 全カテゴリをまとめて取得（並び順通り）
+      supabase.from('service_categories').select('*').eq('shop_id', shopId).order('sort_order'),
+      // 調整・店販・サービスも取得
       supabase.from('admin_adjustments').select('*').eq('shop_id', shopId).is('service_id', null).order('sort_order'),
       supabase.from('products').select('*').eq('shop_id', shopId).order('sort_order'),
-      supabase.from('services').select('*').eq('shop_id', shopId),
+      supabase.from('services').select('*').eq('shop_id', shopId).order('sort_order'),
       supabase.from('service_options').select('*')
     ]);
 
-    setAdjCategories(adjCatRes.data || []);
-    setProductCategories(prodCatRes.data || []); // 🆕 追加：商品カテゴリをセット
+    const allCats = allCatsRes.data || [];
+
+    // 💡 JS側で振り分けることで、DBに「null」と「false」が混ざっていても確実にキャッチします
+    const normalCats = allCats.filter(c => !c.is_adjustment_cat && !c.is_product_cat);
+    const adjustmentCats = allCats.filter(c => c.is_adjustment_cat === true);
+    const productCats = allCats.filter(c => c.is_product_cat === true);
+
+    // 各Stateへセット
+    setCategories(normalCats);         // メニュー用
+    setAdjCategories(adjustmentCats); // 調整用
+    setProductCategories(productCats); // 店販用
+    
     setAdjustments(adjRes.data || []);
     setProducts(prodRes.data || []);
     setServices(servRes.data || []);
     setServiceOptions(optRes.data || []);
-  };
-
+};
   // 画面サイズ管理
   const [windowWidth, setWindowWidth] = useState(window.innerWidth);
   useEffect(() => {
@@ -281,74 +293,122 @@ const initialSvcs = opt.services || (opt.people ? opt.people.flatMap(p => p.serv
     }
   };
 
-  /* ==========================================
-      🆕 お客様の詳細情報（履歴とメモ）を取得する
-     ========================================== */
-  const openCustomerInfo = async (task) => {
-    // 🔍 IDがない場合は「未登録」として処理
-    if (!task.customer_id) {
-      setSelectedCustomer({ name: task.customer_name, id: null });
-      setCustomerMemo('');
-      setCustomerHistory([]);
-      setShowCustomerModal(true);
-      return;
-    }
+/* ==========================================
+    🆕 お客様の詳細情報（名簿マスタからメモを取得）
+   ========================================== */
+const openCustomerInfo = async (task) => {
+  setSelectedTask(task); // 現在のタスクを保持
+  let cust = null;
 
-    try {
-      // 1. 顧客マスタからメモを取得
-      const { data: customer } = await supabase
+  try {
+    // 1. まず予約データに customer_id が紐付いているか確認
+    if (task.customer_id) {
+      const { data } = await supabase
         .from('customers')
         .select('*')
-        .eq('shop_id', shopId)
         .eq('id', task.customer_id)
         .maybeSingle();
+      cust = data;
+    }
 
-      setSelectedCustomer(customer || { name: task.customer_name, id: task.customer_id });
-      setCustomerMemo(customer?.memo || '');
+    // 2. 紐付けがない場合、電話番号かメールで名簿をガサ入れ（名寄せ）
+    if (!cust) {
+      const orConditions = [];
+      if (task.customer_phone && task.customer_phone !== '---') orConditions.push(`phone.eq.${task.customer_phone}`);
+      if (task.customer_email) orConditions.push(`email.eq.${task.customer_email}`);
 
-      // 2. 過去の来店履歴を取得（エラーの原因だった紐付けを外して単体で取得）
-      const { data: history, error: hError } = await supabase
+      if (orConditions.length > 0) {
+        const { data } = await supabase
+          .from('customers')
+          .select('*')
+          .eq('shop_id', shopId)
+          .or(orConditions.join(','))
+          .maybeSingle();
+        cust = data;
+      }
+    }
+
+    // 状態をセット
+    if (cust) {
+      setSelectedCustomer(cust);
+      setCustomerMemo(cust.memo || '');
+    } else {
+      // 全くの新規客の場合
+      setSelectedCustomer({ name: task.customer_name, id: null });
+      setCustomerMemo('');
+    }
+
+    // 3. 過去の来店履歴を取得
+    const searchId = cust?.id || task.customer_id;
+    if (searchId) {
+      const { data: history } = await supabase
         .from('reservations')
-        .select('*') // 💡 salesを外してシンプルに！
+        .select('*')
         .eq('shop_id', shopId)
-        .eq('customer_id', task.customer_id)
+        .eq('customer_id', searchId)
         .eq('status', 'completed')
         .order('start_time', { ascending: false })
         .limit(10);
-
-      if (hError) throw hError;
-
       setCustomerHistory(history || []);
-      setShowCustomerModal(true);
-    } catch (err) {
-      console.error("履歴取得エラー:", err.message);
-      // 万が一エラーでもモーダルだけは開くようにする
-      setShowCustomerModal(true);
+    } else {
+      setCustomerHistory([]);
     }
-  };
 
-  // 🆕 顧客メモを保存する
-  const handleSaveMemo = async () => {
-    if (!selectedCustomer?.id) {
-      alert("このお客様は名簿に登録されていません。予約管理画面で名寄せが必要です。");
-      return;
-    }
-    setIsSavingMemo(true);
-    try {
-      const { error } = await supabase
-        .from('customers')
-        .update({ memo: customerMemo, updated_at: new Date().toISOString() })
-        .eq('id', selectedCustomer.id);
-      
-      if (error) throw error;
-      showMsg("メモを保存しました！✨");
-    } catch (err) {
-      alert("メモの保存に失敗しました: " + err.message);
-    } finally {
-      setIsSavingMemo(false);
-    }
-  };
+    setShowCustomerModal(true);
+  } catch (err) {
+    console.error("データ取得エラー:", err);
+    setShowCustomerModal(true);
+  }
+};
+/* ==========================================
+    🆕 顧客メモを保存（マスタ共通 ＆ 予約と名簿を紐付け）
+   ========================================== */
+const handleSaveMemo = async () => {
+  setIsSavingMemo(true);
+  try {
+    let targetId = selectedCustomer?.id;
 
+    // 1. 名簿（customers）を更新または新規作成（upsert）
+    const customerPayload = {
+      shop_id: shopId,
+      name: selectedCustomer?.name || selectedTask.customer_name,
+      memo: customerMemo,
+      updated_at: new Date().toISOString()
+    };
+
+    // 既存客ならIDを指定して上書き
+    if (targetId) customerPayload.id = targetId;
+
+    const { data: savedCust, error: custError } = await supabase
+      .from('customers')
+      .upsert(customerPayload, { onConflict: 'id' })
+      .select()
+      .single();
+
+    if (custError) throw custError;
+    targetId = savedCust.id;
+
+    // 2. 今の予約データ（reservations）に名簿IDを書き込み、予約側のメモを空にする
+    const { error: resError } = await supabase
+      .from('reservations')
+      .update({ 
+        customer_id: targetId,
+        memo: null // マスタに一本化したので予約側のメモは消去
+      })
+      .eq('id', selectedTask.id);
+
+    if (resError) throw resError;
+
+    // 画面の状態を更新
+    setSelectedCustomer(savedCust);
+    showMsg("名簿の共通メモを更新しました！✨");
+    fetchTodayTasks(); // リスト側も最新の紐付け状態に更新
+  } catch (err) {
+    alert("保存エラー: " + err.message);
+  } finally {
+    setIsSavingMemo(false);
+  }
+};
   const themeColor = shopData?.theme_color || '#2563eb';
 
   if (loading) return <div style={{ textAlign: 'center', padding: '50px' }}>読み込み中...</div>;
@@ -699,116 +759,119 @@ const initialSvcs = opt.services || (opt.people ? opt.people.flatMap(p => p.serv
       )}
 
 {/* ==========================================
-          🆕 Step 6: メニュー追加・変更専用ポップアップ [cite: 2026-03-08]
-          ========================================== */}
-      {isMenuEditOpen && (
-        <div 
-          onClick={() => setIsMenuEditOpen(false)} 
-          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 4000, display: 'flex', alignItems: 'flex-end', backdropFilter: 'blur(4px)' }}
-        >
-          <div 
-            onClick={(e) => e.stopPropagation()} 
-            style={{ background: '#fff', width: '100%', borderTopLeftRadius: '30px', borderTopRightRadius: '30px', maxHeight: '85vh', display: 'flex', flexDirection: 'column', boxShadow: '0 -10px 25px rgba(0,0,0,0.2)' }}
-          >
-            {/* ポップアップヘッダー */}
-            <div style={{ padding: '20px 25px', borderBottom: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 'bold' }}>メニューの追加・変更</h3>
-              <button onClick={() => setIsMenuEditOpen(false)} style={{ background: '#f1f5f9', border: 'none', width: '36px', height: '36px', borderRadius: '50%', cursor: 'pointer', color: '#64748b' }}>✕</button>
-            </div>
+      ✨ 修正後：MenuSettingsの並び順を100%再現する書き方
+    ========================================== */}
+{isMenuEditOpen && (
+  <div 
+    onClick={() => setIsMenuEditOpen(false)} 
+    style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 4000, display: 'flex', alignItems: 'flex-end', backdropFilter: 'blur(4px)' }}
+  >
+    <div 
+      onClick={(e) => e.stopPropagation()} 
+      style={{ background: '#fff', width: '100%', borderTopLeftRadius: '30px', borderTopRightRadius: '30px', maxHeight: '85vh', display: 'flex', flexDirection: 'column', boxShadow: '0 -10px 25px rgba(0,0,0,0.2)' }}
+    >
+      {/* ポップアップヘッダー */}
+      <div style={{ padding: '20px 25px', borderBottom: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 'bold' }}>メニューの追加・変更</h3>
+        <button onClick={() => setIsMenuEditOpen(false)} style={{ background: '#f1f5f9', border: 'none', width: '36px', height: '36px', borderRadius: '50%', cursor: 'pointer', color: '#64748b' }}>✕</button>
+      </div>
 
-            <div style={{ flex: 1, overflowY: 'auto', padding: '15px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
-              {Array.from(new Set(services.map(s => s.category))).map(catName => (
-                <div key={catName}>
-                  <p style={{ fontSize: '0.75rem', fontWeight: 'bold', color: '#64748b', marginBottom: '10px' }}>📁 {catName}</p>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-                    {services.filter(s => s.category === catName).map(svc => {
-                      const isSel = selectedServices.find(s => s.id === svc.id);
-                      return (
-                        <div key={svc.id} style={{ display: 'flex', flexDirection: 'column' }}>
-                          
-                          {/* 💡 ここが 3. メニュー選択のロジック更新部分です [cite: 2026-03-08] */}
-                          <button 
-                            onClick={async () => {
-                              let nextSvcs;
-                              let nextOpts = { ...selectedOptions };
+      <div style={{ flex: 1, overflowY: 'auto', padding: '15px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+        {/* ✅ ポイント：取得済みの categories (マスタ順) をベースにループさせる */}
+        {categories.map(cat => {
+          // このカテゴリに属するサービスを抽出（これらも fetchMasterData で sort_order 順に取得済み）
+          const filteredServices = services.filter(s => s.category === cat.name);
+          
+          // メニューが1つも登録されていないカテゴリは表示しない
+          if (filteredServices.length === 0) return null;
 
-                              if (isSel) {
-                                // 【解除時】メニューを消し、そのメニュー用の枝分かれデータも完全に削除します [cite: 2026-03-08]
-                                nextSvcs = selectedServices.filter(s => s.id !== svc.id);
-                                Object.keys(nextOpts).forEach(key => {
-                                  if (key.startsWith(`${svc.id}-`)) delete nextOpts[key];
-                                });
-                              } else {
-                                // 【追加時】メニューをリストに追加します
-                                nextSvcs = [...selectedServices, svc];
-                              }
+          return (
+            <div key={cat.id}>
+              {/* カテゴリ名の表示 */}
+              <p style={{ fontSize: '0.75rem', fontWeight: 'bold', color: '#64748b', marginBottom: '10px' }}>📁 {cat.name}</p>
+              
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                {filteredServices.map(svc => {
+                  const isSel = selectedServices.find(s => s.id === svc.id);
+                  return (
+                    <div key={svc.id} style={{ display: 'flex', flexDirection: 'column' }}>
+                      <button 
+                        onClick={async () => {
+                          let nextSvcs;
+                          let nextOpts = { ...selectedOptions };
+                          if (isSel) {
+                            nextSvcs = selectedServices.filter(s => s.id !== svc.id);
+                            Object.keys(nextOpts).forEach(key => {
+                              if (key.startsWith(`${svc.id}-`)) delete nextOpts[key];
+                            });
+                          } else {
+                            nextSvcs = [...selectedServices, svc];
+                          }
+                          setSelectedServices(nextSvcs);
+                          setSelectedOptions(nextOpts);
+                          await syncReservationToSupabase(nextSvcs, nextOpts);
+                        }}
+                        style={{ 
+                          width: '100%', padding: '15px 10px', borderRadius: isSel ? '12px 12px 0 0' : '12px',
+                          border: `2px solid ${isSel ? themeColor : '#f1f5f9'}`, 
+                          background: isSel ? `${themeColor}15` : '#fff', 
+                          color: isSel ? themeColor : '#1e293b', 
+                          fontWeight: 'bold', fontSize: '0.8rem', cursor: 'pointer' 
+                        }}
+                      >
+                        {isSel ? '✅ ' : ''}{svc.name}<br />
+                        <span style={{ fontSize: '0.7rem', opacity: 0.6 }}>¥{svc.price?.toLocaleString()}</span>
+                      </button>
 
-                              setSelectedServices(nextSvcs);
-                              setSelectedOptions(nextOpts);
-                              // 💡 ここでDBに即保存！ [cite: 2026-03-08]
-                              await syncReservationToSupabase(nextSvcs, nextOpts);
-                            }}
-                            style={{ 
-                              width: '100%', padding: '15px 10px', borderRadius: isSel ? '12px 12px 0 0' : '12px',
-                              border: `2px solid ${isSel ? themeColor : '#f1f5f9'}`, 
-                              background: isSel ? `${themeColor}15` : '#fff', 
-                              color: isSel ? themeColor : '#1e293b', 
-                              fontWeight: 'bold', fontSize: '0.8rem', cursor: 'pointer' 
-                            }}
-                          >
-                            {isSel ? '✅ ' : ''}{svc.name}<br />
-                            <span style={{ fontSize: '0.7rem', opacity: 0.6 }}>¥{svc.price?.toLocaleString()}</span>
-                          </button>
-
-                          {/* 枝分かれオプション（選択時のみ表示） [cite: 2026-03-08] */}
-                          {isSel && (
-                            <div style={{ padding: '10px', background: '#f8fafc', border: `2px solid ${themeColor}`, borderTop: 'none', borderRadius: '0 0 12px 12px', marginBottom: '10px' }}>
-                              {Array.from(new Set(serviceOptions.filter(o => o.service_id === svc.id).map(o => o.group_name))).map(groupName => (
-                                <div key={groupName} style={{ marginBottom: '10px' }}>
-                                  <p style={{ fontSize: '0.6rem', color: '#94a3b8', margin: '0 0 4px 0' }}>└ {groupName}</p>
-                                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
-                                    {serviceOptions.filter(o => o.service_id === svc.id && o.group_name === groupName).map(opt => {
-                                      const isOptSel = selectedOptions[`${svc.id}-${groupName}`]?.id === opt.id;
-                                      return (
-                                        <button 
-                                          key={opt.id} 
-                                          /* 💡 ここが 枝分かれ選択のロジック更新部分です [cite: 2026-03-08] */
-                                          onClick={async () => {
-                                            const nextOpts = { ...selectedOptions, [`${svc.id}-${groupName}`]: opt };
-                                            setSelectedOptions(nextOpts);
-                                            // 💡 枝分かれを選んだ瞬間もDBに即保存！ [cite: 2026-03-08]
-                                            await syncReservationToSupabase(selectedServices, nextOpts);
-                                          }}
-                                          style={{ padding: '6px 10px', borderRadius: '8px', fontSize: '0.7rem', fontWeight: 'bold', border: `1px solid ${isOptSel ? themeColor : '#cbd5e1'}`, background: isOptSel ? themeColor : '#fff', color: isOptSel ? '#fff' : '#475569', cursor: 'pointer' }}
-                                        >
-                                          {opt.option_name} {opt.additional_price > 0 ? `(+¥${opt.additional_price})` : ''}
-                                        </button>
-                                      );
-                                    })}
-                                  </div>
-                                </div>
-                              ))}
+                      {/* 枝分かれオプション（選択時のみ表示） */}
+                      {isSel && (
+                        <div style={{ padding: '10px', background: '#f8fafc', border: `2px solid ${themeColor}`, borderTop: 'none', borderRadius: '0 0 12px 12px', marginBottom: '10px' }}>
+                          {Array.from(new Set(serviceOptions.filter(o => o.service_id === svc.id).map(o => o.group_name))).map(groupName => (
+                            <div key={groupName} style={{ marginBottom: '10px' }}>
+                              <p style={{ fontSize: '0.6rem', color: '#94a3b8', margin: '0 0 4px 0' }}>└ {groupName}</p>
+                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                                {serviceOptions.filter(o => o.service_id === svc.id && o.group_name === groupName).map(opt => {
+                                  const isOptSel = selectedOptions[`${svc.id}-${groupName}`]?.id === opt.id;
+                                  return (
+                                    <button 
+                                      key={opt.id} 
+                                      onClick={async () => {
+                                        const nextOpts = { ...selectedOptions, [`${svc.id}-${groupName}`]: opt };
+                                        setSelectedOptions(nextOpts);
+                                        await syncReservationToSupabase(selectedServices, nextOpts);
+                                      }}
+                                      style={{ padding: '6px 10px', borderRadius: '8px', fontSize: '0.7rem', fontWeight: 'bold', border: `1px solid ${isOptSel ? themeColor : '#cbd5e1'}`, background: isOptSel ? themeColor : '#fff', color: isOptSel ? '#fff' : '#475569', cursor: 'pointer' }}
+                                    >
+                                      {opt.option_name} {opt.additional_price > 0 ? `(+¥${opt.additional_price})` : ''}
+                                    </button>
+                                  );
+                                })}
+                              </div>
                             </div>
-                          )}
+                          ))}
                         </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              ))}
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
             </div>
+          );
+        })}
+      </div>
 
-            <div style={{ padding: '15px 20px', borderTop: '1px solid #f1f5f9', background: '#fff' }}>
-              <button onClick={() => setIsMenuEditOpen(false)} style={{ width: '100%', padding: '16px', background: themeColor, color: '#fff', border: 'none', borderRadius: '12px', fontWeight: 'bold', fontSize: '1rem', cursor: 'pointer' }}>
-                メニューの選択を完了して閉じる
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <div style={{ padding: '15px 20px', borderTop: '1px solid #f1f5f9', background: '#fff' }}>
+        <button onClick={() => setIsMenuEditOpen(false)} style={{ width: '100%', padding: '16px', background: themeColor, color: '#fff', border: 'none', borderRadius: '12px', fontWeight: 'bold', fontSize: '1rem', cursor: 'pointer' }}>
+          メニューの選択を完了して閉じる
+        </button>
+      </div>
+    </div>
+  </div>
+)}
+
 {/* ==========================================
-          📱 Step 3: お客様提示用 フルスクリーン横向き画面（スクロール修正版） [cite: 2026-03-08]
-          ========================================== */}
+📱 Step 3: お客様提示用 フルスクリーン横向き画面（スクロール修正版） [cite: 2026-03-08]
+========================================== */}
       {isCustomerModeOpen && (
         <div 
           onClick={() => setIsCustomerModeOpen(false)} 

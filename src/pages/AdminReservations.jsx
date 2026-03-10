@@ -30,6 +30,7 @@ function AdminReservations() {
   const [staffs, setStaffs] = useState([]);
   const [reservations, setReservations] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [message, setMessage] = useState('');
 
   const [startDate, setStartDate] = useState(() => {
     const params = new URLSearchParams(window.location.search);
@@ -141,7 +142,7 @@ const isPC = windowWidth > 1024;
 // 3. 全関連店舗の予約データを合算して取得（顧客マスタの最新名も取得）
     const { data: resData } = await supabase
       .from('reservations')
-      .select('*, profiles(business_name), staffs(name), customers(name, admin_name)') // 🆕 ここにcustomersを追加
+      .select('*, profiles(business_name), staffs(name), customers(*)') // 🆕 ここにcustomersを追加
       .in('shop_id', targetShopIds);
       const { data: staffsData } = await supabase.from('staffs').select('*').eq('shop_id', shopId);
     setStaffs(staffsData || []);
@@ -208,19 +209,31 @@ setEditFields({
   };
 
 // 🆕 修正後：名寄せスカウター搭載版
-  const openDetail = async (res) => {
-    if (res.shop_id && res.shop_id !== shopId) {
-      alert(`こちらは他店舗（${res.profiles?.business_name || '別ブランド'}）の予約枠です。`);
-      return;
-    }
-    setSelectedRes(res);
+const openDetail = async (res) => {
+  if (res.shop_id && res.shop_id !== shopId) {
+    alert(`こちらは他店舗...`);
+    return;
+  }
+  setSelectedRes(res);
 
-    // 🔍 【スカウター発動】電話番号またはメールで既存客をガサ入れ
+  let cust = null;
+
+  // 🆕 修正ポイント：まず、予約データに紐付いている顧客IDがあるか確認
+  if (res.customer_id) {
+    const { data: matched } = await supabase
+      .from('customers')
+      .select('*')
+      .eq('id', res.customer_id)
+      .maybeSingle();
+    cust = matched;
+  }
+
+  // もしIDでヒットしなかった場合のみ、電話・メールでスカウターを回す
+  if (!cust) {
     const orConditions = [];
     if (res.customer_phone && res.customer_phone !== '---') orConditions.push(`phone.eq.${res.customer_phone}`);
     if (res.customer_email) orConditions.push(`email.eq.${res.customer_email}`);
 
-    let cust = null;
     if (orConditions.length > 0) {
       const { data: matched } = await supabase
         .from('customers')
@@ -230,28 +243,20 @@ setEditFields({
         .maybeSingle();
       cust = matched;
     }
+  }
 
-// 🔍 判定：連絡先（電話・メール）が一致する人がDBに既にいる場合
-    if (cust) {
-      // 🆕 修正ポイント：
-      // ヒットした顧客マスタのID (cust.id) と、
-      // 予約データに紐付いている顧客ID (res.customer_id) が同じなら
-      // それは「統合済み」の状態なので、3択を出さずにそのまま詳細を開く
-      if (cust.id === res.customer_id) {
-        finalizeOpenDetail(res, cust);
-        return;
-      }
-
-      console.log(`🔍 重複チェック：予約名[${res.customer_name}] vs 名簿名[${cust.name}]`);
-      
-      setMergeCandidate(cust); 
-      setShowMergeConfirm(true); 
-      return; 
-    }    
-    // 重複がない、または名前も一致なら、そのまま詳細表示へ
-    finalizeOpenDetail(res, cust);
-  };
-
+  // 以降の統合チェックロジックへ...
+  if (cust) {
+    if (cust.id === res.customer_id) {
+      finalizeOpenDetail(res, cust);
+      return;
+    }
+    setMergeCandidate(cust);
+    setShowMergeConfirm(true);
+    return;
+  }
+  finalizeOpenDetail(res, cust);
+};
   // 🆕 共通処理：詳細モーダルを表示するための確定処理
   const finalizeOpenDetail = (res, cust) => {
     const visitInfo = res.options?.visit_info || {};
@@ -332,104 +337,93 @@ setEditFields({
       alert("統合処理に失敗しました。");
     }
   };
-  // 🆕 追記ここまで
+// 🆕 追記ここまで
 
-// ✅ 名簿保存 ＆ 統合（名寄せ）ロジック：真・最強版
+  // 🆕 追加：画面に通知を出す関数 [cite: 2026-03-08]
+  const showMsg = (txt) => { setMessage(txt); setTimeout(() => setMessage(''), 3000); };
+
+// ✅ 重複防止 ＆ メモ一本化ロジック：真・完成版 [cite: 2026-03-10]
   const handleUpdateCustomer = async () => {
+    
     try {
-      // 🆕 1. 名前の正規化：全角スペースを半角に変換し、前後の余白を削除 [cite: 2026-03-08]
       const normalizedName = editFields.name.replace(/　/g, ' ').trim();
-      
+      if (!normalizedName) {
+        alert("お名前を入力してください。");
+        return;
+      }
+
+      // 🔍 ステップ1：この名前の人がすでに名簿にいないか「名寄せ検索」を行う
       let targetCustomerId = selectedCustomer?.id;
-
-      // --- 🆕 自動名寄せチェック：検索精度をアップ ---
+      
       if (!targetCustomerId) {
-        // A. 連絡先（LINE ID または 電話番号）による「絶対一致」検索
-        let identifierQuery = supabase.from('customers').select('id, name').eq('shop_id', shopId);
+        const { data: existingCust } = await supabase
+          .from('customers')
+          .select('id')
+          .eq('shop_id', shopId)
+          .eq('name', normalizedName)
+          .maybeSingle();
         
-        let hasIdentifier = false;
-        if (editFields.line_user_id) {
-          identifierQuery = identifierQuery.eq('line_user_id', editFields.line_user_id);
-          hasIdentifier = true;
-        } else if (editFields.phone && editFields.phone !== '---') {
-          identifierQuery = identifierQuery.eq('phone', editFields.phone);
-          hasIdentifier = true;
-        }
-
-        const { data: matchedCust } = hasIdentifier ? await identifierQuery.maybeSingle() : { data: null };
-
-        if (matchedCust) {
-          // 連絡先が一致！ → 分身を作らせないために既存IDを採用 [cite: 2026-03-08]
-          targetCustomerId = matchedCust.id;
-        } else {
-          // B. 連絡先で見つからない場合、正規化した名前で「同姓同名」を検索
-          const { data: nameMatchCust } = await supabase
-            .from('customers')
-            .select('*')
-            .eq('shop_id', shopId)
-            .eq('name', normalizedName) // ここで正規化した名前を使用 [cite: 2026-03-08]
-            .maybeSingle();
-
-          if (nameMatchCust) {
-            const confirmMerge = window.confirm(
-              `「${normalizedName}」様は既に名簿に存在しますが、連絡先が一致しません。\n既存のデータへ統合しますか？`
-            );
-            if (confirmMerge) targetCustomerId = nameMatchCust.id;
-          }
+        if (existingCust) {
+          targetCustomerId = existingCust.id; // すでにいたらそのIDを使う
         }
       }
-      // --- 🆕 チェック終了 ---
 
-      const payload = {
+      const customerPayload = {
         shop_id: shopId,
-        name: normalizedName, // 保存する名前も正規化したものに統一 [cite: 2026-03-08]
+        name: normalizedName,
         admin_name: normalizedName,
-        furigana: editFields.furigana || null, // 🆕 追加
+        furigana: editFields.furigana || null,
         phone: editFields.phone || null,
         email: editFields.email || null,
-        address: editFields.address || null, // 🆕 追加
-        parking: editFields.parking || null, // 🆕 追加
-        symptoms: editFields.symptoms || null, // 🆕 追加
-        request_details: editFields.request_details || null, // 🆕 追加
-        memo: editFields.memo || null,
+        address: editFields.address || null,
+        parking: editFields.parking || null,
+        symptoms: editFields.symptoms || null,
+        request_details: editFields.request_details || null,
+        memo: editFields.memo || null, // 👈 すべてのメモはここ（マスタ）へ！
         line_user_id: editFields.line_user_id || null,
         updated_at: new Date().toISOString()
       };
 
       if (targetCustomerId) {
-        payload.id = targetCustomerId; // IDを指定することで「新規作成」ではなく「上書き」にする
+        customerPayload.id = targetCustomerId;
       }
 
-      const { error: custError } = await supabase.from('customers').upsert(payload, { onConflict: 'id' });
-
+      // 🔍 ステップ2：名簿（customers）を更新。IDがあれば「上書き」、なければ「新規」になる
+      const { data: savedCust, error: custError } = await supabase
+        .from('customers')
+        .upsert(customerPayload, { onConflict: 'id' })
+        .select()
+        .single();
+      
       if (custError) throw custError;
+      targetCustomerId = savedCust.id; // 保存後の最新IDを確保
 
-      // 予約データの名前も最新状態に同期させる
-      let resUpdateQuery = supabase.from('reservations').update({ 
-        customer_name: editFields.name,
-        customer_phone: editFields.phone,
-        customer_email: editFields.email,
-        staff_id: selectedRes.staff_id
-      }).eq('shop_id', shopId);
+      // 🔍 ステップ3：予約データ（reservations）を更新して「名簿ID」をガッチリ紐付ける
+      const { error: resError } = await supabase
+        .from('reservations')
+        .update({ 
+          customer_name: normalizedName,
+          customer_phone: editFields.phone,
+          customer_email: editFields.email,
+          customer_id: targetCustomerId, // 👈 ここで紐付けるので、次からは重複しません！
+          staff_id: selectedRes.staff_id,
+          memo: null // 👈 予約側のメモは混乱を防ぐため空にします
+        })
+        .eq('id', selectedRes.id);
 
-      if (editFields.line_user_id) {
-        resUpdateQuery = resUpdateQuery.eq('line_user_id', editFields.line_user_id);
-      } else {
-        resUpdateQuery = resUpdateQuery.eq('customer_name', selectedRes.customer_name);
-      }
-      await resUpdateQuery;
+      if (resError) throw resError;
 
-      alert('名簿情報を更新・統合しました！'); 
-      setShowCustomerModal(false); 
+      // 💡 ステップ4：画面上の状態（State）も最新に更新する
+      setSelectedCustomer(savedCust); // これで、連続で「保存」を押しても重複しません！
+      
+      showMsg('情報を保存しました！✨'); 
       setShowDetailModal(false); 
       fetchData(); 
     } catch (err) {
       console.error(err);
-      alert('エラーが発生しました: ' + err.message);
+      alert('保存エラー: ' + err.message);
     }
-  };
-
-  const deleteRes = async (id) => {
+  };  const deleteRes = async (id) => {
     const isBlock = selectedRes?.res_type === 'blocked';
     const msg = isBlock ? 'このブロックを解除して予約を「可能」に戻しますか？' : 'この予約データを消去して予約を「可能」に戻しますか？';
     
@@ -675,9 +669,16 @@ const insertData = {
     return parts[0];
   };
 
-  return (
+return (
     <div style={{ display: 'flex', width: '100vw', height: '100dvh', background: '#fff', overflow: 'hidden', position: 'fixed', inset: 0 }}>
-{isPC && (
+      {/* 🆕 追記：通知メッセージを表示するボックス [cite: 2026-03-08] */}
+      {message && (
+        <div style={{ position: 'fixed', top: 20, left: '50%', transform: 'translateX(-50%)', width: '90%', maxWidth: '400px', padding: '15px', background: '#dcfce7', color: '#166534', borderRadius: '12px', zIndex: 10001, textAlign: 'center', fontWeight: 'bold', boxShadow: '0 10px 25px rgba(0,0,0,0.1)' }}>
+          {message}
+        </div>
+      )}
+      {isPC && (
+        
         <div style={{ width: '260px', flexShrink: 0, borderRight: '0.5px solid #cbd5e1', padding: '18px', display: 'flex', flexDirection: 'column', gap: '20px', background: '#fff', zIndex: 100 }}>
 
 {/* --- 1段目：タイトルと設定 --- */}
