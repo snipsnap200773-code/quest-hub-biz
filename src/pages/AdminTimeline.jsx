@@ -74,16 +74,25 @@ function AdminTimeline() {
   // 👤 顧客詳細用（ここがコメントアウトされていました）
 const [selectedCustomer, setSelectedCustomer] = useState(null); 
   const [customerHistory, setCustomerHistory] = useState([]);
-  // 🆕 管理用氏名(admin_name)を追加
-  const [editFields, setEditFields] = useState({ 
+// ✅ 🆕 修正：カレンダー版と同じフル項目セットに拡張
+  const [editFields, setEditFields] = useState({ 
     name: '', 
     admin_name: '', 
-    phone: '', 
-    email: '', 
-    memo: '', 
-    line_user_id: null 
+    furigana: '', phone: '', email: '', 
+    address: '', parking: '', symptoms: '', request_details: '', 
+    memo: '', line_user_id: null 
   });
-  
+
+  // ✅ 🆕 追加：カレンダー版からコピーしたヘルパー関数
+  const getFieldConfig = (key) => {
+    const cfg = shop?.form_config?.[key];
+    if (!cfg) return { show: false, label: '' };
+    return {
+      show: cfg.enabled || cfg.line_enabled,
+      label: cfg.label
+    };
+  };
+    
   // 🆕 名寄せ（マージ）確認用
   const [mergeCandidate, setMergeCandidate] = useState(null); 
   const [showMergeConfirm, setShowMergeConfirm] = useState(false);
@@ -93,6 +102,15 @@ const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [startX, setStartX] = useState(0);
   const [scrollLeft, setScrollLeft] = useState(0);
   const [hasMoved, setHasMoved] = useState(false);
+
+  // ✅ 🆕 画面サイズ管理（エラー解消用）
+  const [windowWidth, setWindowWidth] = useState(window.innerWidth);
+  useEffect(() => {
+    const handleResize = () => setWindowWidth(window.innerWidth);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+  const isPC = windowWidth > 1024; // ✅ これで isPC エラーが消えます
 
   useEffect(() => { fetchData(); }, [shopId, selectedDate]);
 
@@ -199,20 +217,51 @@ const openDetail = async (res) => {
     }
   };
 
-  // 🆕 3. 表示確定：モーダルの中身をセット
-  const finalizeOpenDetail = async (res, cust) => {
-  if (res.res_type === 'private_task') {
-    setSelectedCustomer(null);
-    setEditFields({ 
-      name: res.title, admin_name: '', phone: '', email: '', 
-      memo: res.note || '', line_user_id: null 
-    });
-    setCustomerHistory([]);
-    setShowDetailModal(true);
-    return;
-  }
+const finalizeOpenDetail = async (res, cust) => {
+    if (res.res_type === 'private_task') {
+      setSelectedCustomer(null);
+      setEditFields({ 
+        name: res.title, admin_name: '', phone: '', email: '', 
+        memo: res.note || '', line_user_id: null 
+      });
+      setCustomerHistory([]); setShowDetailModal(true); return;
+    }
 
-    // 来店履歴の取得
+    // ✅ 🆕 修正：予約時の詳細項目(visit_info)を抽出
+    const visitInfo = res.options?.visit_info || {};
+
+    if (cust) {
+      setSelectedCustomer(cust);
+      setEditFields({ 
+        name: cust.name || res.customer_name,
+        admin_name: cust.admin_name || '',
+        furigana: cust.furigana || visitInfo.furigana || '',
+        phone: cust.phone || '', 
+        email: cust.email || '', 
+        address: cust.address || visitInfo.address || '', 
+        parking: cust.parking || visitInfo.parking || '', 
+        symptoms: cust.symptoms || visitInfo.symptoms || '', 
+        request_details: cust.request_details || visitInfo.request_details || '', 
+        memo: cust.memo || '',
+        line_user_id: cust.line_user_id || res.line_user_id || null
+      });
+    } else {
+      setSelectedCustomer(null);
+      setEditFields({ 
+        name: res.customer_name, 
+        admin_name: '',
+        furigana: visitInfo.furigana || '',
+        phone: res.customer_phone || '', 
+        email: res.customer_email || '', 
+        address: visitInfo.address || '', 
+        parking: visitInfo.parking || '', 
+        symptoms: visitInfo.symptoms || '', 
+        request_details: visitInfo.request_details || '', 
+        memo: '',
+        line_user_id: res.line_user_id || null
+      });
+    }
+
     const { data: history } = await supabase.from('reservations').select('*').eq('shop_id', shopId).eq('customer_name', res.customer_name).neq('id', res.id).order('start_time', { ascending: false }).limit(5);
     setCustomerHistory(history || []);
     setShowDetailModal(true);
@@ -221,8 +270,16 @@ const openDetail = async (res) => {
   // --- 顧客情報の更新 ---
 const handleUpdateCustomer = async () => {
   try {
-    // ✅ プライベート予定の更新処理を分岐
+    // ✅ 🆕 変数を定義
+    const normalizedName = editFields.name.replace(/　/g, ' ').trim();
+    if (!normalizedName) {
+      alert("お名前を入力してください。");
+      return;
+    }
+
+    // ✅ プライベート予定の更新処理を分岐（ここは既存の通り）
     if (selectedRes?.res_type === 'private_task') {
+
       await supabase.from('private_tasks').update({
         title: editFields.name,
         note: editFields.memo
@@ -429,41 +486,41 @@ const handleCellClick = (slotMatches, time, staffId) => {
     setShowPrivateModal(true); // 営業時間外・定休日・ブロック枠はプライベート予定
   }
 };
+// --- 修正後：動的に時間軸を計算するコード ---
 const timeSlots = useMemo(() => {
-    if (!shop?.business_hours) return [];
-    
-    let minTotalMinutes = 24 * 60;
-    let maxTotalMinutes = 0;
-    let hasOpenDay = false;
+  if (!shop?.business_hours) return [];
+  
+  let minTotalMinutes = 24 * 60;
+  let maxTotalMinutes = 0;
+  let hasOpenDay = false;
 
-    // 全曜日の最小・最大時間を探す
-    Object.values(shop.business_hours).forEach(h => {
-      if (typeof h === 'object' && !h.is_closed && h.open && h.close) {
-        hasOpenDay = true;
-        const [openH, openM] = h.open.split(':').map(Number);
-        const [closeH, closeM] = h.close.split(':').map(Number);
-        if (openH * 60 + openM < minTotalMinutes) minTotalMinutes = openH * 60 + openM;
-        if (closeH * 60 + closeM > maxTotalMinutes) maxTotalMinutes = closeH * 60 + closeM;
-      }
-    });
-
-    if (!hasOpenDay) { minTotalMinutes = 9 * 60; maxTotalMinutes = 18 * 60; }
-
-    const interval = shop.slot_interval_min || 15;
-    const extraBefore = shop.extra_slots_before || 0; // 💡 これが表示拡張
-    const extraAfter = shop.extra_slots_after || 0;   // 💡 これが表示拡張
-
-    // 拡張分を含めた開始・終了時間を計算
-    const finalStart = minTotalMinutes - (extraBefore * interval);
-    const finalEnd = maxTotalMinutes + (extraAfter * interval);
-
-    const slots = [];
-    for (let m = finalStart; m <= finalEnd; m += interval) {
-      const h = Math.floor(m / 60); const mm = m % 60;
-      slots.push(`${String(h).padStart(2, '0')}:${String(mm).padStart(2, '0')}`);
+  // 全曜日の設定から最小・最大時間を特定
+  Object.values(shop.business_hours).forEach(h => {
+    if (typeof h === 'object' && !h.is_closed && h.open && h.close) {
+      hasOpenDay = true;
+      const [openH, openM] = h.open.split(':').map(Number);
+      const [closeH, closeM] = h.close.split(':').map(Number);
+      if (openH * 60 + openM < minTotalMinutes) minTotalMinutes = openH * 60 + openM;
+      if (closeH * 60 + closeM > maxTotalMinutes) maxTotalMinutes = closeH * 60 + closeM;
     }
-    return slots;
-  }, [shop]);
+  });
+
+  if (!hasOpenDay) { minTotalMinutes = 9 * 60; maxTotalMinutes = 18 * 60; }
+
+  const interval = shop.slot_interval_min || 15;
+  const extraBefore = shop.extra_slots_before || 0; // 💡 表示拡張
+  const extraAfter = shop.extra_slots_after || 0;   // 💡 表示拡張
+
+  const finalStart = minTotalMinutes - (extraBefore * interval);
+  const finalEnd = maxTotalMinutes + (extraAfter * interval);
+
+  const slots = [];
+  for (let m = finalStart; m <= finalEnd; m += interval) {
+    const h = Math.floor(m / 60); const mm = m % 60;
+    slots.push(`${String(h).padStart(2, '0')}:${String(mm).padStart(2, '0')}`);
+  }
+  return slots;
+}, [shop]);
   
   const themeColor = shop?.theme_color || '#4b2c85';
 
@@ -573,9 +630,9 @@ const timeSlots = useMemo(() => {
         const matches = [...resMatches, ...privMatches];
         const hasRes = matches.length > 0;
 
-        // 🆕 2. この枠で「ちょうど開始」する予約を特定
+        // ✅ 🆕 修正：toLocaleTimeString をやめて、数値(getTime)で厳密に判定
         const startingHere = matches.filter(r => 
-          new Date(r.start_time).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', hour12: false }) === time
+          new Date(r.start_time).getTime() === currentSlotStart
         );
         const isStart = startingHere.length > 0;
 
@@ -720,65 +777,107 @@ if (startingHere.length === 1) {
         </div>
       )}
 
-      {/* 👤 モーダル2：予約詳細・名簿 (AdminReservations完全移植) */}
+{/* 👤 モーダル2：予約詳細・名簿 (AdminReservationsから全機能を完全移植) */}
       {showDetailModal && (
-        <div style={overlayStyle} onClick={() => setShowDetailModal(false)}>
-          <div style={{ ...modalContentStyle, maxWidth: '650px' }} onClick={e => e.stopPropagation()}>
+        <div style={overlayStyle} onClick={() => { if(selectedRes?.isRegularHoliday) return; setShowDetailModal(false); }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ ...modalContentStyle, maxWidth: '650px', position: 'relative' }}>
+            
             {selectedRes?.res_type === 'normal' && (
-<button 
-  onClick={() => navigate(`/shop/${shopId}/reserve`, { 
-    state: { 
-      adminDate: selectedDate, 
-      adminTime: targetTime, 
-      adminStaffId: targetStaffId, // ✅ スタッフ情報を固定
-      fromView: 'timeline',        // ✅ 戻り先を記憶
-      isAdminMode: true 
-    } 
-  })} 
-  style={{ width: '100%', padding: '16px', background: themeColor, color: '#fff', border: 'none', borderRadius: '15px', fontWeight: 'bold', cursor: 'pointer', marginBottom: '20px', fontSize: '1rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
->
-  ➕ この時間にさらに予約を入れる（ねじ込み）
-</button>
+              <button 
+                onClick={() => navigate(`/shop/${shopId}/reserve`, { state: { adminDate: selectedDate, adminTime: targetTime, adminStaffId: targetStaffId, fromView: 'timeline', isAdminMode: true } })} 
+                style={{ width: '100%', padding: '16px', background: themeColor, color: '#fff', border: 'none', borderRadius: '15px', fontWeight: 'bold', cursor: 'pointer', marginBottom: '20px', fontSize: '1rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', boxShadow: `0 4px 12px ${themeColor}44` }}
+              >
+                ➕ この時間にさらに予約を入れる（ねじ込み）
+              </button>
             )}
+
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}>
-              <h2 style={{ margin: 0, fontSize: '1.2rem' }}>{selectedRes?.res_type === 'blocked' ? '🚫 ブロック設定' : '📅 予約詳細・名簿更新'}</h2>
+              <h2 style={{ margin: 0, fontSize: '1.2rem' }}>{selectedRes?.res_type === 'private_task' ? '🕒 プライベート予定' : '📅 予約詳細・名簿更新'}</h2>
               <button onClick={() => setShowDetailModal(false)} style={{ background: 'none', border: 'none', fontSize: '1.5rem', cursor: 'pointer' }}>×</button>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '25px' }}>
-              <div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: isPC ? '1fr 1fr' : '1fr', gap: '25px' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
                 <div style={{ background: '#f8fafc', padding: '15px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
+                  
+                  {/* ✅ 🆕 追加：予約メニュー内訳（画像2枚目のオレンジの枠） */}
+                  {selectedRes?.res_type === 'normal' && (
+                    <div style={{ background: `${themeColor}15`, padding: '16px', borderRadius: '15px', marginBottom: '15px', border: `1px solid ${themeColor}` }}>
+                      <label style={{ fontSize: '0.75rem', fontWeight: '900', color: themeColor, display: 'block', marginBottom: '10px' }}>📋 予約メニュー内訳</label>
+                      <div style={{ fontWeight: 'bold', color: '#1e293b' }}>{selectedRes.menu_name || 'メニュー未設定'}</div>
+                    </div>
+                  )}
+
+                  {/* ✅ 🆕 追加：現在の担当者バッジ */}
+                  {selectedRes?.res_type === 'normal' && (
+                    <div style={{ background: '#fff', padding: '10px 15px', borderRadius: '10px', border: '1px solid #e2e8f0', marginBottom: '15px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <User size={16} color={themeColor} />
+                      <span style={{ fontSize: '0.85rem', fontWeight: 'bold', color: '#475569' }}>担当スタッフ: {selectedRes.staffs?.name || '担当なし'}</span>
+                    </div>
+                  )}
+
+                  {/* ✅ 🆕 追加：LINE連携バッジ */}
+                  {editFields.line_user_id && (
+                    <div style={{ background: '#f0fdf4', padding: '8px 12px', borderRadius: '8px', border: '1px solid #bbf7d0', marginBottom: '15px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span style={{ fontSize: '1rem' }}>💬</span>
+                      <span style={{ fontSize: '0.75rem', color: '#166534', fontWeight: 'bold' }}>LINE連携済み</span>
+                    </div>
+                  )}
+
                   <label style={labelStyle}>担当スタッフの変更</label>
                   <select value={selectedRes?.staff_id || ''} onChange={(e) => setSelectedRes({...selectedRes, staff_id: e.target.value || null})} style={inputStyle}>
                     <option value="">フリー（担当なし）</option>
                     {staffs.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                   </select>
+
                   <label style={labelStyle}>お客様名（または予定名）</label>
                   <input type="text" value={editFields.name} onChange={(e) => setEditFields({...editFields, name: e.target.value})} style={inputStyle} />
+                  
                   <label style={labelStyle}>電話番号</label>
                   <input type="tel" value={editFields.phone} onChange={(e) => setEditFields({...editFields, phone: e.target.value})} style={inputStyle} placeholder="未登録" />
-                  <label style={labelStyle}>顧客メモ</label>
-                  <textarea value={editFields.memo} onChange={(e) => setEditFields({...editFields, memo: e.target.value})} style={{ ...inputStyle, height: '80px' }} placeholder="好み、注意事項など" />
+
+                  {/* ✅ 🆕 追加：動的詳細項目（ふりがな・住所など） */}
+                  <div style={{ marginTop: '15px', borderTop: '1px dashed #e2e8f0', paddingTop: '15px' }}>
+                    {getFieldConfig('furigana').show && (
+                      <>
+                        <label style={labelStyle}>{getFieldConfig('furigana').label}</label>
+                        <input type="text" value={editFields.furigana} onChange={(e) => setEditFields({...editFields, furigana: e.target.value})} style={inputStyle} />
+                      </>
+                    )}
+                    {getFieldConfig('address').show && (
+                      <>
+                        <label style={labelStyle}>🏠 {getFieldConfig('address').label}</label>
+                        <input type="text" value={editFields.address} onChange={(e) => setEditFields({...editFields, address: e.target.value})} style={inputStyle} placeholder="住所を入力してください" />
+                      </>
+                    )}
+                  </div>
+
+                  <label style={labelStyle}>顧客メモ（または詳細）</label>
+                  <textarea value={editFields.memo} onChange={(e) => setEditFields({...editFields, memo: e.target.value})} style={{ ...inputStyle, height: '120px' }} placeholder="好み、注意事項、予定の詳細など" />
+                  
                   <button onClick={handleUpdateCustomer} style={{ width: '100%', padding: '12px', background: themeColor, color: '#fff', border: 'none', borderRadius: '10px', fontWeight: 'bold', cursor: 'pointer', marginTop: '10px' }}>情報を保存</button>
                   <button onClick={() => deleteRes(selectedRes.id)} style={{ width: '100%', padding: '12px', background: '#fee2e2', color: '#ef4444', border: 'none', borderRadius: '10px', fontWeight: 'bold', cursor: 'pointer', marginTop: '10px' }}>予約を消去 ＆ 名簿掃除</button>
                 </div>
               </div>
+
               <div>
                 <h4 style={{ margin: '0 0 10px 0', fontSize: '0.9rem', color: '#64748b' }}>🕒 来店履歴</h4>
-                <div style={{ height: '320px', overflowY: 'auto', border: '1px solid #f1f5f9', borderRadius: '12px' }}>
+                <div style={{ height: isPC ? '400px' : '200px', overflowY: 'auto', border: '1px solid #f1f5f9', borderRadius: '12px' }}>
                   {customerHistory.map(h => (
                     <div key={h.id} style={{ padding: '12px', borderBottom: '1px solid #f1f5f9', fontSize: '0.85rem' }}>
                       <div style={{ fontWeight: 'bold' }}>{new Date(h.start_time).toLocaleDateString('ja-JP')}</div>
                       <div style={{ color: themeColor, marginTop: '2px' }}>{h.menu_name || 'メニュー情報なし'}</div>
                     </div>
                   ))}
-                  {customerHistory.length === 0 && <div style={{ padding: '20px', textAlign: 'center', color: '#94a3b8', fontSize: '0.8rem' }}>履歴なし</div>}
+                  {customerHistory.length === 0 && <div style={{ padding: '20px', textAlign: 'center', color: '#94a3b8' }}>履歴なし</div>}
                 </div>
               </div>
             </div>
           </div>
         </div>
       )}
-      {/* 👥 3. 予約者選択リストModal (AdminReservationsから完全移植) */}
+      
+                  {/* 👥 3. 予約者選択リストModal (AdminReservationsから完全移植) */}
       {showSlotListModal && (
         <div onClick={() => setShowSlotListModal(false)} style={overlayStyle}>
           <div onClick={(e) => e.stopPropagation()} style={{ ...modalContentStyle, maxWidth: '450px', textAlign: 'center', background: '#f8fafc', padding: '25px' }}>
