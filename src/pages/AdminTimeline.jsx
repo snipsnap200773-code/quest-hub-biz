@@ -19,7 +19,28 @@ const getCustomerColor = (name) => {
     border: `hsl(${h}, 60%, 80%)`,
     line: `hsl(${h}, 60%, 60%)`,
     text: `hsl(${h}, 70%, 25%)`
+// --- [30行目付近] ---
   };
+};
+
+// 🆕 追加：定休日かどうかを判定するヘルパー関数（エラー解決用）
+const checkIsRegularHoliday = (shop, date) => {
+  if (!shop?.business_hours?.regular_holidays) return false;
+  const holidays = shop.business_hours.regular_holidays;
+  const dayNames = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+  const dayName = dayNames[date.getDay()];
+  const dom = date.getDate();
+  const nthWeek = Math.ceil(dom / 7);
+  const tempDate = new Date(date);
+  const currentMonth = tempDate.getMonth();
+  const checkLast = new Date(date); checkLast.setDate(dom + 7);
+  const isLastWeek = checkLast.getMonth() !== currentMonth;
+  const checkSecondLast = new Date(date); checkSecondLast.setDate(dom + 14);
+  const isSecondToLastWeek = (checkSecondLast.getMonth() !== currentMonth) && !isLastWeek;
+  if (holidays[`${nthWeek}-${dayName}`]) return true;
+  if (isLastWeek && holidays[`L1-${dayName}`]) return true;
+  if (isSecondToLastWeek && holidays[`L2-${dayName}`]) return true;
+  return false;
 };
 
 function AdminTimeline() {
@@ -44,6 +65,11 @@ function AdminTimeline() {
   // 🆕 重複予約リスト用
   const [showSlotListModal, setShowSlotListModal] = useState(false);
   const [selectedSlotReservations, setSelectedSlotReservations] = useState([]);
+
+  // ✅ 🆕 追加：プライベート予定用のState
+  const [privateTasks, setPrivateTasks] = useState([]);
+  const [showPrivateModal, setShowPrivateModal] = useState(false);
+  const [privateTaskFields, setPrivateTaskFields] = useState({ title: '', note: '' });
 
   // 👤 顧客詳細用（ここがコメントアウトされていました）
 const [selectedCustomer, setSelectedCustomer] = useState(null); 
@@ -80,16 +106,25 @@ const [selectedCustomer, setSelectedCustomer] = useState(null);
     const { data: staffsData } = await supabase.from('staffs').select('*').eq('shop_id', shopId).order('created_at', { ascending: true });
     setStaffs(staffsData || []);
 
-    // 3. 予約データ取得（担当者名結合）
-const { data: resData } = await supabase
+// 3. 予約データ取得（担当者名結合）
+    const { data: resData } = await supabase
       .from('reservations')
       .select('*, staffs(name), customers(*)')
+      .eq('shop_id', shopId)
+      .gte('start_time', `${selectedDate}T00:00:00`)
+      .lte('start_time', `${selectedDate}T23:59:59`);
+
+    // ✅ 🆕 追加：4. プライベート予定の取得
+    const { data: privData } = await supabase
+      .from('private_tasks')
+      .select('*')
       .eq('shop_id', shopId)
       .gte('start_time', `${selectedDate}T00:00:00`)
       .lte('start_time', `${selectedDate}T23:59:59`);
 
-    setReservations(resData || []);
-    setLoading(false);
+    setReservations(resData || []);
+    setPrivateTasks(privData || []); // ✅ セット
+    setLoading(false);
   };
 
 // 🆕 1. スカウター発動：予約をタップした瞬間に重複を検知
@@ -97,17 +132,20 @@ const openDetail = async (res) => {
   setSelectedRes(res);
   setTargetStaffId(res.staff_id);
 
+  // ✅ 🆕 修正：最初にあらかじめ cust を定義しておく
   let cust = null;
 
-  // 🆕 修正点：まず、予約データに紐付いている顧客IDがあるか確認
+  if (res.res_type === 'private_task') {
+    finalizeOpenDetail(res, null);
+    return;
+  }
+
   if (res.customer_id) {
-    const { data: matched } = await supabase
-      .from('customers')
-      .select('*')
-      .eq('id', res.customer_id)
-      .maybeSingle();
+    const { data: matched } = await supabase.from('customers').select('*').eq('id', res.customer_id).maybeSingle();
     cust = matched;
   }
+  
+  // 以降、電話番号等での検索ロジックへ続く...
 
   // もしIDでヒットしなかった場合のみ、既存のスカウター（電話・メール検索）を回す
   if (!cust) {
@@ -163,27 +201,16 @@ const openDetail = async (res) => {
 
   // 🆕 3. 表示確定：モーダルの中身をセット
   const finalizeOpenDetail = async (res, cust) => {
-    if (cust) {
-      setSelectedCustomer(cust);
-      setEditFields({ 
-        name: cust.name,
-        admin_name: cust.admin_name || '',
-        phone: cust.phone || res.customer_phone || '', 
-        email: cust.email || res.customer_email || '', 
-        memo: cust.memo || '',
-        line_user_id: cust.line_user_id || res.line_user_id || null
-      });
-    } else {
-      setSelectedCustomer(null);
-      setEditFields({ 
-        name: res.customer_name, 
-        admin_name: '',
-        phone: res.customer_phone || '', 
-        email: res.customer_email || '', 
-        memo: '',
-        line_user_id: res.line_user_id || null
-      });
-    }
+  if (res.res_type === 'private_task') {
+    setSelectedCustomer(null);
+    setEditFields({ 
+      name: res.title, admin_name: '', phone: '', email: '', 
+      memo: res.note || '', line_user_id: null 
+    });
+    setCustomerHistory([]);
+    setShowDetailModal(true);
+    return;
+  }
 
     // 来店履歴の取得
     const { data: history } = await supabase.from('reservations').select('*').eq('shop_id', shopId).eq('customer_name', res.customer_name).neq('id', res.id).order('start_time', { ascending: false }).limit(5);
@@ -194,11 +221,13 @@ const openDetail = async (res) => {
   // --- 顧客情報の更新 ---
 const handleUpdateCustomer = async () => {
   try {
-    // 🔍 ステップ1：名前の正規化
-    const normalizedName = editFields.name.replace(/　/g, ' ').trim();
-    if (!normalizedName) {
-      alert("お名前を入力してください。");
-      return;
+    // ✅ プライベート予定の更新処理を分岐
+    if (selectedRes?.res_type === 'private_task') {
+      await supabase.from('private_tasks').update({
+        title: editFields.name,
+        note: editFields.memo
+      }).eq('id', selectedRes.id);
+      setShowDetailModal(false); fetchData(); return;
     }
 
     let targetCustomerId = selectedCustomer?.id;
@@ -241,6 +270,7 @@ const handleUpdateCustomer = async () => {
 
     if (resError) throw resError;
 
+// --- [196行目付近] ---
     alert('情報を名簿に保存し、予約と紐付けました！✨');
     setShowDetailModal(false);
     fetchData();
@@ -248,14 +278,55 @@ const handleUpdateCustomer = async () => {
     alert('更新に失敗しました: ' + err.message);
   }
 };
+
+// ✅ 🆕 追加：プライベート予定(private_tasksテーブル)をスタッフ毎に保存する関数
+const handleSavePrivateTask = async () => {
+  if (!privateTaskFields.title) {
+    alert("予定の内容を入力してください。");
+    return;
+  }
+
+  try {
+    const start = new Date(`${selectedDate}T${targetTime}:00`);
+    const intervalMin = shop?.slot_interval_min || 15;
+    const end = new Date(start.getTime() + intervalMin * 60000);
+
+    const { error } = await supabase.from('private_tasks').insert([{
+      shop_id: shopId,
+      staff_id: targetStaffId, // 💡 タイムラインで選択した「スタッフID」を正確に紐付け
+      title: privateTaskFields.title,
+      note: privateTaskFields.note,
+      start_time: start.toISOString(),
+      end_time: end.toISOString()
+    }]);
+
+    if (error) throw error;
+
+    // 保存が成功したらモーダルを閉じて入力をリセット
+    setShowPrivateModal(false);
+    setPrivateTaskFields({ title: '', note: '' });
+    fetchData(); // 画面を再読み込み
+  } catch (err) {
+    console.error("保存エラー:", err.message);
+    alert("プライベート予定の保存に失敗しました。");
+  }
+};
+
   // --- 予約の削除 ---
   const deleteRes = async (id) => {
-    if (window.confirm('この予約データを消去して予約を「可能」に戻しますか？')) {
-      const { error } = await supabase.from('reservations').delete().eq('id', id);
-      if (error) alert('削除失敗');
-      else { setShowDetailModal(false); fetchData(); }
-    }
-  };
+
+
+  const isPrivate = selectedRes?.res_type === 'private_task';
+  const msg = isPrivate ? 'このプライベート予定を削除しますか？' : 'この予約データを消去して予約を「可能」に戻しますか？';
+  
+  if (window.confirm(msg)) {
+    // ✅ テーブルの使い分け
+    const table = isPrivate ? 'private_tasks' : 'reservations';
+    const { error } = await supabase.from(table).delete().eq('id', id);
+    if (error) alert('削除失敗');
+    else { setShowDetailModal(false); fetchData(); }
+  }
+};
 
   // --- 臨時休業（ブロック）の設定 ---
   const handleBlockTime = async () => {
@@ -324,34 +395,76 @@ const handleUpdateCustomer = async () => {
     if (Math.abs(walk) > 5) setHasMoved(true);
     scrollRef.current.scrollLeft = scrollLeft - walk;
   };
-const handleCellClick = (slotMatches, time, staffId) => { // ✅ 引数を変更
+const handleCellClick = (slotMatches, time, staffId) => {
   if (hasMoved) return;
   setTargetTime(time);
   const actualStaffId = staffId === 'free' ? null : staffId;
   setTargetStaffId(actualStaffId); 
 
-  // 🆕 修正：予約が2つ以上ある場合はリストを表示、1つなら詳細、0ならメニュー
-  if (slotMatches.length > 1) {
-    setSelectedSlotReservations(slotMatches);
-    setShowSlotListModal(true);
-  } else if (slotMatches.length === 1) {
-    openDetail(slotMatches[0]);
+  // 1. 「予約」または「既にあるプライベート予定」を探す
+  const activeTask = slotMatches.find(r => r.res_type === 'normal' || r.res_type === 'private_task');
+
+  if (activeTask) {
+    if (slotMatches.filter(i => i.res_type === 'normal' || i.res_type === 'private_task').length > 1) {
+      setSelectedSlotReservations(slotMatches); setShowSlotListModal(true);
+    } else {
+      openDetail(activeTask);
+    }
+    return;
+  }
+
+  // 2. 空き枠、または「定休日/ブロック」枠の場合
+  const dayName = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'][new Date(selectedDate).getDay()];
+  const hours = shop?.business_hours?.[dayName];
+  const isStandardTime = hours && !hours.is_closed && time >= hours.open && time < hours.close;
+  
+  // ✅ 🆕 修正：定休日とブロックをここで判定
+  const isHoliday = checkIsRegularHoliday(shop, new Date(selectedDate));
+  const isBlocked = slotMatches.some(r => r.res_type === 'blocked');
+
+  if (isStandardTime && !isHoliday && !isBlocked) {
+    setShowMenuModal(true); // 営業時間は通常予約メニュー
   } else {
-    setShowMenuModal(true);
+    setPrivateTaskFields({ title: '', note: '' });
+    setShowPrivateModal(true); // 営業時間外・定休日・ブロック枠はプライベート予定
   }
 };
+const timeSlots = useMemo(() => {
+    if (!shop?.business_hours) return [];
+    
+    let minTotalMinutes = 24 * 60;
+    let maxTotalMinutes = 0;
+    let hasOpenDay = false;
 
-  const timeSlots = useMemo(() => {
-    const slots = [];
-    const intervalMin = shop?.slot_interval_min || 15;
-    for (let h = 8; h <= 22; h++) {
-      for (let m = 0; m < 60; m += intervalMin) {
-        slots.push(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`);
+    // 全曜日の最小・最大時間を探す
+    Object.values(shop.business_hours).forEach(h => {
+      if (typeof h === 'object' && !h.is_closed && h.open && h.close) {
+        hasOpenDay = true;
+        const [openH, openM] = h.open.split(':').map(Number);
+        const [closeH, closeM] = h.close.split(':').map(Number);
+        if (openH * 60 + openM < minTotalMinutes) minTotalMinutes = openH * 60 + openM;
+        if (closeH * 60 + closeM > maxTotalMinutes) maxTotalMinutes = closeH * 60 + closeM;
       }
+    });
+
+    if (!hasOpenDay) { minTotalMinutes = 9 * 60; maxTotalMinutes = 18 * 60; }
+
+    const interval = shop.slot_interval_min || 15;
+    const extraBefore = shop.extra_slots_before || 0; // 💡 これが表示拡張
+    const extraAfter = shop.extra_slots_after || 0;   // 💡 これが表示拡張
+
+    // 拡張分を含めた開始・終了時間を計算
+    const finalStart = minTotalMinutes - (extraBefore * interval);
+    const finalEnd = maxTotalMinutes + (extraAfter * interval);
+
+    const slots = [];
+    for (let m = finalStart; m <= finalEnd; m += interval) {
+      const h = Math.floor(m / 60); const mm = m % 60;
+      slots.push(`${String(h).padStart(2, '0')}:${String(mm).padStart(2, '0')}`);
     }
     return slots;
   }, [shop]);
-
+  
   const themeColor = shop?.theme_color || '#4b2c85';
 
   if (loading) return <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>読み込み中...</div>;
@@ -450,9 +563,16 @@ const handleCellClick = (slotMatches, time, staffId) => { // ✅ 引数を変更
         const staffIdVal = staff.id === 'free' ? null : staff.id;
         
         // 1. この枠に重なっている全予約を取得
-        const matches = reservations.filter(r => (r.staff_id === staffIdVal) && currentSlotStart >= new Date(r.start_time).getTime() && currentSlotStart < new Date(r.end_time).getTime());
-        const hasRes = matches.length > 0;
+        // 1. お客様の予約・ブロック
+        const resMatches = reservations.filter(r => (r.staff_id === staffIdVal) && currentSlotStart >= new Date(r.start_time).getTime() && currentSlotStart < new Date(r.end_time).getTime());
         
+        // 2. 🆕 プライベート予定
+        const privMatches = privateTasks.filter(p => (p.staff_id === staffIdVal) && currentSlotStart >= new Date(p.start_time).getTime() && currentSlotStart < new Date(p.end_time).getTime())
+          .map(p => ({ ...p, res_type: 'private_task', customer_name: p.title }));
+
+        const matches = [...resMatches, ...privMatches];
+        const hasRes = matches.length > 0;
+
         // 🆕 2. この枠で「ちょうど開始」する予約を特定
         const startingHere = matches.filter(r => 
           new Date(r.start_time).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', hour12: false }) === time
@@ -697,7 +817,62 @@ if (startingHere.length === 1) {
                 </div>
               ))}
             </div>
+// --- [580行目付近] ---
             <button onClick={() => setShowSlotListModal(false)} style={{ marginTop: '25px', padding: '12px', border: 'none', background: 'none', color: '#94a3b8', fontWeight: 'bold', cursor: 'pointer' }}>キャンセル</button>
+          </div>
+        </div>
+      )}
+
+      {/* ✅ 🆕 追加：プライベート予定入力用モーダル */}
+      {showPrivateModal && (
+        <div style={overlayStyle} onClick={() => setShowPrivateModal(false)}>
+          <div 
+            onClick={(e) => e.stopPropagation()} 
+            style={{ ...modalContentStyle, maxWidth: '400px', textAlign: 'center', position: 'relative', padding: '35px' }}
+          >
+            <div style={{ fontSize: '2.5rem', marginBottom: '10px' }}>🕒</div>
+            <h3 style={{ margin: '0 0 5px 0', color: themeColor, fontWeight: '900' }}>プライベート予定</h3>
+            <p style={{ fontSize: '0.85rem', color: '#64748b', marginBottom: '5px' }}>
+              {selectedDate.replace(/-/g, '/')} {targetTime}
+            </p>
+            {/* 💡 どのスタッフの枠に入れているかを表示 */}
+            <p style={{ fontSize: '0.75rem', color: themeColor, fontWeight: 'bold', marginBottom: '25px' }}>
+              👤 担当：{staffs.find(s => s.id === targetStaffId)?.name || '担当なし'}
+            </p>
+            
+            <div style={{ textAlign: 'left', marginBottom: '20px' }}>
+              <label style={labelStyle}>予定の内容（必須）</label>
+              <input 
+                type="text" 
+                placeholder="例：休憩、買い出し、ミーティングなど" 
+                value={privateTaskFields.title}
+                onChange={(e) => setPrivateTaskFields({ ...privateTaskFields, title: e.target.value })}
+                style={inputStyle}
+              />
+              
+              <label style={labelStyle}>メモ (任意)</label>
+              <textarea 
+                placeholder="詳細があれば入力してください"
+                value={privateTaskFields.note}
+                onChange={(e) => setPrivateTaskFields({ ...privateTaskFields, note: e.target.value })}
+                style={{ ...inputStyle, height: '100px', lineHeight: '1.5' }}
+              />
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <button 
+                onClick={handleSavePrivateTask}
+                style={{ width: '100%', padding: '18px', background: '#1e293b', color: '#fff', border: 'none', borderRadius: '18px', fontWeight: 'bold', fontSize: '1rem', cursor: 'pointer', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
+              >
+                予定を保存する
+              </button>
+              <button 
+                onClick={() => setShowPrivateModal(false)} 
+                style={{ padding: '12px', border: 'none', background: 'none', color: '#94a3b8', cursor: 'pointer', fontWeight: 'bold' }}
+              >
+                キャンセル
+              </button>
+            </div>
           </div>
         </div>
       )}
