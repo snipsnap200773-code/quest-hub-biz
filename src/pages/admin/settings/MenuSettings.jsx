@@ -122,31 +122,47 @@ const fetchMenuDetails = async () => {
     if (prodCatRes.data) setProductCategories(prodCatRes.data);
     if (prodRes.data) setProducts(prodRes.data);
   };
-    const showMsg = (txt) => { setMessage(txt); setTimeout(() => setMessage(''), 3000); };
+const showMsg = (txt) => { setMessage(txt); setTimeout(() => setMessage(''), 3000); };
 
-  // --- 3. アクション系ロジック (完全維持) ---
+  /* ==========================================
+      🆕 修正：全マスタ対応・データ欠損なしの並び替え関数
+     ========================================== */
   const moveItem = async (type, list, id, direction) => {
     const idx = list.findIndex(item => item.id === id);
     const targetIdx = direction === 'up' ? idx - 1 : idx + 1;
     if (targetIdx < 0 || targetIdx >= list.length) return;
-    const newList = [...list]; const [moved] = newList.splice(idx, 1); newList.splice(targetIdx, 0, moved);
-    const table = type === 'category' ? 'service_categories' : 'services';
-// --- moveItem 関数内の updates 定義部分 ---
-const updates = newList.map((item, i) => ({ 
-  id: item.id, 
-  shop_id: shopId, 
-  sort_order: i, 
-  name: item.name, 
-  ...(type === 'service' ? { 
-    // 0 を「値なし」と判定させないために ?? を使用
-    slots: Number(item.slots ?? 0), 
-    category: item.category 
-  } : {}) 
-}));
-    await supabase.from(table).upsert(updates); fetchMenuDetails();
+
+    // リスト内での位置を入れ替え
+    const newList = [...list];
+    const [moved] = newList.splice(idx, 1);
+    newList.splice(targetIdx, 0, moved);
+
+    // 💡 テーブル名の判定を調整項目(adjustment)と店販(product)に広げました [cite: 2026-03-08]
+    const tableMap = {
+      category: 'service_categories',
+      service: 'services',
+      adjustment: 'admin_adjustments',
+      product: 'products'
+    };
+    const table = tableMap[type] || 'services';
+
+    // 💡 重要：...item で元の全データを保持して送ることで 400 エラーを防ぎます
+    const updates = newList.map((item, i) => ({ 
+      ...item, 
+      sort_order: i 
+    }));
+
+    const { error } = await supabase.from(table).upsert(updates);
+
+    if (!error) {
+      fetchMenuDetails(); // 成功したら再読み込みして順番を反映
+    } else {
+      console.error("並び替えエラー:", error.message);
+      alert("並び替えに失敗しました。");
+    }
   };
 
-const handleToggleDisableCat = async (catId, targetCatName) => {
+  const handleToggleDisableCat = async (catId, targetCatName) => {
     const targetCat = categories.find(c => c.id === catId);
     if (!targetCat) return; // 念のためのガード
     // (targetCat.disable_categories || '') とすることで null 回避します [cite: 2026-03-01]
@@ -644,15 +660,30 @@ showMsg(editingOptionId ? '枝メニューを更新しました' : '枝メニュ
           <h2 style={{ fontSize: '1.5rem', color: '#1e293b', margin: 0, fontWeight: '900' }}>店販商品マスター管理</h2>
         </div>
 
-        {/* 1. 商品カテゴリ作成 */}
+{/* 1. 商品カテゴリ作成 */}
         <section style={{ ...cardStyle, background: '#f0fdf4', border: '2px solid #bbf7d0' }}>
           <h3 style={{ marginTop: 0, fontSize: '1rem', color: '#008000', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '15px' }}><Layers size={18} /> 商品カテゴリの作成</h3>
-          <form onSubmit={handleProdCatSubmit} style={{ display: 'flex', gap: '10px' }}>
+          <form onSubmit={handleProdCatSubmit} style={{ display: 'flex', gap: '10px', marginBottom: '15px' }}>
             <input placeholder="例：シャンプー, スタイリング剤" value={newProdCatName} onChange={(e) => setNewProdCatName(e.target.value)} style={inputStyle} required />
             <button type="submit" style={{ padding: '0 25px', background: '#008000', color: 'white', border: 'none', borderRadius: '12px', fontWeight: 'bold', cursor: 'pointer' }}>
               {editingProdCatId ? '更新' : '＋作成'}
             </button>
           </form>
+
+          {/* 🆕 追加：商品カテゴリの一覧と並び替えボタン [cite: 2026-03-08] */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            {productCategories.map((c, idx) => (
+              <div key={c.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#fff', padding: '10px 15px', borderRadius: '10px', border: '1px solid #e2e8f0' }}>
+                <span style={{ fontSize: '0.9rem', fontWeight: 'bold', color: '#1e293b' }}>{c.name}</span>
+                <div style={{ display: 'flex', gap: '6px' }}>
+                  <button onClick={() => moveItem('category', productCategories, c.id, 'up')} disabled={idx === 0} style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '4px', cursor: idx === 0 ? 'not-allowed' : 'pointer', opacity: idx === 0 ? 0.3 : 1 }}><ArrowUp size={16} /></button>
+                  <button onClick={() => moveItem('category', productCategories, c.id, 'down')} disabled={idx === productCategories.length - 1} style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '4px', cursor: idx === productCategories.length - 1 ? 'not-allowed' : 'pointer', opacity: idx === productCategories.length - 1 ? 0.3 : 1 }}><ArrowDown size={16} /></button>
+                  <button onClick={() => { setEditingProdCatId(c.id); setNewProdCatName(c.name); }} style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '4px', color: '#3b82f6', cursor: 'pointer' }}><Edit2 size={16} /></button>
+                  <button onClick={async () => { if(window.confirm('カテゴリを削除しますか？')) { await supabase.from('service_categories').delete().eq('id', c.id); fetchMenuDetails(); } }} style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '4px', color: '#ef4444', cursor: 'pointer' }}><Trash2 size={16} /></button>
+                </div>
+              </div>
+            ))}
+          </div>
         </section>
 
         {/* 2. 商品登録フォーム */}
@@ -676,17 +707,21 @@ showMsg(editingOptionId ? '枝メニューを更新しました' : '枝メニュ
           </form>
         </section>
 
-        {/* 3. 商品一覧 */}
+{/* 3. 商品一覧 */}
         {productCategories.map(cat => (
           <div key={cat.id} style={{ marginBottom: '30px' }}>
             <h4 style={{ color: '#008000', fontSize: '0.9rem', marginBottom: '15px', borderLeft: '5px solid #008000', paddingLeft: '12px', fontWeight: 'bold' }}>{cat.name}</h4>
-            {products.filter(p => p.category === cat.name).map((p) => (
+            {products.filter(p => p.category === cat.name).map((p, idx, filteredList) => (
               <div key={p.id} style={{ ...cardStyle, padding: '18px 25px', marginBottom: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', border: '1px solid #bbf7d0' }}>
                 <div>
                   <div style={{ fontWeight: 'bold', color: '#1e293b' }}>{p.name}</div>
                   <div style={{ fontSize: '0.95rem', color: '#008000', fontWeight: 'bold', marginTop: '4px' }}>¥{(p.price || 0).toLocaleString()}</div>
                 </div>
                 <div style={{ display: 'flex', gap: '8px' }}>
+                  {/* 🆕 追加：商品そのものの並び替えボタン [cite: 2026-03-08] */}
+                  <button onClick={() => moveItem('product', filteredList, p.id, 'up')} disabled={idx === 0} style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '6px', opacity: idx === 0 ? 0.3 : 1 }}><ArrowUp size={20} /></button>
+                  <button onClick={() => moveItem('product', filteredList, p.id, 'down')} disabled={idx === filteredList.length - 1} style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '6px', opacity: idx === filteredList.length - 1 ? 0.3 : 1 }}><ArrowDown size={20} /></button>
+                  
                   <button onClick={() => { setEditingProdId(p.id); setNewProdName(p.name); setNewProdPrice(p.price); setSelectedProdCat(p.category); }} style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '6px', color: '#3b82f6' }}><Edit2 size={20} /></button>
                   <button onClick={async () => { if(window.confirm('削除しますか？')) { await supabase.from('products').delete().eq('id', p.id); fetchMenuDetails(); } }} style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '6px', color: '#ef4444' }}><Trash2 size={20} /></button>
                 </div>
@@ -694,7 +729,7 @@ showMsg(editingOptionId ? '枝メニューを更新しました' : '枝メニュ
             ))}
           </div>
         ))}
-      </div>
+        </div>
 
       <div style={{ marginTop: '60px', borderTop: '6px solid #ef4444', paddingTop: '40px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '30px' }}>
@@ -702,15 +737,30 @@ showMsg(editingOptionId ? '枝メニューを更新しました' : '枝メニュ
           <h2 style={{ fontSize: '1.5rem', color: '#1e293b', margin: 0, fontWeight: '900' }}>お会計調整マスター管理</h2>
         </div>
 
-        {/* 1. 調整カテゴリ作成 */}
+{/* 1. 調整カテゴリ作成 */}
         <section style={{ ...cardStyle, background: '#fff5f5', border: '2px solid #feb2b2' }}>
           <h3 style={{ marginTop: 0, fontSize: '1rem', color: '#ef4444', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '15px' }}><Layers size={18} /> 調整カテゴリの作成</h3>
-          <form onSubmit={handleAdjCatSubmit} style={{ display: 'flex', gap: '10px' }}>
+          <form onSubmit={handleAdjCatSubmit} style={{ display: 'flex', gap: '10px', marginBottom: '15px' }}>
             <input placeholder="例：割引, キャンペーン" value={newAdjCatName} onChange={(e) => setNewAdjCatName(e.target.value)} style={inputStyle} required />
             <button type="submit" style={{ padding: '0 25px', background: '#ef4444', color: 'white', border: 'none', borderRadius: '12px', fontWeight: 'bold', cursor: 'pointer' }}>
               {editingAdjCatId ? '更新' : '＋作成'}
             </button>
           </form>
+
+          {/* 🆕 追加：調整カテゴリの並び替え一覧 [cite: 2026-03-08] */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            {adjCategories.map((c, idx) => (
+              <div key={c.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#fff', padding: '10px 15px', borderRadius: '10px', border: '1px solid #e2e8f0' }}>
+                <span style={{ fontSize: '0.9rem', fontWeight: 'bold', color: '#1e293b' }}>{c.name}</span>
+                <div style={{ display: 'flex', gap: '6px' }}>
+                  <button onClick={() => moveItem('category', adjCategories, c.id, 'up')} disabled={idx === 0} style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '4px', opacity: idx === 0 ? 0.3 : 1 }}><ArrowUp size={16} /></button>
+                  <button onClick={() => moveItem('category', adjCategories, c.id, 'down')} disabled={idx === adjCategories.length - 1} style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '4px', opacity: idx === adjCategories.length - 1 ? 0.3 : 1 }}><ArrowDown size={16} /></button>
+                  <button onClick={() => { setEditingAdjCatId(c.id); setNewAdjCatName(c.name); }} style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '4px', color: '#3b82f6' }}><Edit2 size={16} /></button>
+                  <button onClick={async () => { if(window.confirm('カテゴリを削除しますか？')) { await supabase.from('service_categories').delete().eq('id', c.id); fetchMenuDetails(); } }} style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '4px', color: '#ef4444' }}><Trash2 size={16} /></button>
+                </div>
+              </div>
+            ))}
+          </div>
         </section>
 
         {/* 2. 調整ボタン登録 */}
