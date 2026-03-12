@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { useParams, useLocation, useNavigate } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
 import { ChevronLeft, ChevronRight, Clock, User, Calendar as CalendarIcon } from 'lucide-react';
@@ -7,6 +7,9 @@ function TimeSelectionCalendar() {
   const { shopId } = useParams();
   const location = useLocation();
   const navigate = useNavigate();
+
+  // ✅ 🆕 修正1：スクロール先の目印を作成
+  const timeSlotsRef = useRef(null);
 
   const queryParams = new URLSearchParams(location.search);
   const staffIdFromUrl = queryParams.get('staff');
@@ -125,6 +128,19 @@ function TimeSelectionCalendar() {
     return false;
   };
 
+  // ✅ 🆕 修正：長期休暇（夏休み等）の期間中か判定する関数を追加
+  const checkIsSpecialHoliday = (date) => {
+    // 💡 新設した special_holidays カラムを見に行きます
+    if (!shop?.special_holidays || !Array.isArray(shop.special_holidays)) return false;
+    
+    const targetDateStr = date.toLocaleDateString('sv-SE'); // YYYY-MM-DD形式
+    
+    return shop.special_holidays.some(h => {
+      // 💡 選択した日が「開始日」と「終了日」の間であれば true を返す
+      return targetDateStr >= h.start && targetDateStr <= h.end;
+    });
+  };
+
   const isStaffOnHoliday = (date, staff) => {
     if (!staff?.weekly_holidays) return false;
     return staff.weekly_holidays.includes(date.getDay());
@@ -155,7 +171,11 @@ function TimeSelectionCalendar() {
 
   const checkAvailability = (date, timeStr) => {
     if (!shop?.business_hours) return { status: 'none', remaining: 0 };
-    if (checkIsRegularHoliday(date)) return { status: 'closed', label: '休', remaining: 0 };
+
+    // 💡 🆕 修正：定休日 または 長期休暇 なら「休」にする
+    if (checkIsRegularHoliday(date) || checkIsSpecialHoliday(date)) {
+      return { status: 'closed', label: '休', remaining: 0 };
+    }
 
     const dayOfWeek = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'][date.getDay()];
     const hours = shop.business_hours[dayOfWeek];
@@ -254,6 +274,34 @@ function TimeSelectionCalendar() {
     return { status: 'available', label: '◎', remaining: minRemaining };
   };
 
+// ✅ 🆕 修正：カレンダーの一部を残してゆっくりスクロールする
+  const handleDateClick = (date) => {
+    const isHoliday = checkIsRegularHoliday(date);
+    const isPast = date < new Date(new Date().setHours(0,0,0,0));
+    if (isHoliday || isPast) return;
+
+    setSelectedDate(date);
+    
+    // 💡 日付を変えてから表示が切り替わるのを少し待つ
+    setTimeout(() => {
+      const element = timeSlotsRef.current;
+      if (element) {
+        // 🆕 止まる位置の調整（180pxほど上に余白を作ることでカレンダーを見せる）
+        const offset = 180; 
+        const bodyRect = document.body.getBoundingClientRect().top;
+        const elementRect = element.getBoundingClientRect().top;
+        const elementPosition = elementRect - bodyRect;
+        const offsetPosition = elementPosition - offset;
+
+        // 指定した位置へスムーズにスクロール
+        window.scrollTo({
+          top: offsetPosition,
+          behavior: 'smooth' // 💡 これでゆっくり動きます
+        });
+      }
+    }, 100);
+  };
+
   const calendarDays = useMemo(() => {
     const year = viewDate.getFullYear();
     const month = viewDate.getMonth();
@@ -314,10 +362,11 @@ function TimeSelectionCalendar() {
               const isHoliday = checkIsRegularHoliday(date);
               const isPast = date < new Date(new Date().setHours(0,0,0,0));
               return (
-                <div 
+<div 
                   key={date.toString()} 
-                  onClick={() => !isHoliday && !isPast && setSelectedDate(date)}
-                  style={{ 
+                  onClick={() => handleDateClick(date)} // 🆕 以前の setSelectedDate を handleDateClick に変更
+                  style={{
+                    
                     padding: '10px 0', borderRadius: '12px', cursor: isHoliday || isPast ? 'default' : 'pointer',
                     background: isSelected ? themeColor : 'transparent',
                     color: isSelected ? '#fff' : (isHoliday || isPast ? '#cbd5e1' : '#1e293b'),
@@ -335,7 +384,8 @@ function TimeSelectionCalendar() {
       </div>
       
       <div style={{ padding: '0 15px 20px' }}>
-        <h4 style={{ fontSize: '0.9rem', color: '#64748b', marginBottom: '15px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+        {/* ✅ 🆕 ここに ref={timeSlotsRef} を追加して目印にします */}
+        <h4 ref={timeSlotsRef} style={{ fontSize: '0.9rem', color: '#64748b', marginBottom: '15px', display: 'flex', alignItems: 'center', gap: '8px' }}>
           <CalendarIcon size={16} /> {selectedDate.getMonth()+1}月{selectedDate.getDate()}日の空き時間
         </h4>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>

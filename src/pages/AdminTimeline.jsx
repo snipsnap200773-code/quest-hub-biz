@@ -26,7 +26,7 @@ const getCustomerColor = (name) => {
 // 🆕 追加：定休日かどうかを判定するヘルパー関数（エラー解決用）
 const checkIsRegularHoliday = (shop, date) => {
   if (!shop?.business_hours?.regular_holidays) return false;
-  const holidays = shop.business_hours.regular_holidays;
+  const holidays = shop.business_hours.regular_holidays || {};
   const dayNames = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
   const dayName = dayNames[date.getDay()];
   const dom = date.getDate();
@@ -37,9 +37,17 @@ const checkIsRegularHoliday = (shop, date) => {
   const isLastWeek = checkLast.getMonth() !== currentMonth;
   const checkSecondLast = new Date(date); checkSecondLast.setDate(dom + 14);
   const isSecondToLastWeek = (checkSecondLast.getMonth() !== currentMonth) && !isLastWeek;
-  if (holidays[`${nthWeek}-${dayName}`]) return true;
-  if (isLastWeek && holidays[`L1-${dayName}`]) return true;
-  if (isSecondToLastWeek && holidays[`L2-${dayName}`]) return true;
+  
+  const isRegular = !!(holidays[`${nthWeek}-${dayName}`] || (isLastWeek && holidays[`L1-${dayName}`]) || (isSecondToLastWeek && holidays[`L2-${dayName}`]));
+  if (isRegular) return true;
+
+  // 2. 長期休暇チェック（新設カラム special_holidays を参照）
+  if (shop.special_holidays && Array.isArray(shop.special_holidays)) {
+    const dStr = date.toLocaleDateString('sv-SE');
+    const isSpecial = shop.special_holidays.some(h => dStr >= h.start && dStr <= h.end);
+    if (isSpecial) return true;
+  }
+
   return false;
 };
 
@@ -263,28 +271,38 @@ const finalizeOpenDetail = async (res, cust) => {
       });
     }
 
-    const { data: history } = await supabase.from('reservations').select('*').eq('shop_id', shopId).eq('customer_name', res.customer_name).neq('id', res.id).order('start_time', { ascending: false }).limit(5);
+    const { data: history } = await supabase
+      .from('reservations')
+      .select('*')
+      .eq('shop_id', shopId)
+      .eq('res_type', 'normal')
+      .or(`customer_name.eq."${res.customer_name}"${cust?.id ? `,customer_id.eq.${cust.id}` : ''}`)
+      .order('start_time', { ascending: false });
+
     setCustomerHistory(history || []);
     setShowDetailModal(true);
-  };
+    };
 
   // --- 顧客情報の更新 ---
 const handleUpdateCustomer = async () => {
-  try {
-    // ✅ 🆕 変数を定義
-    const normalizedName = editFields.name.replace(/　/g, ' ').trim();
-    if (!normalizedName) {
-      alert("お名前を入力してください。");
-      return;
-    }
+    try {
+      const normalizedName = editFields.name.replace(/　/g, ' ').trim();
+      if (!normalizedName) {
+        alert("名前を入力してください。");
+        return;
+      }
 
-    // ✅ プライベート予定の更新処理を分岐（ここは既存の通り）
-    if (selectedRes?.res_type === 'private_task') {
+      // ✅ 🆕 追加：ブロック枠(blocked) または プライベート予定(private_task) の場合
+      if (selectedRes?.res_type === 'private_task' || selectedRes?.res_type === 'blocked') {
+      const isPrivate = selectedRes.res_type === 'private_task';
+      const targetTable = isPrivate ? 'private_tasks' : 'reservations';
+      
+      const updateData = isPrivate 
+        ? { title: normalizedName, note: editFields.memo } 
+        : { customer_name: normalizedName };
 
-      await supabase.from('private_tasks').update({
-        title: editFields.name,
-        note: editFields.memo
-      }).eq('id', selectedRes.id);
+      await supabase.from(targetTable).update(updateData).eq('id', selectedRes.id);
+      showMsg('内容を更新しました！');
       setShowDetailModal(false); fetchData(); return;
     }
 
@@ -406,7 +424,7 @@ const handleSavePrivateTask = async () => {
       start_time: start.toISOString(), 
       end_time: end.toISOString(),
       total_slots: 1, 
-      customer_email: 'admin@example.com', 
+      customer_email: null, 
       customer_phone: '---', 
       options: { type: 'admin_block' }
     };
@@ -433,7 +451,7 @@ const handleSavePrivateTask = async () => {
       start_time: start.toISOString(), 
       end_time: end.toISOString(),
       total_slots: slotsCount, 
-      customer_email: 'admin@example.com', 
+      customer_email: null, 
       customer_phone: '---',
       options: { isFullDay: true }
     };
@@ -462,32 +480,35 @@ const handleCellClick = (slotMatches, time, staffId) => {
   const actualStaffId = staffId === 'free' ? null : staffId;
   setTargetStaffId(actualStaffId); 
 
-  // 1. 「予約」または「既にあるプライベート予定」を探す
-  const activeTask = slotMatches.find(r => r.res_type === 'normal' || r.res_type === 'private_task');
+  // 💡 1. DBに記録があるもの（予約、プライベート予定、ブロック）を探す
+  // 判定条件に 'blocked' を追加します
+  const dbRecords = slotMatches.filter(r => r.id && (r.res_type === 'normal' || r.res_type === 'private_task' || r.res_type === 'blocked'));
+  const activeTask = dbRecords[0];
 
+  // 💡 2. すでに予定（ブロック含む）がある場合は詳細を開く
   if (activeTask) {
-    if (slotMatches.filter(i => i.res_type === 'normal' || i.res_type === 'private_task').length > 1) {
-      setSelectedSlotReservations(slotMatches); setShowSlotListModal(true);
+    if (dbRecords.length > 1) {
+      setSelectedSlotReservations(dbRecords); setShowSlotListModal(true);
     } else {
       openDetail(activeTask);
     }
     return;
   }
 
-  // 2. 空き枠、または「定休日/ブロック」枠の場合
+  // 💡 3. 本当に何もない空き枠、またはシステム上の定休日
   const dayName = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'][new Date(selectedDate).getDay()];
   const hours = shop?.business_hours?.[dayName];
   const isStandardTime = hours && !hours.is_closed && time >= hours.open && time < hours.close;
   
-  // ✅ 🆕 修正：定休日とブロックをここで判定
-  const isHoliday = checkIsRegularHoliday(shop, new Date(selectedDate));
-  const isBlocked = slotMatches.some(r => r.res_type === 'blocked');
+  // ✅ 🆕 修正：統合した休日判定関数を使うように変更
+  const isHoliday = isShopHoliday(shop, new Date(selectedDate));
+  const isBlocked = dbRecords.some(r => r.res_type === 'blocked');
 
   if (isStandardTime && !isHoliday && !isBlocked) {
-    setShowMenuModal(true); // 営業時間は通常予約メニュー
+    setShowMenuModal(true); 
   } else {
     setPrivateTaskFields({ title: '', note: '' });
-    setShowPrivateModal(true); // 営業時間外・定休日・ブロック枠はプライベート予定
+    setShowPrivateModal(true); // 営業時間外・定休日はプライベート予定
   }
 };
 // --- 修正後：動的に時間軸を計算するコード ---
@@ -800,83 +821,114 @@ if (startingHere.length === 1) {
               <button onClick={() => setShowDetailModal(false)} style={{ background: 'none', border: 'none', fontSize: '1.5rem', cursor: 'pointer' }}>×</button>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: isPC ? '1fr 1fr' : '1fr', gap: '25px' }}>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
-                <div style={{ background: '#f8fafc', padding: '15px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
+            {/* ============================================================
+               🆕 ここから「出し分け命令（三項演算子）」の開始： { 条件 ? (
+               ============================================================ */}
+            {(selectedRes?.res_type === 'blocked' || selectedRes?.res_type === 'private_task') ? (
+              
+              /* 🚫 パターンA：管理用（ブロック枠・プライベート予定） */
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', padding: '10px 0' }}>
+                <div style={{ background: '#f8fafc', padding: '30px', borderRadius: '25px', border: `2px solid ${themeColor}22`, textAlign: 'center' }}>
+                  <div style={{ fontSize: '2.5rem', marginBottom: '15px' }}>
+                    {selectedRes.res_type === 'private_task' ? '☕️' : '🚫'}
+                  </div>
                   
-                  {/* ✅ 🆕 追加：予約メニュー内訳（画像2枚目のオレンジの枠） */}
-                  {selectedRes?.res_type === 'normal' && (
+                  <label style={labelStyle}>予定名・ブロック理由</label>
+                  <input 
+                    type="text" 
+                    value={editFields.name} 
+                    onChange={(e) => setEditFields({...editFields, name: e.target.value})} 
+                    style={{ ...inputStyle, fontSize: '1.3rem', fontWeight: 'bold', marginBottom: '20px', textAlign: 'center', borderRadius: '15px' }} 
+                  />
+
+                  {/* プライベート予定の時だけメモ欄を出す */}
+                  {selectedRes.res_type === 'private_task' && (
+                    <div style={{ textAlign: 'left', marginBottom: '20px' }}>
+                      <label style={labelStyle}>メモ・詳細</label>
+                      <textarea 
+                        value={editFields.memo} 
+                        onChange={(e) => setEditFields({...editFields, memo: e.target.value})} 
+                        style={{ ...inputStyle, height: '80px', fontSize: '0.9rem' }}
+                      />
+                    </div>
+                  )}
+                  
+                  <button onClick={handleUpdateCustomer} style={{ width: '100%', padding: '18px', background: themeColor, color: '#fff', border: 'none', borderRadius: '15px', fontWeight: 'bold', cursor: 'pointer', marginBottom: '15px', fontSize: '1.1rem', boxShadow: `0 8px 20px ${themeColor}44` }}>
+                    情報を保存
+                  </button>
+
+                  <button onClick={() => deleteRes(selectedRes.id)} style={{ width: '100%', padding: '15px', background: '#fff', color: '#ef4444', border: '1px solid #fee2e2', borderRadius: '15px', fontWeight: 'bold', cursor: 'pointer' }}>
+                    {selectedRes.res_type === 'private_task' ? '🗑 予定を削除する' : '🔓 ブロック解除（予約可能に戻す）'}
+                  </button>
+                </div>
+              </div>
+
+            ) : (
+
+              /* 👤 パターンB：接客用（通常のお客様予約） */
+              <div style={{ display: 'grid', gridTemplateColumns: isPC ? '1fr 1fr' : '1fr', gap: '25px' }}>
+                
+                {/* 📝 左側：入力フォーム */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
+                  <div style={{ background: '#f8fafc', padding: '15px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
+                    
+                    {/* 予約メニュー内訳 */}
                     <div style={{ background: `${themeColor}15`, padding: '16px', borderRadius: '15px', marginBottom: '15px', border: `1px solid ${themeColor}` }}>
                       <label style={{ fontSize: '0.75rem', fontWeight: '900', color: themeColor, display: 'block', marginBottom: '10px' }}>📋 予約メニュー内訳</label>
-                      <div style={{ fontWeight: 'bold', color: '#1e293b' }}>{selectedRes.menu_name || 'メニュー未設定'}</div>
+                      <div style={{ fontWeight: 'bold', color: '#1e293b' }}>{selectedRes?.menu_name || 'メニュー未設定'}</div>
                     </div>
-                  )}
 
-                  {/* ✅ 🆕 追加：現在の担当者バッジ */}
-                  {selectedRes?.res_type === 'normal' && (
-                    <div style={{ background: '#fff', padding: '10px 15px', borderRadius: '10px', border: '1px solid #e2e8f0', marginBottom: '15px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <User size={16} color={themeColor} />
-                      <span style={{ fontSize: '0.85rem', fontWeight: 'bold', color: '#475569' }}>担当スタッフ: {selectedRes.staffs?.name || '担当なし'}</span>
-                    </div>
-                  )}
+                    <label style={labelStyle}>担当スタッフの変更</label>
+                    <select value={selectedRes?.staff_id || ''} onChange={(e) => setSelectedRes({...selectedRes, staff_id: e.target.value || null})} style={inputStyle}>
+                      <option value="">フリー（担当なし）</option>
+                      {staffs.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                    </select>
 
-                  {/* ✅ 🆕 追加：LINE連携バッジ */}
-                  {editFields.line_user_id && (
-                    <div style={{ background: '#f0fdf4', padding: '8px 12px', borderRadius: '8px', border: '1px solid #bbf7d0', marginBottom: '15px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <span style={{ fontSize: '1rem' }}>💬</span>
-                      <span style={{ fontSize: '0.75rem', color: '#166534', fontWeight: 'bold' }}>LINE連携済み</span>
-                    </div>
-                  )}
+                    <label style={labelStyle}>お客様名</label>
+                    <input type="text" value={editFields.name} onChange={(e) => setEditFields({...editFields, name: e.target.value})} style={inputStyle} />
+                    
+                    <label style={labelStyle}>電話番号</label>
+                    <input type="tel" value={editFields.phone} onChange={(e) => setEditFields({...editFields, phone: e.target.value})} style={inputStyle} placeholder="未登録" />
 
-                  <label style={labelStyle}>担当スタッフの変更</label>
-                  <select value={selectedRes?.staff_id || ''} onChange={(e) => setSelectedRes({...selectedRes, staff_id: e.target.value || null})} style={inputStyle}>
-                    <option value="">フリー（担当なし）</option>
-                    {staffs.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                  </select>
-
-                  <label style={labelStyle}>お客様名（または予定名）</label>
-                  <input type="text" value={editFields.name} onChange={(e) => setEditFields({...editFields, name: e.target.value})} style={inputStyle} />
-                  
-                  <label style={labelStyle}>電話番号</label>
-                  <input type="tel" value={editFields.phone} onChange={(e) => setEditFields({...editFields, phone: e.target.value})} style={inputStyle} placeholder="未登録" />
-
-                  {/* ✅ 🆕 追加：動的詳細項目（ふりがな・住所など） */}
-                  <div style={{ marginTop: '15px', borderTop: '1px dashed #e2e8f0', paddingTop: '15px' }}>
-                    {getFieldConfig('furigana').show && (
-                      <>
-                        <label style={labelStyle}>{getFieldConfig('furigana').label}</label>
-                        <input type="text" value={editFields.furigana} onChange={(e) => setEditFields({...editFields, furigana: e.target.value})} style={inputStyle} />
-                      </>
-                    )}
+                    {/* 動的詳細項目（住所など） */}
                     {getFieldConfig('address').show && (
-                      <>
+                      <div style={{ marginTop: '10px' }}>
                         <label style={labelStyle}>🏠 {getFieldConfig('address').label}</label>
-                        <input type="text" value={editFields.address} onChange={(e) => setEditFields({...editFields, address: e.target.value})} style={inputStyle} placeholder="住所を入力してください" />
-                      </>
+                        <input type="text" value={editFields.address} onChange={(e) => setEditFields({...editFields, address: e.target.value})} style={inputStyle} />
+                      </div>
                     )}
+
+                    <label style={labelStyle}>顧客メモ（共通）</label>
+                    <textarea value={editFields.memo} onChange={(e) => setEditFields({...editFields, memo: e.target.value})} style={{ ...inputStyle, height: '100px' }} placeholder="好み、注意事項など" />
+                    
+                    <button onClick={handleUpdateCustomer} style={{ width: '100%', padding: '12px', background: themeColor, color: '#fff', border: 'none', borderRadius: '10px', fontWeight: 'bold', cursor: 'pointer', marginTop: '10px' }}>情報を保存</button>
+                    <button onClick={() => deleteRes(selectedRes.id)} style={{ width: '100%', padding: '12px', background: '#fee2e2', color: '#ef4444', border: 'none', borderRadius: '10px', fontWeight: 'bold', cursor: 'pointer', marginTop: '10px' }}>予約を消去 ＆ 名簿掃除</button>
                   </div>
+                </div>
 
-                  <label style={labelStyle}>顧客メモ（または詳細）</label>
-                  <textarea value={editFields.memo} onChange={(e) => setEditFields({...editFields, memo: e.target.value})} style={{ ...inputStyle, height: '120px' }} placeholder="好み、注意事項、予定の詳細など" />
-                  
-                  <button onClick={handleUpdateCustomer} style={{ width: '100%', padding: '12px', background: themeColor, color: '#fff', border: 'none', borderRadius: '10px', fontWeight: 'bold', cursor: 'pointer', marginTop: '10px' }}>情報を保存</button>
-                  <button onClick={() => deleteRes(selectedRes.id)} style={{ width: '100%', padding: '12px', background: '#fee2e2', color: '#ef4444', border: 'none', borderRadius: '10px', fontWeight: 'bold', cursor: 'pointer', marginTop: '10px' }}>予約を消去 ＆ 名簿掃除</button>
+                {/* 🕒 右側：来店履歴 */}
+                <div>
+                  <h4 style={{ margin: '0 0 10px 0', fontSize: '0.9rem', color: '#64748b' }}>🕒 来店履歴 ＆ 予定</h4>
+                  <div style={{ height: isPC ? '420px' : '250px', overflowY: 'auto', border: '1px solid #f1f5f9', borderRadius: '15px', background: '#f8fafc', padding: '5px' }}>
+                    {customerHistory.map((h) => {
+                      const hDate = new Date(h.start_time);
+                      const isToday = hDate.toLocaleDateString('sv-SE') === new Date().toLocaleDateString('sv-SE');
+                      return (
+                        <div key={h.id} style={{ padding: '15px', borderBottom: '1px solid #eee', background: '#fff', borderRadius: isToday ? '12px' : '0', border: isToday ? `2px solid ${themeColor}` : 'none' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '5px' }}>
+                            <span style={{ fontWeight: 'bold' }}>{hDate.toLocaleDateString('ja-JP')}</span>
+                            <span style={{ color: '#e11d48', fontWeight: 'bold' }}>¥{(h.total_price || 0).toLocaleString()}</span>
+                          </div>
+                          <div style={{ color: '#475569', fontSize: '0.8rem' }}>{h.menu_name}</div>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
+            )}
+            {/* ✅ 🆕 ここが出し分けの閉じ： )} */}
 
-              <div>
-                <h4 style={{ margin: '0 0 10px 0', fontSize: '0.9rem', color: '#64748b' }}>🕒 来店履歴</h4>
-                <div style={{ height: isPC ? '400px' : '200px', overflowY: 'auto', border: '1px solid #f1f5f9', borderRadius: '12px' }}>
-                  {customerHistory.map(h => (
-                    <div key={h.id} style={{ padding: '12px', borderBottom: '1px solid #f1f5f9', fontSize: '0.85rem' }}>
-                      <div style={{ fontWeight: 'bold' }}>{new Date(h.start_time).toLocaleDateString('ja-JP')}</div>
-                      <div style={{ color: themeColor, marginTop: '2px' }}>{h.menu_name || 'メニュー情報なし'}</div>
-                    </div>
-                  ))}
-                  {customerHistory.length === 0 && <div style={{ padding: '20px', textAlign: 'center', color: '#94a3b8' }}>履歴なし</div>}
-                </div>
-              </div>
-            </div>
           </div>
         </div>
       )}

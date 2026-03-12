@@ -11,6 +11,8 @@ const MenuSettings = () => {
   const { shopId } = useParams();
   const navigate = useNavigate();
   const menuFormRef = useRef(null);
+  const adjFormRef = useRef(null);
+  const prodFormRef = useRef(null);
 
   // 🆕 画面サイズ管理を追加（ボタンをレスポンシブにするため）
   const [windowWidth, setWindowWidth] = useState(window.innerWidth);
@@ -195,16 +197,35 @@ const showMsg = (txt) => { setMessage(txt); setTimeout(() => setMessage(''), 300
     else alert('保存に失敗しました。');
   };
 
-  const handleCategorySubmit = async (e) => {
+const handleCategorySubmit = async (e) => {
     e.preventDefault();
     const payload = { 
       name: newCategoryName, url_key: newUrlKey, custom_shop_name: newCustomShopName,
       custom_description: newCustomDescription, custom_official_url: newCustomOfficialUrl
     };
-    if (editingCategoryId) await supabase.from('service_categories').update(payload).eq('id', editingCategoryId);
-    else await supabase.from('service_categories').insert([{ ...payload, shop_id: shopId, sort_order: categories.length }]);
+
+    if (editingCategoryId) {
+      // 💡 🆕 追加：古いカテゴリ名を取得しておく
+      const oldCategory = categories.find(c => c.id === editingCategoryId);
+      const oldName = oldCategory?.name;
+
+      // 1. カテゴリ自体の名前を更新
+      await supabase.from('service_categories').update(payload).eq('id', editingCategoryId);
+
+      // 2. 💡 🆕 追加：名前が変わった場合のみ、属するメニューも一括更新
+      if (oldName && oldName !== newCategoryName) {
+        await supabase
+          .from('services')
+          .update({ category: newCategoryName })
+          .eq('shop_id', shopId)
+          .eq('category', oldName);
+      }
+    } else {
+      await supabase.from('service_categories').insert([{ ...payload, shop_id: shopId, sort_order: categories.length }]);
+    }
+    
     setEditingCategoryId(null); setNewCategoryName(''); setNewUrlKey(''); setNewCustomShopName(''); 
-    fetchMenuDetails(); showMsg('カテゴリを保存しました');
+    fetchMenuDetails(); showMsg('カテゴリと所属メニューを更新しました');
   };
 
 const handleServiceSubmit = async (e) => {
@@ -268,17 +289,33 @@ showMsg(editingOptionId ? '枝メニューを更新しました' : '枝メニュ
      ========================================== */
 
   // 1. 調整カテゴリを保存する
-  const handleAdjCatSubmit = async (e) => {
+const handleAdjCatSubmit = async (e) => {
     e.preventDefault();
     const payload = { name: newAdjCatName, shop_id: shopId, is_adjustment_cat: true };
-    if (editingAdjCatId) await supabase.from('service_categories').update(payload).eq('id', editingAdjCatId);
-    else await supabase.from('service_categories').insert([{ ...payload, sort_order: adjCategories.length }]);
+
+    if (editingAdjCatId) {
+      // 💡 🆕 追加：古いカテゴリ名の特定
+      const oldCat = adjCategories.find(c => c.id === editingAdjCatId);
+      const oldName = oldCat?.name;
+
+      await supabase.from('service_categories').update(payload).eq('id', editingAdjCatId);
+
+      // 💡 🆕 追加：属する調整項目のカテゴリ名を一括更新
+      if (oldName && oldName !== newAdjCatName) {
+        await supabase
+          .from('admin_adjustments')
+          .update({ category: newAdjCatName })
+          .eq('shop_id', shopId)
+          .eq('category', oldName);
+      }
+    } else {
+      await supabase.from('service_categories').insert([{ ...payload, sort_order: adjCategories.length }]);
+    }
     
     setNewAdjCatName(''); setEditingAdjCatId(null); 
-    fetchMenuDetails(); // 画面を更新 [cite: 2026-03-08]
-    showMsg('調整カテゴリを保存しました');
+    fetchMenuDetails(); showMsg('調整カテゴリと項目を更新しました');
   };
-
+  
   // 2. 調整ボタン本体を保存する
   const handleAdjItemSubmit = async (e) => {
     e.preventDefault();
@@ -305,12 +342,25 @@ showMsg(editingOptionId ? '枝メニューを更新しました' : '枝メニュ
      ========================================== */
 
   // 1. 商品カテゴリを保存 [cite: 2026-03-08]
-  const handleProdCatSubmit = async (e) => {
+const handleProdCatSubmit = async (e) => {
     e.preventDefault();
     const payload = { name: newProdCatName, shop_id: shopId, is_product_cat: true };
-    
+
     if (editingProdCatId) {
+      // 💡 🆕 追加：古いカテゴリ名の特定
+      const oldCat = productCategories.find(c => c.id === editingProdCatId);
+      const oldName = oldCat?.name;
+
       await supabase.from('service_categories').update(payload).eq('id', editingProdCatId);
+
+      // 💡 🆕 追加：属する商品のカテゴリ名を一括更新
+      if (oldName && oldName !== newProdCatName) {
+        await supabase
+          .from('products')
+          .update({ category: newProdCatName })
+          .eq('shop_id', shopId)
+          .eq('category', oldName);
+      }
     } else {
       await supabase.from('service_categories').insert([{ ...payload, sort_order: productCategories.length }]);
     }
@@ -318,9 +368,9 @@ showMsg(editingOptionId ? '枝メニューを更新しました' : '枝メニュ
     setNewProdCatName(''); 
     setEditingProdCatId(null); 
     fetchMenuDetails();
-    showMsg('商品カテゴリを保存しました');
+    showMsg('商品カテゴリと在庫データを更新しました');
   };
-
+  
   // 2. 商品本体を保存 [cite: 2026-03-08]
   const handleProductSubmit = async (e) => {
     e.preventDefault();
@@ -452,8 +502,22 @@ showMsg(editingOptionId ? '枝メニューを更新しました' : '枝メニュ
                   <button onClick={() => moveItem('category', categories, c.id, 'up')} disabled={idx === 0} style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '4px' }}><ArrowUp size={16} /></button>
                   <button onClick={() => moveItem('category', categories, c.id, 'down')} disabled={idx === categories.length - 1} style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '4px' }}><ArrowDown size={16} /></button>
                   <button onClick={() => { setEditingCategoryId(c.id); setNewCategoryName(c.name); setNewUrlKey(c.url_key || ''); setNewCustomShopName(c.custom_shop_name || ''); }} style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '4px', color: '#3b82f6' }}><Edit2 size={16} /></button>
-                  <button onClick={async () => { if(window.confirm('カテゴリを削除しますか？')) { await supabase.from('service_categories').delete().eq('id', c.id); fetchMenuDetails(); } }} style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '4px', color: '#ef4444' }}><Trash2 size={16} /></button>
-                </div>
+<button 
+  onClick={async () => { 
+    if(window.confirm(`「${c.name}」カテゴリを削除しますか？\n※このカテゴリに属するメニューもすべて削除されます。`)) { 
+      // 1. 先にそのカテゴリに属するメニュー（services）を削除
+      await supabase.from('services').delete().eq('shop_id', shopId).eq('category', c.name);
+      // 2. その後にカテゴリ自体を削除
+      await supabase.from('service_categories').delete().eq('id', c.id); 
+      fetchMenuDetails(); 
+      showMsg('カテゴリとメニューを削除しました');
+    } 
+  }} 
+  style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '4px', color: '#ef4444', cursor: 'pointer' }}
+>
+  <Trash2 size={16} />
+</button>
+              </div>
               </div>
               <div style={{ marginTop: '12px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                 <button onClick={async () => { await supabase.from('service_categories').update({ allow_multiple_in_category: !c.allow_multiple_in_category }).eq('id', c.id); fetchMenuDetails(); }} style={{ fontSize: '0.75rem', padding: '6px 12px', background: c.allow_multiple_in_category ? themeColor : '#fff', color: c.allow_multiple_in_category ? '#fff' : '#475569', border: '1px solid #cbd5e1', borderRadius: '20px', fontWeight: 'bold', cursor: 'pointer' }}>
@@ -698,16 +762,32 @@ showMsg(editingOptionId ? '枝メニューを更新しました' : '枝メニュ
                   {/* ✅ adj ではなく c を使うように修正しました [cite: 2026-03-08] */}
                   <button onClick={() => { setEditingProdCatId(c.id); setNewProdCatName(c.name); }} style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '4px', color: '#3b82f6' }}><Edit2 size={16} /></button>
                   
-                  <button onClick={async () => { if(window.confirm('カテゴリを削除しますか？')) { await supabase.from('service_categories').delete().eq('id', c.id); fetchMenuDetails(); } }} style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '4px', color: '#ef4444' }}><Trash2 size={16} /></button>
-                </div>
+<button 
+  onClick={async () => { 
+    if(window.confirm(`「${c.name}」商品カテゴリを削除しますか？\n※登録されている商品もすべて削除されます。`)) { 
+      // 1. 商品を削除
+      await supabase.from('products').delete().eq('shop_id', shopId).eq('category', c.name);
+      // 2. カテゴリを削除
+      await supabase.from('service_categories').delete().eq('id', c.id); 
+      fetchMenuDetails(); 
+      showMsg('商品カテゴリと在庫データを削除しました');
+    } 
+  }} 
+  style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '4px', color: '#ef4444', cursor: 'pointer' }}
+>
+  <Trash2 size={16} />
+</button>
+              </div>
               </div>
             ))}
           </div>
                   </section>
 
         {/* 2. 商品登録フォーム */}
-        <section style={{ ...cardStyle, border: '2px solid #008000' }}>
-          <h3 style={{ marginTop: 0, fontSize: '1rem', color: '#008000', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '15px' }}><Plus size={20} /> 商品の新規登録</h3>
+<section ref={prodFormRef} style={{ ...cardStyle, border: '2px solid #008000' }}>
+  <h3 style={{ marginTop: 0, fontSize: '1rem', color: '#008000', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '15px' }}>
+    <Plus size={20} /> 商品の新規登録
+  </h3>
           <form onSubmit={handleProductSubmit}>
             <div style={{ marginBottom: '15px' }}>
               <label style={{ fontSize: '0.8rem', fontWeight: 'bold', color: '#64748b', display: 'block', marginBottom: '8px' }}>所属カテゴリ</label>
@@ -755,8 +835,20 @@ showMsg(editingOptionId ? '枝メニューを更新しました' : '枝メニュ
                     <ArrowDown size={20} />
                   </button>
                   
-                  <button onClick={() => { setEditingProdId(p.id); setNewProdName(p.name); setNewProdPrice(p.price); setSelectedProdCat(p.category); }} style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '6px', color: '#3b82f6' }}><Edit2 size={20} /></button>
-                  <button onClick={async () => { if(window.confirm('削除しますか？')) { await supabase.from('products').delete().eq('id', p.id); fetchMenuDetails(); } }} style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '6px', color: '#ef4444' }}><Trash2 size={20} /></button>
+<button 
+  onClick={() => { 
+    setEditingProdId(p.id); 
+    setNewProdName(p.name); 
+    setNewProdPrice(p.price); 
+    setSelectedProdCat(p.category); 
+    // 🆕 フォームの位置までスクロール
+    prodFormRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }} 
+  style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '6px', color: '#3b82f6' }}
+>
+  <Edit2 size={20} />
+</button>
+                <button onClick={async () => { if(window.confirm('削除しますか？')) { await supabase.from('products').delete().eq('id', p.id); fetchMenuDetails(); } }} style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '6px', color: '#ef4444' }}><Trash2 size={20} /></button>
                 </div>
               </div>
             ))}
@@ -789,16 +881,32 @@ showMsg(editingOptionId ? '枝メニューを更新しました' : '枝メニュ
                   <button onClick={() => moveItem('category', adjCategories, c.id, 'up')} disabled={idx === 0} style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '4px', opacity: idx === 0 ? 0.3 : 1 }}><ArrowUp size={16} /></button>
                   <button onClick={() => moveItem('category', adjCategories, c.id, 'down')} disabled={idx === adjCategories.length - 1} style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '4px', opacity: idx === adjCategories.length - 1 ? 0.3 : 1 }}><ArrowDown size={16} /></button>
                   <button onClick={() => { setEditingAdjCatId(c.id); setNewAdjCatName(c.name); }} style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '4px', color: '#3b82f6' }}><Edit2 size={16} /></button>
-                  <button onClick={async () => { if(window.confirm('カテゴリを削除しますか？')) { await supabase.from('service_categories').delete().eq('id', c.id); fetchMenuDetails(); } }} style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '4px', color: '#ef4444' }}><Trash2 size={16} /></button>
-                </div>
+<button 
+  onClick={async () => { 
+    if(window.confirm(`「${c.name}」調整カテゴリを削除しますか？\n※中の調整ボタンもすべて削除されます。`)) { 
+      // 1. 調整項目を削除
+      await supabase.from('admin_adjustments').delete().eq('shop_id', shopId).eq('category', c.name);
+      // 2. カテゴリを削除
+      await supabase.from('service_categories').delete().eq('id', c.id); 
+      fetchMenuDetails(); 
+      showMsg('調整カテゴリと項目を削除しました');
+    } 
+  }} 
+  style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '4px', color: '#ef4444', cursor: 'pointer' }}
+>
+  <Trash2 size={16} />
+</button>
+              </div>
               </div>
             ))}
           </div>
         </section>
 
         {/* 2. 調整ボタン登録 */}
-        <section style={{ ...cardStyle, border: '2px solid #ef4444' }}>
-          <h3 style={{ marginTop: 0, fontSize: '1rem', color: '#ef4444', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '15px' }}><Plus size={20} /> 調整ボタンの登録</h3>
+<section ref={adjFormRef} style={{ ...cardStyle, border: '2px solid #ef4444' }}>
+  <h3 style={{ marginTop: 0, fontSize: '1rem', color: '#ef4444', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '15px' }}>
+    <Plus size={20} /> 調整ボタンの登録
+  </h3>
           <form onSubmit={handleAdjItemSubmit}>
             <div style={{ marginBottom: '15px' }}>
               <label style={{ fontSize: '0.8rem', fontWeight: 'bold', color: '#64748b', display: 'block', marginBottom: '8px' }}>所属カテゴリ</label>
@@ -854,8 +962,20 @@ showMsg(editingOptionId ? '枝メニューを更新しました' : '枝メニュ
                     <ArrowDown size={20} />
                   </button>
                   
-                  <button onClick={() => { setEditingAdjId(adj.id); setNewAdjName(adj.name); setAdjValue(adj.price); setSelectedAdjCat(adj.category); }} style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '6px', color: '#3b82f6' }}><Edit2 size={20} /></button>
-                  <button onClick={async () => { if(window.confirm('削除しますか？')) { await supabase.from('admin_adjustments').delete().eq('id', adj.id); fetchMenuDetails(); } }} style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '6px', color: '#ef4444' }}><Trash2 size={20} /></button>
+<button 
+  onClick={() => { 
+    setEditingAdjId(adj.id); 
+    setNewAdjName(adj.name); 
+    setAdjValue(adj.price); 
+    setSelectedAdjCat(adj.category); 
+    // 🆕 フォームの位置までスクロール
+    adjFormRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }} 
+  style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '6px', color: '#3b82f6' }}
+>
+  <Edit2 size={20} />
+</button>
+                <button onClick={async () => { if(window.confirm('削除しますか？')) { await supabase.from('admin_adjustments').delete().eq('id', adj.id); fetchMenuDetails(); } }} style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '6px', color: '#ef4444' }}><Trash2 size={20} /></button>
                 </div>
               </div>
             ))}

@@ -33,8 +33,6 @@ function AdminManagement() {
   const [products, setProducts] = useState([]); 
   const [staffs, setStaffs] = useState([]); // 🆕 追加済み（再確認）
   const [staffPickerRes, setStaffPickerRes] = useState(null);
-  const [deletedAdjIds, setDeletedAdjIds] = useState([]);
-  const [deletedProductIds, setDeletedProductIds] = useState([]);
 
   // --- 予約・売上データ保持 ---
   const [allReservations, setAllReservations] = useState([]);
@@ -426,24 +424,6 @@ const completePayment = async () => {
     
     alert("現在のマスター設定でリセットしました。");
   };
-  const addAdjustment = (svcId = null) => {
-    const name = prompt("項目名を入力してください"); if (!name) return;
-    let cat = svcId === null ? (prompt("カテゴリー名を入力してください", "その他") || "その他") : null;
-    setAdminAdjustments([...adminAdjustments, { id: crypto.randomUUID(), service_id: svcId, name, price: 0, is_percent: false, is_minus: false, category: cat }]);
-  };
-
-  const handleRemoveAdjustment = (adj) => {
-    setAdminAdjustments(prev => prev.filter(a => a.id !== adj.id));
-    if (adj.id && adj.id.length >= 36) { // 正式なUUID(DB登録済み)の場合のみ削除リストへ
-      setDeletedAdjIds(prev => [...prev, adj.id]);
-    }
-  };
-
-  const addProduct = () => { 
-    const name = prompt("商品名を入力してください"); 
-    if (name) setProducts([...products, { id: crypto.randomUUID(), name, price: 0 }]); 
-  };
-
   const dailyTotalSales = useMemo(() => allReservations.filter(r => r.start_time.startsWith(selectedDate) && r.res_type === 'normal' && r.status === 'completed').reduce((sum, r) => sum + (r.total_price || 0), 0), [allReservations, selectedDate]);
 
 // ✅ 売上の人数と金額のズレを完全に解消する集計ロジック（厳格・台帳連動版）
@@ -503,57 +483,39 @@ const completePayment = async () => {
     return sorted.reduce((acc, adj) => { const cat = adj.category || 'その他'; if (!acc[cat]) acc[cat] = []; acc[cat].push(adj); return acc; }, {});
   }, [adminAdjustments]);
 
-  // ✅ 削除・整形・保存を一括で行う関数（エラー解消版）
-  const saveAllMasters = async () => {
-    setIsSaving(true);
-    try {
-      // 1. 物理削除を実行
-      if (deletedAdjIds.length > 0) {
-        await supabase.from('admin_adjustments').delete().in('id', deletedAdjIds);
-        setDeletedAdjIds([]); 
+  // ✅ 🆕 データをCSV形式でダウンロードする関数
+  const handleExportCSV = (monthData) => {
+    if (!monthData) return;
+    
+    // 1. ヘッダー行を作成
+    let csvContent = "日付,来客数,売上合計\n";
+    
+    // 2. 日ごとのデータを1行ずつ作成
+    monthData.days.forEach(d => {
+      // 売上が1円でもある日だけ出力します
+      if (d.total > 0) {
+        csvContent += `${viewYear}/${monthData.month}/${d.day},${d.count},${d.total}\n`;
       }
-      if (deletedProductIds.length > 0) {
-        await supabase.from('products').delete().in('id', deletedProductIds);
-        setDeletedProductIds([]);
-      }
+    });
+    
+    // 3. 最後に月の合計行を追加
+    csvContent += `合計,${monthData.count},${monthData.total}\n`;
 
-      // 2. 整形
-const formattedServices = services.map(svc => ({ 
-  id: svc.id, 
-  shop_id: cleanShopId, 
-  name: svc.name, 
-  price: svc.price || 0, 
-  category: svc.category, 
-  sort_order: svc.sort_order || 0, 
-  slots: svc.slots ?? 0 // 🆕 ?? 0 にすることで、0を0のまま保存します
-}));
-      const formattedOptions = serviceOptions.map(opt => ({ id: opt.id, service_id: opt.service_id, group_name: opt.group_name, option_name: opt.option_name, additional_price: opt.additional_price || 0 }));
-      const formattedAdjustments = adminAdjustments.map(adj => ({ 
-        id: adj.id, shop_id: cleanShopId, service_id: adj.service_id, name: adj.name, price: adj.price || 0, 
-        is_percent: adj.is_percent || false, is_minus: adj.is_minus || false, category: adj.service_id ? null : (adj.category || 'その他') 
-      }));
-      const formattedProducts = products.map((p, i) => ({ id: p.id, shop_id: cleanShopId, name: p.name, price: p.price || 0, sort_order: i }));
-
-      // 3. 一括保存(upsert)
-      await Promise.all([ 
-        supabase.from('services').upsert(formattedServices), 
-        supabase.from('service_options').upsert(formattedOptions), 
-        supabase.from('admin_adjustments').upsert(formattedAdjustments), 
-        supabase.from('products').upsert(formattedProducts) 
-      ]);
-
-      alert("設定をすべて保存しました。"); 
-      fetchInitialData();
-    } catch (err) { 
-      console.error(err);
-      alert("保存失敗: " + err.message); 
-    } finally { 
-      setIsSaving(false); 
-    }
+    // 4. ファイルとしてダウンロードするための「魔法の処理」
+    // \uFEFF はExcelで開いた時に文字化けしないためのおまじない（BOM）です
+    const blob = new Blob(["\uFEFF" + csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `売上台帳_${viewYear}年${monthData.month}月.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   // 🆕 ここから追加：お客様詳細（カルテ）を開く関数
-const openCustomerInfo = async (res) => {
+  const openCustomerInfo = async (res) => {
+
     // 🆕 名前がない予約データの場合は処理しないようにガード
     if (!res || !res.customer_name) {
       alert("顧客名が記録されていないため、カルテを開けません。");
@@ -632,7 +594,6 @@ return (
           <p style={{ fontSize: '0.6rem', fontWeight: 'bold' }}>MANAGEMENT</p>
         </div>
         <button style={navBtnStyle(activeMenu === 'work', '#d34817')} onClick={() => setActiveMenu('work')}>日常業務</button>
-        <button style={navBtnStyle(activeMenu === 'master_tech', '#4285f4')} onClick={() => setActiveMenu('master_tech')}>施術商品</button>
         <button style={navBtnStyle(activeMenu === 'analytics', '#008000')} onClick={() => setActiveMenu('analytics')}>売上分析</button>
 
         <div style={{ background: '#fff', borderRadius: '12px', padding: '10px', marginTop: '15px', border: '1px solid #4b2c85' }}>
@@ -951,9 +912,36 @@ return (
             {selectedMonthData && (
               <div style={modalOverlayStyle} onClick={() => setSelectedMonthData(null)}>
                 <div style={modalContentStyle} onClick={e => e.stopPropagation()}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '2px solid #008000', paddingBottom: '10px', marginBottom: '15px' }}>
-                    <h3 style={{ margin: 0 }}>{viewYear}年 {selectedMonthData.month}月 日別詳細</h3>
-                    <button onClick={() => setSelectedMonthData(null)} style={{ border: 'none', background: 'none', cursor: 'pointer' }}><X /></button>
+                  
+                  {/* 💡 ここから書き換え：タイトルとボタンを横並びにします */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '2px solid #008000', paddingBottom: '10px', marginBottom: '15px', alignItems: 'center' }}>
+                    <h3 style={{ margin: 0, fontSize: '1rem' }}>{viewYear}年 {selectedMonthData.month}月 日別詳細</h3>
+                    
+                    <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                      {/* 🆕 CSV出力ボタンを設置 */}
+                      <button 
+                        onClick={() => handleExportCSV(selectedMonthData)}
+                        style={{ 
+                          padding: '6px 12px', 
+                          background: '#008000', 
+                          color: '#fff', 
+                          border: 'none', 
+                          borderRadius: '8px', 
+                          fontSize: '0.75rem', 
+                          fontWeight: 'bold', 
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '4px',
+                          boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+                        }}
+                      >
+                        📥 CSV保存
+                      </button>
+                      
+                      {/* 閉じるボタン */}
+                      <button onClick={() => setSelectedMonthData(null)} style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#64748b' }}><X size={20}/></button>
+                    </div>
                   </div>
                   <div style={{ maxHeight: '50vh', overflowY: 'auto' }}>
                     <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -988,73 +976,6 @@ return (
             <div style={{ background: '#4285f4', padding: '15px 25px', color: '#fff', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <h2 style={{ margin: 0, fontStyle: 'italic' }}>商品マスター設定</h2>
               <button onClick={saveAllMasters} disabled={isSaving} style={{ padding: '8px 30px', background: '#008000', color: '#fff', border: '1px solid #fff', fontWeight: 'bold' }}>一括保存</button>
-            </div>
-            <div style={{ flex: 1, overflowY: 'auto', padding: '30px' }}>
-              {categories.map(cat => (
-                <div key={cat.id} style={cardStyle}>
-                  <div style={catHeaderStyle}><span style={{ fontSize: '1.1rem', fontWeight: 'bold' }}>📁 {cat.name}</span></div>
-                  {services.filter(s => s.category === cat.name).map(svc => (
-                    <div key={svc.id} style={{ ...svcRowStyle, flexDirection: 'column', alignItems: 'flex-start', borderBottom: '1px solid #eee' }}>
-                       <div style={{ display: 'flex', alignItems: 'center', gap: '15px', width: '100%', marginBottom: '10px' }}>
-                          <span style={{ fontWeight: 'bold', minWidth: '150px' }}>{svc.name}</span>
-                          <input type="number" value={svc.price || 0} onChange={(e) => setServices(services.map(s => s.id === svc.id ? {...s, price: parseInt(e.target.value)} : s))} style={priceInputStyle} />
-                          <button onClick={() => addAdjustment(svc.id)} style={optAddBtnStyle}>＋ プロ調整</button>
-                          <div style={{ flex: 1, display: 'flex', gap: '5px', flexWrap: 'wrap' }}>
-                             {adminAdjustments.filter(a => a.service_id === svc.id).map(adj => (
-                               <div key={adj.id} style={adjChipStyle}>
-                                   <span>{adj.name}</span><button onClick={() => cycleAdjType(adj.id)} style={typeBtnStyle}>{adj.is_percent ? '%' : adj.is_minus ? '-' : '+'}</button>
-                                   <input type="number" value={adj.price || 0} onChange={(e) => setAdminAdjustments(adminAdjustments.map(a => a.id === adj.id ? {...a, price: parseInt(e.target.value)} : a))} style={miniPriceInput} />
-                                   <button onClick={() => handleRemoveAdjustment(adj)} style={{border:'none', background:'none'}}>×</button>
-                               </div>
-                             ))}
-                          </div>
-                       </div>
-                       <div style={{ marginLeft: '30px', width: '90%', display: 'flex', flexDirection: 'column', gap: '5px' }}>
-                          {serviceOptions.filter(opt => opt.service_id === svc.id).map(opt => (
-                            <div key={opt.id} style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '0.85rem', background: '#f8fafc', padding: '5px 15px', borderRadius: '8px' }}>
-                              <span style={{ color: '#666' }}>└ {opt.group_name}: <b>{opt.option_name}</b></span>
-                              <input type="number" value={opt.additional_price || 0} onChange={(e) => setServiceOptions(serviceOptions.map(o => o.id === opt.id ? {...o, additional_price: parseInt(e.target.value)} : o))} style={{ ...miniPriceInput, width: '80px', background: '#fff', border: '1px solid #ddd' }} />
-                            </div>
-                          ))}
-                       </div>
-                    </div>
-                  ))}
-                </div>
-              ))}
-              <div style={{ ...cardStyle, border: '3px solid #ef4444' }}>
-                <div style={{ ...catHeaderStyle, background: '#fff5f5', display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ fontSize: '1.2rem', fontWeight: 'bold', color: '#ef4444' }}>⚙️ 全体調整 (＋－％)</span>
-                  <button onClick={() => addAdjustment(null)} style={{ ...optAddBtnStyle, borderColor: '#ef4444' }}>＋ 共通項目追加</button>
-                </div>
-                <div style={{ padding: '20px', display: 'flex', flexWrap: 'wrap', gap: '15px' }}>
-                  {sortItems(adminAdjustments.filter(a => a.service_id === null)).map(adj => (
-                    <div key={adj.id} style={{ ...adjChipStyle, padding: '10px 20px', flexDirection: 'column' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <input value={adj.name} onChange={(e) => setAdminAdjustments(adminAdjustments.map(a => a.id === adj.id ? {...a, name: e.target.value} : a))} style={{ ...optInputStyle, width: '120px' }} />
-                        <button onClick={() => cycleAdjType(adj.id)} style={typeBtnStyle}>{adj.is_percent ? '%' : adj.is_minus ? '-' : '+'}</button>
-                        <input type="number" value={adj.price || 0} onChange={(e) => setAdminAdjustments(adminAdjustments.map(a => a.id === adj.id ? {...a, price: parseInt(e.target.value)} : a))} style={{ ...optPriceStyle, width: '80px' }} />
-                        <button onClick={() => handleRemoveAdjustment(adj)} style={{ color: '#ff1493', background: 'none', border: 'none' }}><Trash2 size={18} /></button>
-                      </div>
-                      <input placeholder="カテゴリー" value={adj.category || ''} onChange={(e) => setAdminAdjustments(adminAdjustments.map(a => a.id === adj.id ? {...a, category: e.target.value} : a))} style={{ border: 'none', background: '#f8fafc', fontSize: '0.7rem', width: '100%', marginTop: '5px' }} />
-                    </div>
-                  ))}
-                </div>
-              </div>
-              <div style={{ ...cardStyle, border: '3px solid #008000' }}>
-                <div style={{ ...catHeaderStyle, background: '#f0fdf4', display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ fontSize: '1.2rem', fontWeight: 'bold', color: '#008000' }}>🧴 店販商品マスター</span>
-                  <button onClick={addProduct} style={{ ...optAddBtnStyle, borderColor: '#008000', color: '#008000' }}>＋ 商品を追加</button>
-                </div>
-                <div style={{ padding: '20px' }}>
-                  {products.map(p => (
-                    <div key={p.id} style={{ ...svcRowStyle, borderBottom: '1px solid #eee' }}>
-                      <input value={p.name} onChange={(e) => setProducts(products.map(x => x.id === p.id ? {...x, name: e.target.value} : x))} style={{ ...optInputStyle, width: '200px' }} />
-                      <input type="number" value={p.price || 0} onChange={(e) => setProducts(products.map(x => x.id === p.id ? {...x, price: parseInt(e.target.value)} : x))} style={priceInputStyle} />
-                      <button onClick={() => { setDeletedProductIds([...deletedProductIds, p.id]); setProducts(products.filter(x => x.id !== p.id)); }} style={{ color: '#ef4444', border: 'none', background: 'none' }}><Trash2 size={18} /></button>
-                    </div>
-                  ))}
-                </div>
-              </div>
             </div>
           </div>
         )}

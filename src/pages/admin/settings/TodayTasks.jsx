@@ -341,28 +341,25 @@ const openCustomerInfo = async (task) => {
     const searchId = cust?.id || task.customer_id;
     
     // クエリの構築
-    let historyQuery = supabase
-      .from('reservations')
-      .select('*')
-      .eq('shop_id', shopId)
-      .eq('res_type', 'normal') // ブロックなどは除外
-      .neq('id', task.id);      // 今回の予約自体は除外
+    let historyQuery = supabase
+      .from('reservations')
+      .select('*')
+      .eq('shop_id', shopId)
+      .eq('res_type', 'normal');
 
-    if (searchId) {
-      // 💡 IDがある場合：IDが一致、または名前が一致すれば履歴とする
-      historyQuery = historyQuery.or(`customer_id.eq.${searchId},customer_name.eq.${task.customer_name}`);
-    } else {
-      // 💡 IDがない場合：名前の一致だけで探す
-      historyQuery = historyQuery.eq('customer_name', task.customer_name);
-    }
+    if (searchId) {
+      historyQuery = historyQuery.or(`customer_id.eq.${searchId},customer_name.eq.${task.customer_name}`);
+    } else {
+      historyQuery = historyQuery.eq('customer_name', task.customer_name);
+    }
 
-    const { data: history, error: hError } = await historyQuery
-      .order('start_time', { ascending: false })
-      .limit(10);
+    const { data: history, error: hError } = await historyQuery
+      .order('start_time', { ascending: false }); // 新しい順に並べる
 
-    if (!hError) {
-      setCustomerHistory(history || []);
-    } else {
+    if (!hError) {
+      setCustomerHistory(history || []);
+    }
+     else {
       setCustomerHistory([]);
     }
 
@@ -1005,20 +1002,60 @@ const handleSaveMemo = async () => {
               </div>
 
               {/* 🕒 履歴エリア：売上金額付き [cite: 2026-03-08] */}
-              <h4 style={{ fontSize: '0.9rem', color: '#64748b', marginBottom: '12px', borderLeft: `4px solid ${themeColor}`, paddingLeft: '10px', fontWeight: 'bold' }}>🕒 直近の来店履歴</h4>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                {customerHistory.length > 0 ? customerHistory.map(h => (
-                  <div key={h.id} style={{ padding: '12px', background: '#f8fafc', borderRadius: '12px', border: '1px solid #f1f5f9' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', fontSize: '0.85rem' }}>
-                      <span style={{ color: '#1e293b' }}>📅 {new Date(h.start_time).toLocaleDateString('ja-JP')}</span>
-                      {/* ✅ 修正：予約データの total_price を直接見るようにしました [cite: 2026-03-10] */}
-                      <span style={{ color: '#d34817' }}>¥{(h.total_price || 0).toLocaleString()}</span>
+              <h4 style={{ fontSize: '0.9rem', color: '#64748b', marginBottom: '12px', borderLeft: `4px solid ${themeColor}`, paddingLeft: '10px', fontWeight: 'bold' }}>🕒 来店履歴 ＆ 予定</h4>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                {customerHistory.length > 0 ? customerHistory.map((h, idx) => {
+                  const hDate = new Date(h.start_time);
+                  const isToday = hDate.toLocaleDateString('sv-SE') === new Date().toLocaleDateString('sv-SE');
+                  const isFuture = hDate > new Date() && !isToday;
+                  
+                  // 💡 前回との差分日数を計算
+                  let dayDiff = null;
+                  if (customerHistory[idx + 1]) {
+                    const prevDate = new Date(customerHistory[idx + 1].start_time);
+                    dayDiff = Math.floor((hDate - prevDate) / (1000 * 60 * 60 * 24));
+                  }
+
+                  return (
+                    <div 
+                      key={h.id} 
+                      style={{ 
+                        padding: '15px', 
+                        background: isToday ? '#fff' : (isFuture ? '#f0f9ff' : '#f8fafc'), 
+                        borderRadius: '16px', 
+                        border: isToday ? `2px solid ${themeColor}` : (isFuture ? '1px dashed #0ea5e9' : '1px solid #f1f5f9'),
+                        boxShadow: isToday ? `0 4px 15px ${themeColor}33` : 'none',
+                        position: 'relative',
+                        animation: isToday ? 'pulseGlow 2s infinite' : 'none'
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', fontSize: '0.85rem', marginBottom: '4px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <span style={{ color: isToday ? themeColor : (isFuture ? '#0ea5e9' : '#1e293b') }}>
+                            📅 {hDate.toLocaleDateString('ja-JP')}
+                          </span>
+                          {isToday && <span style={{ background: themeColor, color: '#fff', padding: '1px 6px', borderRadius: '4px', fontSize: '0.6rem' }}>今回</span>}
+                          {isFuture && <span style={{ background: '#0ea5e9', color: '#fff', padding: '1px 6px', borderRadius: '4px', fontSize: '0.6rem' }}>次回の予約</span>}
+                        </div>
+                        {/* 💰 金額表示：total_price を優先して表示 */}
+                        <div style={{ color: isFuture ? '#94a3b8' : '#d34817' }}>
+                          {isFuture ? '---' : `¥${(h.total_price ?? 0).toLocaleString()}`}
+                        </div>
+                      </div>
+
+                      {/* 💡 来店間隔の表示（今日/今回の行のみ） */}
+                      {isToday && dayDiff !== null && (
+                        <div style={{ fontSize: '0.7rem', color: '#64748b', margin: '4px 0 8px 0', background: '#fff', padding: '4px 8px', borderRadius: '6px', border: '1px solid #eee', width: 'fit-content', fontWeight: 'bold' }}>
+                          🗓 前回から <span style={{ color: themeColor }}>{dayDiff}日ぶり</span>
+                        </div>
+                      )}
+
+                      <div style={{ fontSize: '0.8rem', color: '#475569', fontWeight: 'bold', paddingLeft: '2px' }}>
+                        {h.menu_name || 'メニュー記録なし'}
+                      </div>
                     </div>
-                    <div style={{ fontSize: '0.8rem', color: themeColor, marginTop: '4px', fontWeight: 'bold' }}>
-                      {h.menu_name || 'メニュー記録なし'}
-                    </div>
-                  </div>
-                )) : (
+                  );
+                }) : (
                   <div style={{ textAlign: 'center', padding: '30px', background: '#f8fafc', borderRadius: '12px', color: '#94a3b8', fontSize: '0.85rem' }}>
                     来店履歴はありません
                   </div>

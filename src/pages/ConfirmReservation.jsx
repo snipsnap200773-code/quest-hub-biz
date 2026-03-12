@@ -312,8 +312,35 @@ const handleReserve = async () => {
     setIsSubmitting(true);
 
     try {
-      // --- 2. 保存用のラベル作成 (ReferenceError回避のため冒頭で定義) ---
+      // 💡 🆕 追加：ファイナル・ガード（最終空き枠チェック）
+      // 管理者の「ねじ込み」でない場合のみ、本当に枠が空いているか再確認する
+      if (!isAdminEntry) {
+        const targetDate = adminDate || date;
+        const targetTime = adminTime || time;
+        const checkStartTime = new Date(`${targetDate}T${targetTime}:00`).toISOString();
+
+        // 同じ時間の予約が何件あるか、DBの最新情報を直接聞きに行く
+        const { count, error: checkError } = await supabase
+          .from('reservations')
+          .select('*', { count: 'exact', head: true })
+          .eq('shop_id', shopId)
+          .eq('start_time', checkStartTime)
+          .eq('res_type', 'normal');
+
+        if (checkError) throw checkError;
+
+        // もしすでに最大数（マンツーマンなら1）に達していたら、ここで強制終了
+        if (count >= (shop.max_capacity || 1)) {
+          alert('申し訳ありません！タッチの差で他の予約が埋まってしまいました。もう一度時間を選び直してください。');
+          setIsSubmitting(false);
+          navigate(`/shop/${shopId}/reserve`); // 予約画面に戻す
+          return;
+        }
+      }
+
+      // --- ここから下は既存の保存処理 ---
       const menuLabel = people && people.length > 1
+      
         ? people.map((p, i) => `${i + 1}人目: ${p.fullName}`).join(' / ')
         : (people && people[0]?.fullName || 'メニューなし');
 

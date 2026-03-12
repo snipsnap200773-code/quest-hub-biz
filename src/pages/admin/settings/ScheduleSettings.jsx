@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from "../../../supabaseClient";
 import { 
-  Clock, Calendar, Save, Zap, ArrowLeft, Sparkles 
+  Clock, Calendar, Save, Zap, ArrowLeft, Sparkles, Plus, Trash2 // ✅ Plus と Trash2 を追加
 } from 'lucide-react';
 
 const ScheduleSettings = () => {
@@ -28,6 +28,10 @@ const ScheduleSettings = () => {
   const [minLeadTimeHours, setMinLeadTimeHours] = useState(0);
   const [autoFillLogic, setAutoFillLogic] = useState(true);
   const [maxCapacity, setMaxCapacity] = useState(1);
+
+  // ✅ 🆕 修正1：長期休暇用のStateを追加
+  const [specialHolidays, setSpecialHolidays] = useState([]);
+  const [newSpecialHoliday, setNewSpecialHoliday] = useState({ name: '', start: '', end: '' });
 
   const dayMap = { mon: '月曜日', tue: '火曜日', wed: '水曜日', thu: '木曜日', fri: '金曜日', sat: '土曜日', sun: '日曜日' };
   const weekLabels = [
@@ -64,6 +68,8 @@ const fetchScheduleData = async () => {
       setMinLeadTimeHours(data.min_lead_time_hours || 0);
       setAutoFillLogic(data.auto_fill_logic ?? true);
       setMaxCapacity(data.max_capacity || 1);
+      // ✅ 🆕 長期休暇データを取得
+      setSpecialHolidays(data.special_holidays || []);
     }
   };
 
@@ -83,12 +89,31 @@ const fetchScheduleData = async () => {
     const key = `${weekKey}-${dayKey}`;
     setRegularHolidays(prev => ({ ...prev, [key]: !prev[key] }));
   };
+  
+  // ✅ 🆕 長期休暇をリストに追加する関数
+  const addSpecialHoliday = () => {
+    if (!newSpecialHoliday.name || !newSpecialHoliday.start || !newSpecialHoliday.end) {
+      alert("休暇名と開始日・終了日を入力してください。");
+      return;
+    }
+    setSpecialHolidays([...specialHolidays, { ...newSpecialHoliday, id: crypto.randomUUID() }]);
+    setNewSpecialHoliday({ name: '', start: '', end: '' }); // 入力欄リセット
+    showMsg('リストに追加しました！「保存」ボタンで確定してください。');
+  };
+
+  // ✅ 🆕 長期休暇をリストから削除する関数
+  const removeSpecialHoliday = (id) => {
+    setSpecialHolidays(specialHolidays.filter(h => h.id !== id));
+  };
 
   // --- 💾 保存ロジック (統合版・完全維持) ---
   const handleSave = async () => {
+    // 💡 修正：business_hours と special_holidays を別々に保存
     const updatedBusinessHours = { ...businessHours, regular_holidays: regularHolidays };
+
     const { error } = await supabase.from('profiles').update({ 
       business_hours: updatedBusinessHours,
+      special_holidays: specialHolidays, // ✅ 正式に新設したカラムへ保存！
       buffer_preparation_min: bufferPreparationMin,
       min_lead_time_hours: minLeadTimeHours,
       auto_fill_logic: autoFillLogic,
@@ -282,6 +307,62 @@ const fetchScheduleData = async () => {
           </p>
         )}
       </section>
+
+      {/* ✅ 🆕 ここから「長期休暇セクション」を挿入 */}
+      <section style={{ ...cardStyle, border: `2px solid ${themeColor}` }}>
+        <h3 style={{ marginTop: 0, fontSize: '1.1rem', color: themeColor, display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '20px' }}>
+          <Sparkles size={22} /> 長期休暇（夏休み・正月休みなど）
+        </h3>
+        
+        <div style={{ background: '#f8fafc', padding: '20px', borderRadius: '16px', marginBottom: '20px' }}>
+          <label style={{ fontSize: '0.8rem', fontWeight: 'bold', color: '#64748b', display: 'block', marginBottom: '8px' }}>休暇名（例：夏休み）</label>
+          <input 
+            type="text" 
+            placeholder="休暇の名前を入力" 
+            value={newSpecialHoliday.name} 
+            onChange={(e) => setNewSpecialHoliday({...newSpecialHoliday, name: e.target.value})} 
+            style={{ ...inputStyle, width: '100%', marginBottom: '15px' }} 
+          />
+          
+          <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+            <div style={{ flex: 1 }}>
+              <label style={{ fontSize: '0.7rem', color: '#64748b' }}>開始日</label>
+              <input type="date" value={newSpecialHoliday.start} onChange={(e) => setNewSpecialHoliday({...newSpecialHoliday, start: e.target.value})} style={{ ...inputStyle, width: '100%' }} />
+            </div>
+            <span style={{ marginTop: '20px' }}>〜</span>
+            <div style={{ flex: 1 }}>
+              <label style={{ fontSize: '0.7rem', color: '#64748b' }}>終了日</label>
+              <input type="date" value={newSpecialHoliday.end} onChange={(e) => setNewSpecialHoliday({...newSpecialHoliday, end: e.target.value})} style={{ ...inputStyle, width: '100%' }} />
+            </div>
+          </div>
+          
+          <button 
+            onClick={addSpecialHoliday}
+            style={{ width: '100%', marginTop: '20px', padding: '16px', background: '#1e293b', color: '#fff', border: 'none', borderRadius: '12px', fontWeight: 'bold', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
+          >
+            <Plus size={18} /> この期間を一括で休みにする
+          </button>
+        </div>
+
+        {/* 登録済みの休暇リスト */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          {specialHolidays.map((h) => (
+            <div key={h.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 15px', background: '#fff', border: '1px solid #e2e8f0', borderRadius: '12px' }}>
+              <div>
+                <b style={{ fontSize: '0.9rem', color: '#1e293b' }}>{h.name}</b>
+                <div style={{ fontSize: '0.75rem', color: '#64748b' }}>{h.start.replace(/-/g, '/')} 〜 {h.end.replace(/-/g, '/')}</div>
+              </div>
+              <button onClick={() => removeSpecialHoliday(h.id)} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer' }}>
+                <Trash2 size={18} />
+              </button>
+            </div>
+          ))}
+          {specialHolidays.length === 0 && (
+            <p style={{ textAlign: 'center', fontSize: '0.8rem', color: '#94a3b8', padding: '10px' }}>登録されている長期休暇はありません</p>
+          )}
+        </div>
+      </section>
+      {/* ✅ 🆕 ここまで挿入 */}
 
       {/* 📅 定休日の設定 */}
       <section style={{ ...cardStyle, border: '1px solid #fee2e2' }}>
