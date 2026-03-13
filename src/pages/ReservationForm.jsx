@@ -127,8 +127,16 @@ if (shopRes.data) {
 
       if (!shopRes.data.is_suspended) {
         // カテゴリ取得
-        let catQuery = supabase.from('service_categories').select('*').eq('shop_id', shopId).order('sort_order');
-        const catRes = await catQuery;
+// ✅ 🆕 修正：店販商品用カテゴリと調整用カテゴリを除外して取得する
+let catQuery = supabase.from('service_categories')
+  .select('*')
+  .eq('shop_id', shopId)
+  // 💡 調整用カテゴリ（is_adjustment_cat）が null または false のものだけ
+  .or('is_adjustment_cat.is.null,is_adjustment_cat.eq.false')
+  // 💡 店販商品用カテゴリ（is_product_cat）が null または false のものだけ
+  .or('is_product_cat.is.null,is_product_cat.eq.false')
+  .order('sort_order');
+          const catRes = await catQuery;
         
         if (catRes.data) {
           // 2. 入り口識別キー（url_key）による絞り込み
