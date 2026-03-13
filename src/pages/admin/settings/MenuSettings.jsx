@@ -100,19 +100,36 @@ const [editingAdjId, setEditingAdjId] = useState(null);
     }
   };
 
+// --- [135行目付近：fetchMenuDetails を丸ごと書き換え] ---
 const fetchMenuDetails = async () => {
-    // 1. 通常カテゴリを取得
-    const catRes = await supabase.from('service_categories').select('*').eq('shop_id', shopId).or('is_adjustment_cat.is.null,is_adjustment_cat.eq.false').order('sort_order');
-    // 2. 調整用カテゴリを取得
-    const adjCatRes = await supabase.from('service_categories').select('*').eq('shop_id', shopId).eq('is_adjustment_cat', true).order('sort_order');
+    // 1. 🟢 通常カテゴリ (調整用でも商品用でもない純粋なメニュー用)
+    const catRes = await supabase.from('service_categories')
+      .select('*')
+      .eq('shop_id', shopId)
+      // 💡 調整用フラグが false または null
+      .or('is_adjustment_cat.is.null,is_adjustment_cat.eq.false')
+      // 💡 商品用フラグが false または null
+      .or('is_product_cat.is.null,is_product_cat.eq.false')
+      .order('sort_order');
+
+    // 2. 🔴 調整用カテゴリのみ
+    const adjCatRes = await supabase.from('service_categories')
+      .select('*')
+      .eq('shop_id', shopId)
+      .eq('is_adjustment_cat', true)
+      .order('sort_order');
+
+    // 3. 🔵 商品用カテゴリのみ
+    const prodCatRes = await supabase.from('service_categories')
+      .select('*')
+      .eq('shop_id', shopId)
+      .eq('is_product_cat', true)
+      .order('sort_order');
     
+    // --- [以下、既存のデータ取得（services, optRes, adjRes, prodRes）は維持] ---
     const servRes = await supabase.from('services').select('*').eq('shop_id', shopId).order('sort_order');
     const optRes = await supabase.from('service_options').select('*'); 
-    // 3. 調整項目を取得
     const adjRes = await supabase.from('admin_adjustments').select('*').eq('shop_id', shopId).is('service_id', null).order('sort_order');
-
-    // 🆕 4. 商品カテゴリと商品データを取得 [cite: 2026-03-08]
-    const prodCatRes = await supabase.from('service_categories').select('*').eq('shop_id', shopId).eq('is_product_cat', true).order('sort_order');
     const prodRes = await supabase.from('products').select('*').eq('shop_id', shopId).order('sort_order');
 
     if (catRes.data) setCategories(catRes.data);
@@ -120,10 +137,9 @@ const fetchMenuDetails = async () => {
     if (servRes.data) setServices(servRes.data);
     if (optRes.data) setOptions(optRes.data);
     if (adjRes.data) setAdjustments(adjRes.data);
-    // 🆕 取得した商品データをセット
     if (prodCatRes.data) setProductCategories(prodCatRes.data);
     if (prodRes.data) setProducts(prodRes.data);
-  };
+};
 const showMsg = (txt) => { setMessage(txt); setTimeout(() => setMessage(''), 3000); };
 
 /* ==========================================
