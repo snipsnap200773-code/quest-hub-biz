@@ -854,7 +854,7 @@ const handleProdCatSubmit = async (e) => {
                               </div>
                               
                               <div style={{ display: 'flex', gap: '4px' }}>
-                                {/* ✏️ 🆕 枝メニューの編集ボタン [cite: 2026-03-08] */}
+                                {/* ✏️ 🆕 枝メニューの編集ボタン丸 [cite: 2026-03-08] */}
                                 <button 
                                   onClick={() => {
                                     setEditingOptionId(o.id);
