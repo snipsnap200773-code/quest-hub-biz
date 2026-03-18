@@ -355,7 +355,6 @@ const placeholderData = {
               
               ${optionsListHtml} 
 
-              {/* 🆕 A: 電話ボタンの差し込み */}
               ${payload.phone ? `
                 <div style="margin-top: 15px; border-top: 1px solid #eee; padding-top: 15px;">
                   <a href="tel:${payload.phone}" style="display: inline-block; background: #10b981; color: #fff; padding: 10px 20px; border-radius: 8px; text-decoration: none; font-weight: bold; font-size: 0.9rem;">📞 お客様へ電話をかける</a>
@@ -368,7 +367,6 @@ const placeholderData = {
               <div style="font-size: 0.9rem; color: #1e293b;">
                 ${address ? `
                   <p style="margin: 4px 0;">📍 <b>住所:</b> ${address}</p>
-                  {/* 🆕 B: マップボタンの差し込み */}
                   <div style="margin: 8px 0 15px 0;">
                     <a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}" target="_blank" style="display: inline-block; background: #3b82f6; color: #fff; padding: 8px 16px; border-radius: 8px; text-decoration: none; font-weight: bold; font-size: 0.85rem;">🗺 Googleマップで場所を確認</a>
                   </div>
@@ -376,7 +374,6 @@ const placeholderData = {
                 
                 ${parking ? `<p style="margin: 4px 0;">🅿️ <b>駐車場:</b> ${parking}</p>` : ''}
 
-                {/* 🆕 C: カスタム質問回答の表示ロジック */}
                 ${custom_answers && Object.keys(custom_answers).length > 0 ? `
                   <div style="margin-top: 15px; padding: 12px; background: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0;">
                     <p style="margin: 0 0 8px 0; font-size: 0.8rem; color: #64748b; font-weight: bold;">🙋 カスタム質問への回答:</p>

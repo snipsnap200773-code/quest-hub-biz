@@ -34,6 +34,9 @@ function AdminManagement() {
   const [staffs, setStaffs] = useState([]); // 🆕 追加済み（再確認）
   const [staffPickerRes, setStaffPickerRes] = useState(null);
 
+  // 🆕 追加：全顧客データ用のState
+  const [allCustomers, setAllCustomers] = useState([]);
+
   // --- 予約・売上データ保持 ---
   const [allReservations, setAllReservations] = useState([]);
   const [salesRecords, setSalesRecords] = useState([]);
@@ -60,8 +63,15 @@ const [isMenuPopupOpen, setIsMenuPopupOpen] = useState(false);
   const [editEmail, setEditEmail] = useState('');
   const [customerMemo, setCustomerMemo] = useState('');
   const [firstArrivalDate, setFirstArrivalDate] = useState(''); 
-const [pastVisits, setPastVisits] = useState([]);
+  const [pastVisits, setPastVisits] = useState([]);
   const [isSavingMemo, setIsSavingMemo] = useState(false);
+  const [editFields, setEditFields] = useState({
+    name: '', furigana: '', email: '', phone: '', 
+    zip_code: '', address: '', parking: '', 
+    building_type: '', care_notes: '', company_name: '', 
+    symptoms: '', request_details: '', 
+    first_arrival_date: '', memo: '', custom_answers: {}
+  });
 
   // ==========================================
   // --- 🆕 画面サイズ管理（エラー解決のために追加） ---
@@ -84,6 +94,18 @@ const [pastVisits, setPastVisits] = useState([]);
     if (catA !== catB) return catA.localeCompare(catB, 'ja');
     return (a.name || '').localeCompare(b.name || '', 'ja');
   });
+
+  // 🆕 修正：管理画面の詳細モーダルで表示すべきか判定するロジック
+  const shouldShowInAdmin = (key) => {
+    // 1. 基本の4項目は設定に関わらず常に表示
+    const basicFields = ['name', 'furigana', 'email', 'phone'];
+    if (basicFields.includes(key)) return true;
+    // 2. それ以外（住所、駐車場など）は、必須設定の場合のみ表示
+    const cfg = shop?.form_config?.[key];
+    return cfg?.required === true;
+  };
+
+  const getFieldLabel = (key) => shop?.form_config?.[key]?.label || key;
 
   useEffect(() => {
     if (cleanShopId) fetchInitialData();
@@ -121,14 +143,15 @@ if (profile && profile.business_name) {
       setStaffs(staffsData || []);
 
       // 4. 各種マスター ＆ 売上実績(sales)取得
-      const [catRes, servRes, optRes, adjRes, prodRes, sDataRes] = await Promise.all([
-        supabase.from('service_categories').select('*').eq('shop_id', cleanShopId).order('sort_order'),
-        supabase.from('services').select('*').eq('shop_id', cleanShopId).order('sort_order'),
-        supabase.from('service_options').select('*'),
-        supabase.from('admin_adjustments').select('*').eq('shop_id', cleanShopId),
-        supabase.from('products').select('*').eq('shop_id', cleanShopId).order('sort_order'),
-        supabase.from('sales').select('*').eq('shop_id', cleanShopId).gte('sale_date', startOfYear).lte('sale_date', endOfYear)
-      ]);
+      const [catRes, servRes, optRes, adjRes, prodRes, sDataRes, custAllRes] = await Promise.all([ // 🆕 custAllResを追加
+        supabase.from('service_categories').select('*').eq('shop_id', cleanShopId).order('sort_order'),
+        supabase.from('services').select('*').eq('shop_id', cleanShopId).order('sort_order'),
+        supabase.from('service_options').select('*'),
+        supabase.from('admin_adjustments').select('*').eq('shop_id', cleanShopId),
+        supabase.from('products').select('*').eq('shop_id', cleanShopId).order('sort_order'),
+        supabase.from('sales').select('*').eq('shop_id', cleanShopId).gte('sale_date', startOfYear).lte('sale_date', endOfYear),
+        supabase.from('customers').select('*').eq('shop_id', cleanShopId).order('last_arrival_at', { ascending: false }) // 🆕 全顧客取得
+      ]);
 
       setCategories(catRes.data || []);
       setServices(servRes.data || []);
@@ -136,6 +159,7 @@ if (profile && profile.business_name) {
       setAdminAdjustments(adjRes.data || []);
       setProducts(prodRes.data || []);
       setSalesRecords(sDataRes.data || []);
+      setAllCustomers(custAllRes.data || []);
 
     } catch (err) { 
       console.error("Fetch Error:", err); 
@@ -515,29 +539,43 @@ const completePayment = async () => {
 
   // 🆕 ここから追加：お客様詳細（カルテ）を開く関数
   const openCustomerInfo = async (res) => {
-
-    // 🆕 名前がない予約データの場合は処理しないようにガード
     if (!res || !res.customer_name) {
       alert("顧客名が記録されていないため、カルテを開けません。");
       return;
     }
 
-    try {
-      // 1. 予約名からお客様の基本情報を取得
-      const { data: customer } = await supabase
+    try {
+      const { data: customer } = await supabase
         .from('customers')
         .select('*')
         .eq('shop_id', cleanShopId)
         .eq('name', res.customer_name)
         .maybeSingle();
 
-      // ステートにセット
+      // 🆕 修正：全項目 ＆ カスタム質問の回答を State (editFields) に集約
+      const visitInfo = res.options?.visit_info || {};
+      const allFields = {
+        name: customer?.name || res.customer_name || '',
+        furigana: customer?.furigana || visitInfo.furigana || '',
+        phone: customer?.phone || res.customer_phone || '',
+        email: customer?.email || res.customer_email || '',
+        zip_code: customer?.zip_code || visitInfo.zip_code || '',
+        address: customer?.address || visitInfo.address || '',
+        parking: customer?.parking || visitInfo.parking || '',
+        building_type: customer?.building_type || visitInfo.building_type || '',
+        care_notes: customer?.care_notes || visitInfo.care_notes || '',
+        company_name: customer?.company_name || visitInfo.company_name || '',
+        symptoms: customer?.symptoms || visitInfo.symptoms || '',
+        request_details: customer?.request_details || visitInfo.request_details || '',
+        first_arrival_date: customer?.first_arrival_date || '',
+        memo: customer?.memo || '',
+        line_user_id: customer?.line_user_id || res.line_user_id || null,
+        custom_answers: visitInfo.custom_answers || customer?.custom_answers || {}
+      };
+
       setSelectedCustomer(customer || { name: res.customer_name });
-      setEditName(customer?.name || res.customer_name);
-      setEditPhone(customer?.phone || '');
-      setEditEmail(customer?.email || '');
-      setCustomerMemo(customer?.memo || '');
-      setFirstArrivalDate(customer?.first_arrival_date || '');
+      setEditFields(allFields);
+      setSelectedRes(res);
 
       // 2. 過去の来店履歴（完了済み予約）を取得
       const { data: visits } = await supabase
@@ -559,20 +597,56 @@ const completePayment = async () => {
   };
 
   const saveCustomerInfo = async () => {
-    if (!selectedCustomer) return; setIsSavingMemo(true);
+    if (!selectedCustomer) return; 
+    setIsSavingMemo(true);
+
+    // 🆕 修正：editFields.name を使うように変更
+    const normalizedName = (editFields.name || '').replace(/　/g, ' ').trim(); 
+
     try {
       const currentId = selectedCustomer.id;
-      const { data: duplicate } = await supabase.from('customers').select('*').eq('shop_id', cleanShopId).eq('name', editName).neq('id', currentId || '00000000-0000-0000-0000-000000000000').maybeSingle();
-      if (duplicate && window.confirm(`「${editName}」様を統合しますか？`)) {
-          await supabase.from('customers').update({ memo: `${duplicate.memo || ''}\n\n${customerMemo}`.trim(), total_visits: (duplicate.total_visits || 0) + (selectedCustomer.total_visits || 0), phone: editPhone || duplicate.phone, email: editEmail || duplicate.email, updated_at: new Date().toISOString() }).eq('id', duplicate.id);
-          await supabase.from('reservations').update({ customer_name: editName }).eq('shop_id', cleanShopId).eq('customer_name', selectedCustomer.name);
+      const { data: duplicate } = await supabase.from('customers').select('*').eq('shop_id', cleanShopId).eq('name', normalizedName).neq('id', currentId || '00000000-0000-0000-0000-000000000000').maybeSingle();
+      
+      if (duplicate && window.confirm(`「${normalizedName}」様を統合しますか？`)) {
+          await supabase.from('customers').update({ 
+            memo: `${duplicate.memo || ''}\n\n${editFields.memo}`.trim(), 
+            total_visits: (duplicate.total_visits || 0) + (selectedCustomer.total_visits || 0), 
+            phone: editFields.phone || duplicate.phone, 
+            email: editFields.email || duplicate.email, 
+            updated_at: new Date().toISOString() 
+          }).eq('id', duplicate.id);
+          await supabase.from('reservations').update({ customer_name: normalizedName }).eq('shop_id', cleanShopId).eq('customer_name', selectedCustomer.name);
           if (currentId) await supabase.from('customers').delete().eq('id', currentId);
           alert("統合完了！"); setIsCustomerInfoOpen(false); fetchInitialData(); return;
       }
-      const payload = { shop_id: cleanShopId, name: editName, phone: editPhone, email: editEmail, memo: customerMemo, first_arrival_date: firstArrivalDate, updated_at: new Date().toISOString() };
-      if (currentId) await supabase.from('customers').update(payload).eq('id', currentId); else await supabase.from('customers').insert([payload]);
-      alert("情報を更新しました。"); fetchInitialData();
-    } catch (err) { alert("失敗: " + err.message); } finally { setIsSavingMemo(false); }
+      
+      // 🆕 修正：送信データを一括Stateから取得
+      const payload = { 
+        shop_id: cleanShopId, 
+        name: normalizedName, 
+        furigana: editFields.furigana,
+        phone: editFields.phone, 
+        email: editFields.email, 
+        address: editFields.address,
+        zip_code: editFields.zip_code,
+        parking: editFields.parking,
+        building_type: editFields.building_type,
+        care_notes: editFields.care_notes,
+        company_name: editFields.company_name,
+        symptoms: editFields.symptoms,
+        request_details: editFields.request_details,
+        memo: editFields.memo, 
+        first_arrival_date: editFields.first_arrival_date, 
+        updated_at: new Date().toISOString() 
+      };
+      
+      if (currentId) await supabase.from('customers').update(payload).eq('id', currentId); 
+      else await supabase.from('customers').insert([payload]);
+
+      alert("情報を更新しました。"); 
+      fetchInitialData();
+    } catch (err) { alert("失敗: " + err.message); } 
+    finally { setIsSavingMemo(false); }
   };
 
   const handleUpdateStaffDirectly = async (resId, newStaffId) => {
@@ -586,55 +660,48 @@ const completePayment = async () => {
 
   const handleDateChangeUI = (days) => { const d = new Date(selectedDate); d.setDate(d.getDate() + days); setSelectedDate(d.toLocaleDateString('sv-SE')); };
 return (
-    /* 🆕 translate="no" と className="notranslate" を追加して翻訳を禁止します */
     <div style={fullPageWrapper} translate="no" className="notranslate">
-          <div style={sidebarStyle}>
-        <div style={{ textAlign: 'center', marginBottom: '20px' }}>
-          <h2 style={{ fontSize: '2.2rem', fontStyle: 'italic', fontWeight: '900', color: '#4b2c85', margin: 0 }}>SOLO</h2>
-          <p style={{ fontSize: '0.6rem', fontWeight: 'bold' }}>MANAGEMENT</p>
-        </div>
-        <button style={navBtnStyle(activeMenu === 'work', '#d34817')} onClick={() => setActiveMenu('work')}>日常業務</button>
-        <button style={navBtnStyle(activeMenu === 'analytics', '#008000')} onClick={() => setActiveMenu('analytics')}>売上分析</button>
+      
+      {/* 🆕 修正：サイドバー全体を isPC 条件で囲う */}
+      {isPC && (
+        <div style={sidebarStyle}>
+          <div style={{ textAlign: 'center', marginBottom: '20px' }}>
+            <h2 style={{ fontSize: '2.2rem', fontStyle: 'italic', fontWeight: '900', color: '#4b2c85', margin: 0 }}>SOLO</h2>
+            <p style={{ fontSize: '0.6rem', fontWeight: 'bold' }}>MANAGEMENT</p>
+          </div>
+          <button style={navBtnStyle(activeMenu === 'work', '#d34817')} onClick={() => setActiveMenu('work')}>日常業務</button>
+          <button style={navBtnStyle(activeMenu === 'customers', '#4285f4')} onClick={() => setActiveMenu('customers')}>顧客名簿</button>
+          <button style={navBtnStyle(activeMenu === 'analytics', '#008000')} onClick={() => setActiveMenu('analytics')}>売上分析</button>
 
-        <div style={{ background: '#fff', borderRadius: '12px', padding: '10px', marginTop: '15px', border: '1px solid #4b2c85' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-            <span style={{ fontSize: '0.75rem', fontWeight: 'bold' }}>{viewMonth.getFullYear()}年{viewMonth.getMonth()+1}月</span>
-            <div style={{ display: 'flex', gap: '5px' }}>
-              <button onClick={() => setViewMonth(new Date(viewMonth.setMonth(viewMonth.getMonth()-1)))} style={{ border: 'none', background: 'none' }}>◀</button>
-              <button onClick={() => setViewMonth(new Date(viewMonth.setMonth(viewMonth.getMonth()+1)))} style={{ border: 'none', background: 'none' }}>▶</button>
+          {/* ミニカレンダー */}
+          <div style={{ background: '#fff', borderRadius: '12px', padding: '10px', marginTop: '15px', border: '1px solid #4b2c85' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+              <span style={{ fontSize: '0.75rem', fontWeight: 'bold' }}>{viewMonth.getFullYear()}年{viewMonth.getMonth()+1}月</span>
+              <div style={{ display: 'flex', gap: '5px' }}>
+                <button onClick={() => setViewMonth(new Date(viewMonth.setMonth(viewMonth.getMonth()-1)))} style={{ border: 'none', background: 'none' }}>◀</button>
+                <button onClick={() => setViewMonth(new Date(viewMonth.setMonth(viewMonth.getMonth()+1)))} style={{ border: 'none', background: 'none' }}>▶</button>
+              </div>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '2px', textAlign: 'center' }}>
+              {['月','火','水','木','金','土','日'].map(d => <div key={d} style={{ fontSize: '0.6rem', color: '#94a3b8' }}>{d}</div>)}
+              {Array.from({length: 42}).map((_, i) => {
+                const year = viewMonth.getFullYear(); const month = viewMonth.getMonth();
+                const firstDay = new Date(year, month, 1).getDay();
+                const d = new Date(year, month, i - (firstDay === 0 ? 6 : firstDay - 1) + 1);
+                if (d.getMonth() !== month) return <div key={i} />;
+                const isSelected = d.toLocaleDateString('sv-SE') === selectedDate;
+                return <div key={i} onClick={() => setSelectedDate(d.toLocaleDateString('sv-SE'))} style={{ fontSize: '0.7rem', padding: '4px 0', cursor: 'pointer', borderRadius: '4px', background: isSelected ? '#4b2c85' : 'none', color: isSelected ? '#fff' : '#333' }}>{d.getDate()}</div>
+              })}
             </div>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '2px', textAlign: 'center' }}>
-            {['月','火','水','木','金','土','日'].map(d => <div key={d} style={{ fontSize: '0.6rem', color: '#94a3b8' }}>{d}</div>)}
-            {Array.from({length: 42}).map((_, i) => {
-              const year = viewMonth.getFullYear(); const month = viewMonth.getMonth();
-              const firstDay = new Date(year, month, 1).getDay();
-              const d = new Date(year, month, i - (firstDay === 0 ? 6 : firstDay - 1) + 1);
-              if (d.getMonth() !== month) return <div key={i} />;
-              const isSelected = d.toLocaleDateString('sv-SE') === selectedDate;
-              return <div key={i} onClick={() => setSelectedDate(d.toLocaleDateString('sv-SE'))} style={{ fontSize: '0.7rem', padding: '4px 0', cursor: 'pointer', borderRadius: '4px', background: isSelected ? '#4b2c85' : 'none', color: isSelected ? '#fff' : '#333' }}>{d.getDate()}</div>
-            })}
+          
+          <div style={{ marginTop: 'auto', paddingTop: '20px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            <button style={navBtnStyle(false, '#4285f4')} onClick={() => navigate(`/admin/${cleanShopId}/reservations`)}>カレンダー</button>
+            <button style={navBtnStyle(false, '#4b2c85')} onClick={() => navigate(`/admin/${cleanShopId}/timeline`)}>タイムライン</button>
           </div>
         </div>
-        
-        <div style={{ marginTop: 'auto', paddingTop: '20px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-          {/* 🆕 カレンダー画面へ戻るボタン */}
-          <button 
-            style={navBtnStyle(false, '#4285f4')} 
-            onClick={() => navigate(`/admin/${cleanShopId}/reservations`)}
-          >
-            カレンダー
-          </button>
-
-          {/* 🆕 タイムライン画面へ戻るボタン */}
-          <button 
-            style={navBtnStyle(false, '#4b2c85')} 
-            onClick={() => navigate(`/admin/${cleanShopId}/timeline`)}
-          >
-            タイムライン
-          </button>
-        </div>
-      </div>
+      )}
+      {/* 🆕 修正：ここまでサイドバーの囲い */}
 
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
 {activeMenu === 'work' && (
@@ -878,6 +945,97 @@ return (
           </div>
         )}
 
+        {activeMenu === 'customers' && (
+          <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#f0f2f5' }}>
+            {/* ヘッダー：青系のデザインで名簿らしさを演出 */}
+            <div style={{ 
+              background: '#4285f4', 
+              padding: isPC ? '15px 25px' : '10px 15px', 
+              color: '#fff', 
+              display: 'flex', 
+              justifyContent: 'space-between', 
+              alignItems: 'center',
+              boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+            }}>
+              <h2 style={{ margin: 0, fontStyle: 'italic', fontSize: isPC ? '1.4rem' : '1.1rem' }}>
+                顧客名簿一覧 ({allCustomers.length}名)
+              </h2>
+              <div style={{ position: 'relative' }}>
+                <input 
+                  type="text" 
+                  placeholder="名前・電話で検索..." 
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  style={{ 
+                    padding: '8px 12px', 
+                    borderRadius: '8px', 
+                    border: 'none', 
+                    fontSize: '0.8rem', 
+                    width: isPC ? '200px' : '120px',
+                    outline: 'none'
+                  }}
+                />
+              </div>
+            </div>
+
+            {/* 名簿リストエリア */}
+            <div style={{ 
+              flex: 1, 
+              overflowY: 'auto', 
+              padding: isPC ? '20px' : '10px',
+              paddingBottom: isPC ? '20px' : '100px' // スマホ時は下タブの分余白を作る
+            }}>
+              <div style={{ 
+                display: 'grid', 
+                gridTemplateColumns: isPC ? 'repeat(auto-fill, minmax(300px, 1fr))' : '1fr', 
+                gap: '15px' 
+              }}>
+                {allCustomers
+                  .filter(c => c.name.includes(searchTerm) || (c.phone && c.phone.includes(searchTerm)))
+                  .map(cust => (
+                    <div 
+                      key={cust.id} 
+                      onClick={() => openCustomerInfo({ customer_name: cust.name })} 
+                      style={{ 
+                        background: '#fff', 
+                        padding: '18px', 
+                        borderRadius: '16px', 
+                        boxShadow: '0 4px 6px rgba(0,0,0,0.05)', 
+                        cursor: 'pointer', 
+                        border: '1px solid #e2e8f0', 
+                        display: 'flex', 
+                        justifyContent: 'space-between', 
+                        alignItems: 'center',
+                        transition: 'transform 0.1s',
+                      }}
+                      onMouseEnter={(e) => isPC && (e.currentTarget.style.transform = 'translateY(-2px)')}
+                      onMouseLeave={(e) => isPC && (e.currentTarget.style.transform = 'translateY(0)')}
+                    >
+                      <div>
+                        <div style={{ fontWeight: 'bold', fontSize: '1.1rem', color: '#1e293b' }}>{cust.name} 様</div>
+                        <div style={{ fontSize: '0.8rem', color: '#64748b', marginTop: '4px' }}>📞 {cust.phone || '電話未登録'}</div>
+                        <div style={{ fontSize: '0.7rem', color: '#94a3b8', marginTop: '8px' }}>
+                          最終来店: {cust.last_arrival_at ? new Date(cust.last_arrival_at).toLocaleDateString() : '記録なし'}
+                        </div>
+                      </div>
+                      <div style={{ textAlign: 'right', borderLeft: '1px solid #f1f5f9', paddingLeft: '15px' }}>
+                        <div style={{ fontSize: '0.65rem', color: '#94a3b8', fontWeight: 'bold' }}>来店回数</div>
+                        <div style={{ fontSize: '1.4rem', fontWeight: '900', color: '#4b2c85' }}>
+                          {cust.total_visits || 0}<span style={{fontSize:'0.75rem', marginLeft: '2px'}}>回</span>
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                }
+              </div>
+              
+              {allCustomers.filter(c => c.name.includes(searchTerm) || (c.phone && c.phone.includes(searchTerm))).length === 0 && (
+                <div style={{ textAlign: 'center', padding: '50px', color: '#94a3b8' }}>一致するお客様が見つかりません</div>
+              )}
+            </div>
+          </div>
+        )}
+
 {activeMenu === 'analytics' && (
           <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#f0f2f5' }}>
             {/* 🆕 年度切り替えヘッダー */}
@@ -1082,11 +1240,78 @@ return (
             <div style={{ ...checkoutHeaderStyle, background: '#008000' }}><div><h3 style={{ margin: 0 }}>{selectedCustomer?.name} 様</h3><p style={{ fontSize: '0.8rem', margin: 0 }}>顧客カルテ編集</p></div><button onClick={() => setIsCustomerInfoOpen(false)} style={{ background: 'none', border: 'none', color: '#fff' }}><X size={24} /></button></div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '20px' }}>
               <SectionTitle icon={<User size={16} />} title="基本情報" color="#008000" />
-              <div style={{ background: '#fff', padding: '15px', borderRadius: '10px', border: '1px solid #eee', marginBottom: '20px' }}>
-                <label style={{ fontSize: '0.75rem', fontWeight: 'bold' }}>お客様名</label><input type="text" value={editName} onChange={(e) => setEditName(e.target.value)} style={editInputStyle} />
-                <div style={{ display: 'flex', gap: '10px' }}><div style={{ flex: 1 }}><label style={{ fontSize: '0.75rem' }}>電話番号</label><input type="tel" value={editPhone} onChange={(e) => setEditPhone(e.target.value)} style={editInputStyle} /></div><div style={{ flex: 1 }}><label style={{ fontSize: '0.75rem' }}>初回来店日</label><input type="date" value={firstArrivalDate} onChange={(e) => setFirstArrivalDate(e.target.value)} style={editInputStyle} /></div></div>
-                <label style={{ fontSize: '0.75rem' }}>メール</label><input type="email" value={editEmail} onChange={(e) => setEditEmail(e.target.value)} style={editInputStyle} />
+              
+              {/* 🆕 順番固定・ボタン付きの最強カルテUI */}
+              <div style={{ background: '#fff', padding: '20px', borderRadius: '15px', border: '1px solid #eee', marginBottom: '20px' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  {(() => {
+                    const fieldOrder = [
+                      'name', 'furigana', 'email', 'phone', 
+                      'zip_code', 'address', 'parking', 
+                      'building_type', 'care_notes', 'company_name', 
+                      'symptoms', 'request_details'
+                    ];
+
+                    return fieldOrder.map((key) => {
+                      if (!shouldShowInAdmin(key)) return null;
+
+                      return (
+                        <div key={key}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '6px' }}>
+                            <label style={{ fontSize: '0.75rem', fontWeight: 'bold', color: '#64748b' }}>{getFieldLabel(key)}</label>
+                            {key === 'phone' && editFields.phone && (
+                              <a href={`tel:${editFields.phone}`} style={badgeStyle('#10b981')}>電話 📞</a>
+                            )}
+                            {key === 'address' && editFields.address && (
+                              <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(editFields.address)}`} target="_blank" rel="noopener noreferrer" style={badgeStyle('#3b82f6')}>マップ 📍</a>
+                            )}
+                          </div>
+                          
+                          {key === 'parking' ? (
+                            <select value={editFields[key] || ''} onChange={(e) => setEditFields({...editFields, [key]: e.target.value})} style={editInputStyle}>
+                              <option value="">未選択</option>
+                              <option value="あり">あり</option>
+                              <option value="なし">なし</option>
+                            </select>
+                          ) : (
+                            <input 
+                              type={key === 'email' ? 'email' : key === 'phone' ? 'tel' : 'text'} 
+                              value={editFields[key] || ''} 
+                              onChange={(e) => setEditFields({...editFields, [key]: e.target.value})} 
+                              style={editInputStyle} 
+                              placeholder="未登録" 
+                            />
+                          )}
+                        </div>
+                      );
+                    });
+                  })()}
+
+                  <div>
+                    <label style={{ fontSize: '0.75rem', fontWeight: 'bold', color: '#64748b', display: 'block', marginBottom: '6px' }}>初回来店日</label>
+                    <input type="date" value={editFields.first_arrival_date} onChange={(e) => setEditFields({...editFields, first_arrival_date: e.target.value})} style={editInputStyle} />
+                  </div>
+
+                  {/* 🆕 カスタム質問の回答 */}
+                  {shop?.form_config?.custom_questions?.map((q) => {
+                    const answer = editFields.custom_answers?.[q.id];
+                    if (q.required || answer) {
+                      return (
+                        <div key={q.id} style={{ background: '#f8fafc', padding: '12px', borderRadius: '12px', border: q.required ? `1px solid #00800033` : '1px solid #e2e8f0', marginTop: '5px' }}>
+                          <label style={{ fontSize: '0.7rem', fontWeight: 'bold', color: q.required ? '#008000' : '#64748b', display: 'block', marginBottom: '6px' }}>
+                            🙋 {q.label} {q.required && <span style={{ color: '#ef4444' }}>(必須)</span>}
+                          </label>
+                          <div style={{ fontSize: '0.9rem', fontWeight: 'bold', color: '#1e293b' }}>
+                            {answer || <span style={{ color: '#cbd5e1', fontWeight: 'normal' }}>未回答</span>}
+                          </div>
+                        </div>
+                      );
+                    }
+                    return null;
+                  })}
+                </div>
               </div>
+
               <SectionTitle icon={<FileText size={16} />} title="顧客メモ" color="#d34817" />
               <textarea value={customerMemo} onChange={(e) => setCustomerMemo(e.target.value)} style={{ width: '100%', minHeight: '120px', padding: '10px', borderRadius: '10px', border: '2px solid #d34817', marginBottom: '10px' }} />
               <button onClick={saveCustomerInfo} disabled={isSavingMemo} style={{ width: '100%', padding: '15px', background: '#008000', color: '#fff', borderRadius: '10px', fontWeight: 'bold' }}>{isSavingMemo ? '保存中...' : '情報を保存'}</button>
@@ -1115,11 +1340,17 @@ return (
                 })}
               </div>
             </div>
-            <div style={{ padding: '25px', borderTop: '2px solid #ddd' }}>
-              <button onClick={() => openCheckout(selectedRes)} style={{ ...completeBtnStyle, background: '#d34817' }}>
-                <Clipboard size={20} /> お会計へ
-              </button>
-            </div>
+            {/* 🆕 修正：予約IDがある（台帳から開いた）場合のみ、お会計ボタンを表示する */}
+            {selectedRes?.id && (
+              <div style={{ padding: '25px', borderTop: '2px solid #ddd', background: '#fff' }}>
+                <button 
+                  onClick={() => openCheckout(selectedRes)} 
+                  style={{ ...completeBtnStyle, background: '#d34817', borderRadius: '15px' }}
+                >
+                  <Clipboard size={20} /> この予約のお会計（レジ）へ
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -1231,6 +1462,49 @@ return (
           </div>
         </div>
       )}
+
+      {/* 🆕 ここから追加：スマホ専用ボトムナビゲーション */}
+      {!isPC && (
+        <div style={{ 
+          position: 'fixed', 
+          bottom: 0, 
+          left: 0, 
+          right: 0, 
+          height: '75px', 
+          background: '#fff', 
+          borderTop: '1px solid #e2e8f0', 
+          display: 'flex', 
+          justifyContent: 'space-around', 
+          alignItems: 'center', 
+          zIndex: 2000, 
+          paddingBottom: 'env(safe-area-inset-bottom)', // iPhoneのノッチ対策
+          boxShadow: '0 -4px 15px rgba(0,0,0,0.05)' 
+        }}>
+          {/* 台帳ボタン */}
+          <button onClick={() => setActiveMenu('work')} style={mobileTabStyle(activeMenu === 'work', '#d34817')}>
+            <Clipboard size={22} />
+            <span style={{ fontSize: '0.65rem', fontWeight: 'bold' }}>台帳</span>
+          </button>
+
+          {/* 名簿ボタン */}
+          <button onClick={() => setActiveMenu('customers')} style={mobileTabStyle(activeMenu === 'customers', '#4285f4')}>
+            <Users size={22} />
+            <span style={{ fontSize: '0.65rem', fontWeight: 'bold' }}>名簿</span>
+          </button>
+
+          {/* 分析ボタン */}
+          <button onClick={() => setActiveMenu('analytics')} style={mobileTabStyle(activeMenu === 'analytics', '#008000')}>
+            <BarChart3 size={22} />
+            <span style={{ fontSize: '0.65rem', fontWeight: 'bold' }}>分析</span>
+          </button>
+
+          {/* カレンダーへ戻るショートカット */}
+          <button onClick={() => navigate(`/admin/${cleanShopId}/reservations`)} style={mobileTabStyle(false, '#4b2c85')}>
+            <Calendar size={22} />
+            <span style={{ fontSize: '0.65rem', fontWeight: 'bold' }}>戻る</span>
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -1265,5 +1539,19 @@ const yearBtnStyle = { background: 'rgba(255,255,255,0.2)', border: '1px solid #
 const monthCardStyle = { background: '#fff', padding: '20px', borderRadius: '16px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)', border: '1px solid #e2e8f0', cursor: 'pointer' };
 const modalOverlayStyle = { position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 10000 };
 const modalContentStyle = { background: '#fff', padding: '25px', borderRadius: '24px', width: '90%', maxWidth: '450px', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)' };
+
+// 🆕 スマホのタブボタン用スタイル
+const mobileTabStyle = (active, color) => ({
+  display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '4px',
+  background: 'none', border: 'none', color: active ? color : '#94a3b8',
+  cursor: 'pointer', flex: 1, padding: '8px 0', transition: 'all 0.2s'
+});
+
+const badgeStyle = (color) => ({
+  textDecoration: 'none', background: color, color: '#fff',
+  padding: '2px 8px', borderRadius: '6px', fontSize: '0.65rem',
+  fontWeight: 'bold', display: 'flex', alignItems: 'center', boxShadow: `0 2px 4px ${color}33`,
+  cursor: 'pointer'
+});
 
 export default AdminManagement;

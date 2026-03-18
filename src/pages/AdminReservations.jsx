@@ -2,6 +2,7 @@ import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
+import { Clipboard, Activity, BarChart3, Calendar } from 'lucide-react';
 
 // 🆕 予約者名から固有のパステルカラーを生成するロジック
 const getCustomerColor = (name, type) => { // 💡 typeを引数に追加
@@ -957,29 +958,13 @@ return (
               <h2 style={{ fontSize: '1.1rem', margin: '0 0 0 auto', fontWeight: '900', color: '#1e293b' }}>{startDate.getFullYear()}年 {startDate.getMonth() + 1}月</h2>
             </div>
 ) : (
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', gap: '15px', position: 'relative' }}>
-              <button onClick={goPrevMonth} style={mobileArrowBtnStyle}>◀</button>
-              <h2 style={{ fontSize: '1.3rem', margin: 0, fontWeight: '900', color: '#1e293b' }}>{startDate.getFullYear()}年 {startDate.getMonth() + 1}月</h2>
-              <button onClick={goNextMonth} style={mobileArrowBtnStyle}>▶</button>
+  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', gap: '15px', position: 'relative' }}>
+    {/* 🆕 修正：スマホでも週単位でサクサク移動できるように変更 */}
+    <button onClick={goPrev} style={mobileArrowBtnStyle}>◀</button>
+    <h2 style={{ fontSize: '1.3rem', margin: 0, fontWeight: '900', color: '#1e293b' }}>{startDate.getFullYear()}年 {startDate.getMonth() + 1}月</h2>
+    <button onClick={goNext} style={mobileArrowBtnStyle}>▶</button>
               
-              {/* ✅ 追加：スマホ画面の右端に配置 [cite: 2026-03-06] */}
-              <button 
-                onClick={() => navigate(`/admin/${shopId}/today-tasks`)}
-                style={{ 
-                  position: 'absolute', 
-                  right: '0', 
-                  background: themeColor, 
-                  color: '#fff', 
-                  border: 'none', 
-                  padding: '8px 12px', 
-                  borderRadius: '10px', 
-                  fontSize: '0.75rem', 
-                  fontWeight: 'bold',
-                  boxShadow: `0 4px 10px ${themeColor}44`
-                }}
-              >
-                タスク
-              </button>
+              
             </div>
           )}
           </div>
@@ -1181,12 +1166,41 @@ if (startingHere.length === 1) {
         </div>
         
         {!isPC && (
-          <div style={{ position: 'fixed', bottom: '20px', left: '50%', transform: 'translateX(-50%)', display: 'flex', background: '#fff', borderRadius: '50px', boxShadow: '0 8px 30px rgba(0,0,0,0.15)', padding: '5px', zIndex: 100, border: '1px solid #eee' }}>
-            <button onClick={goPrev} style={floatNavBtnStyle}>◀</button>
-            <button onClick={goToday} style={{ ...floatNavBtnStyle, width: '80px', color: themeColor, fontSize: '0.9rem' }}>今日</button>
-            <button onClick={goNext} style={floatNavBtnStyle}>▶</button>
-          </div>
-        )}
+        <div style={{ 
+          position: 'fixed', bottom: 0, left: 0, right: 0, height: '75px', 
+          background: '#fff', borderTop: '1px solid #e2e8f0', display: 'flex', 
+          justifyContent: 'space-around', alignItems: 'center', zIndex: 2000, 
+          paddingBottom: 'env(safe-area-inset-bottom)',
+          boxShadow: '0 -4px 15px rgba(0,0,0,0.05)' 
+        }}>
+          {/* 1. ライン（タイムライン） */}
+          <button onClick={() => navigate(`/admin/${shopId}/timeline?date=${selectedDate}`)} style={mobileTabStyle(false, '#4b2c85')}>
+            <Activity size={22} />
+            <span style={{ fontSize: '0.65rem', fontWeight: 'bold' }}>ライン</span>
+          </button>
+
+          {/* 2. タスク（現場実行） */}
+          <button onClick={() => navigate(`/admin/${shopId}/today-tasks`)} style={mobileTabStyle(false, '#1e293b')}>
+            <Clipboard size={22} />
+            <span style={{ fontSize: '0.65rem', fontWeight: 'bold' }}>タスク</span>
+          </button>
+
+          {/* 3. 今日（カレンダーの今日に戻る） */}
+          <button onClick={goToday} style={{ 
+            display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px',
+            background: themeColorLight, border: `1px solid ${themeColor}33`, 
+            color: themeColor, borderRadius: '15px', padding: '8px 15px', cursor: 'pointer' 
+          }}>
+            <span style={{ fontSize: '0.85rem', fontWeight: '900' }}>今日</span>
+          </button>
+
+          {/* 4. 管理（名簿・売上） */}
+          <button onClick={() => navigate(`/admin/${shopId}/management`)} style={mobileTabStyle(false, '#008000')}>
+            <BarChart3 size={22} />
+            <span style={{ fontSize: '0.65rem', fontWeight: 'bold' }}>管理</span>
+          </button>
+        </div>
+      )}
       </div>
 
 {/* 🆕 3択の名寄せ（マージ）確認モーダル */}
@@ -1731,4 +1745,19 @@ const switchBtnStyle = (active) => ({
   color: active ? '#1e293b' : '#64748b',
   transition: 'all 0.2s'
 });
+const mobileTabStyle = (active, color) => ({
+  display: 'flex', 
+  flexDirection: 'column', 
+  alignItems: 'center', 
+  justifyContent: 'center', 
+  gap: '4px',
+  background: 'none', 
+  border: 'none', 
+  color: active ? color : '#94a3b8',
+  cursor: 'pointer', 
+  flex: 1, 
+  padding: '8px 0', 
+  transition: 'all 0.2s'
+});
+
 export default AdminReservations;
