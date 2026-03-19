@@ -51,8 +51,15 @@ function AdminManagement() {
   // ✅ 追記：レジで選択中の枝分かれメニューを保持する箱
   const [checkoutOptions, setCheckoutOptions] = useState({});
   const [finalPrice, setFinalPrice] = useState(0);
+  const [isManualPrice, setIsManualPrice] = useState(false); 
+  const [isCalculatorOpen, setIsCalculatorOpen] = useState(false);
+  const [tempPrice, setTempPrice] = useState('0'); // 現在表示されている数字
+  // 🆕 電卓の計算用State
+  const [prevValue, setPrevValue] = useState(null); // 一つ前に入力した数字
+  const [operator, setOperator] = useState(null);  // ＋－×÷ の種類
+  const [waitingForNext, setWaitingForNext] = useState(false); // 次の数字を待っている状態か
   const [openAdjCategory, setOpenAdjCategory] = useState(null); 
-const [isMenuPopupOpen, setIsMenuPopupOpen] = useState(false); 
+　const [isMenuPopupOpen, setIsMenuPopupOpen] = useState(false); 
   // --- 🆕 売上分析用の新Stateを追加 ---
   const [viewYear, setViewYear] = useState(new Date().getFullYear()); // 表示する年
   const [selectedMonthData, setSelectedMonthData] = useState(null);   // ポップアップで表示する月のデータ
@@ -269,6 +276,9 @@ if (profile && profile.business_name) {
   };
 
   const calculateFinalTotal = (currentSvcs, currentAdjs, currentProds, currentOpts = checkoutOptions) => {
+    // 🆕 手動入力モードなら、自動計算の結果を反映させない
+    if (isManualPrice) return;
+
     let total = currentSvcs.reduce((sum, s) => sum + (Number(s.price) || 0), 0);
     const optPrice = Object.values(currentOpts).reduce((sum, o) => sum + (Number(o.additional_price) || 0), 0);
     total += optPrice;
@@ -1408,7 +1418,48 @@ return (
               ))}
               <div style={{ marginTop: '30px' }}><SectionTitle icon={<ShoppingBag size={16} />} title="店販商品" color="#008000" /><div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>{products.map(prod => (<button key={prod.id} onClick={() => toggleCheckoutProduct(prod)} style={{ ...adjBtnStyle(checkoutProducts.some(p => p.id === prod.id)), borderColor: '#008000', color: checkoutProducts.some(p => p.id === prod.id) ? '#fff' : '#008000', background: checkoutProducts.some(p => p.id === prod.id) ? '#008000' : '#fff' }}>{prod.name} (¥{prod.price.toLocaleString()})</button>))}</div></div>
             </div>
-            <div style={checkoutFooterStyle}><div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '15px' }}><span style={{ fontSize: '1.1rem', fontWeight: 'bold' }}>最終合計</span><span style={{ fontSize: '2.2rem', fontWeight: '900', color: '#d34817' }}>¥ {finalPrice.toLocaleString()}</span></div><button onClick={completePayment} style={completeBtnStyle}><CheckCircle size={20} /> 確定して台帳に記録</button></div>
+<div style={checkoutFooterStyle}>
+              {/* 合計金額表示行 */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '15px', alignItems: 'center' }}>
+                <span style={{ fontSize: '1.1rem', fontWeight: 'bold' }}>最終合計</span>
+                
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+
+                  {/* 🆕 B：電卓（テンキー呼び出し）ボタン */}
+                  <button 
+                    onClick={() => { setTempPrice(finalPrice.toString()); setIsCalculatorOpen(true); }}
+                    style={{ 
+                      background: isManualPrice ? '#e0e7ff' : '#f1f5f9', 
+                      border: 'none', 
+                      padding: '8px', 
+                      borderRadius: '10px', 
+                      cursor: 'pointer', 
+                      display: 'flex', 
+                      alignItems: 'center', 
+                      color: isManualPrice ? '#2563eb' : '#4b2c85',
+                      boxShadow: '0 2px 4px rgba(0,0,0,0.05)'
+                    }}
+                    title="金額を手入力する"
+                  >
+                    <PlusCircle size={22} />
+                  </button>
+
+                  {/* 金額表示：手動入力時は青色(#2563eb)にして区別 */}
+                  <span style={{ 
+                    fontSize: '2.2rem', 
+                    fontWeight: '900', 
+                    color: isManualPrice ? '#2563eb' : '#d34817',
+                    transition: 'color 0.3s'
+                  }}>
+                    ¥ {finalPrice.toLocaleString()}
+                  </span>
+                </div>
+              </div>
+
+              <button onClick={completePayment} style={completeBtnStyle}>
+                <CheckCircle size={20} /> 確定して台帳に記録
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -1667,6 +1718,114 @@ return (
           <button onClick={() => { closeAllPopups(); setActiveMenu('customers'); }} style={mobileTabStyle(activeMenu === 'customers', '#4285f4')}><Users size={22} /><span style={{ fontSize: '0.65rem', fontWeight: 'bold' }}>名簿</span></button>
           <button onClick={() => { closeAllPopups(); setActiveMenu('analytics'); }} style={mobileTabStyle(activeMenu === 'analytics', '#008000')}><BarChart3 size={22} /><span style={{ fontSize: '0.65rem', fontWeight: 'bold' }}>分析</span></button>
           <button onClick={() => { closeAllPopups(); navigate(`/admin/${cleanShopId}/reservations`); }} style={mobileTabStyle(false, '#4b2c85')}><Calendar size={22} /><span style={{ fontSize: '0.65rem', fontWeight: 'bold' }}>戻る</span></button>
+        </div>
+      )}
+
+      {/* 🆕 4. 一般的な電卓機能付きポップアップ */}
+      {isCalculatorOpen && (
+        <div style={modalOverlayStyle} onClick={() => setIsCalculatorOpen(false)}>
+          <div 
+            style={{ ...modalContentStyle, maxWidth: '340px', padding: '20px', borderRadius: '30px' }} 
+            onClick={e => e.stopPropagation()}
+          >
+            {/* 表示部 */}
+            <div style={{ textAlign: 'center', marginBottom: '20px' }}>
+              <div style={{ fontSize: '0.7rem', color: '#94a3b8', height: '1rem' }}>
+                {prevValue !== null ? `${prevValue.toLocaleString()} ${operator || ''}` : ''}
+              </div>
+              <div style={{ 
+                fontSize: '2.4rem', 
+                fontWeight: '900', 
+                color: '#1e293b', 
+                marginTop: '5px', 
+                padding: '15px', 
+                background: '#f8fafc', 
+                borderRadius: '15px',
+                border: '1px solid #e2e8f0',
+                textAlign: 'right'
+              }}>
+                ¥ {Number(tempPrice).toLocaleString()}
+              </div>
+            </div>
+            
+            {/* 電卓ボタン配置（4列） */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px' }}>
+              {/* ボタンの定義: 文字列は数字、オブジェクトは機能ボタン */}
+              {[
+                { label: 'AC', type: 'clear', color: '#fee2e2', txt: '#ef4444' },
+                { label: '÷', type: 'op', op: '÷', color: '#f1f5f9', txt: '#4b2c85' },
+                { label: '×', type: 'op', op: '×', color: '#f1f5f9', txt: '#4b2c85' },
+                { label: '－', type: 'op', op: '－', color: '#f1f5f9', txt: '#4b2c85' },
+                '7', '8', '9', { label: '＋', type: 'op', op: '＋', color: '#f1f5f9', txt: '#4b2c85' },
+                '4', '5', '6', { label: '＝', type: 'equal', color: '#4b2c85', txt: '#fff' },
+                '1', '2', '3', '0',
+                '00', { label: 'OK', type: 'confirm', colSpan: 2, color: '#008000', txt: '#fff' }
+              ].map((btn, i) => {
+                const isObj = typeof btn === 'object';
+                const label = isObj ? btn.label : btn;
+
+                return (
+                  <button
+                    key={i}
+                    onClick={() => {
+                      if (!isObj || btn === '00') {
+                        // 🔢 数字入力のロジック
+                        const val = isObj ? '00' : btn;
+                        if (waitingForNext) {
+                          setTempPrice(val);
+                          setWaitingForNext(false);
+                        } else {
+                          setTempPrice(prev => prev === '0' ? val : prev + val);
+                        }
+                      } else if (btn.type === 'op') {
+                        // ⚙️ 演算子（＋－×÷）のロジック
+                        setPrevValue(Number(tempPrice));
+                        setOperator(btn.op);
+                        setWaitingForNext(true);
+                      } else if (btn.type === 'equal') {
+                        // ＝ のロジック
+                        if (prevValue === null || !operator) return;
+                        const current = Number(tempPrice);
+                        let result = 0;
+                        if (operator === '＋') result = prevValue + current;
+                        if (operator === '－') result = prevValue - current;
+                        if (operator === '×') result = prevValue * current;
+                        if (operator === '÷') result = current !== 0 ? prevValue / current : 0;
+                        setTempPrice(Math.round(result).toString());
+                        setPrevValue(null);
+                        setOperator(null);
+                        setWaitingForNext(true);
+                      } else if (btn.type === 'clear') {
+                        // AC のロジック
+                        setTempPrice('0');
+                        setPrevValue(null);
+                        setOperator(null);
+                        setWaitingForNext(false);
+                      } else if (btn.type === 'confirm') {
+                        // OK（お会計に反映）
+                        setFinalPrice(Number(tempPrice));
+                        setIsManualPrice(true);
+                        setIsCalculatorOpen(false);
+                      }
+                    }}
+                    style={{
+                      gridColumn: isObj && btn.colSpan ? `span ${btn.colSpan}` : 'auto',
+                      gridRow: label === '＝' ? 'span 2' : 'auto', // ＝を縦長くする
+                      padding: '18px 0', fontSize: '1.2rem', fontWeight: '900', borderRadius: '16px', border: 'none',
+                      background: isObj ? btn.color : '#f1f5f9',
+                      color: isObj ? btn.txt : '#1e293b',
+                      cursor: 'pointer', boxShadow: '0 2px 0px rgba(0,0,0,0.05)', transition: 'transform 0.1s'
+                    }}
+                    onMouseDown={e => e.currentTarget.style.transform = 'scale(0.95)'}
+                    onMouseUp={e => e.currentTarget.style.transform = 'scale(1)'}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+            <button onClick={() => setIsCalculatorOpen(false)} style={{ width: '100%', marginTop: '15px', padding: '10px', border: 'none', background: 'none', color: '#94a3b8', cursor: 'pointer', fontWeight: 'bold' }}>キャンセル</button>
+          </div>
         </div>
       )}
 

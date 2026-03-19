@@ -4,7 +4,8 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from "../../../supabaseClient";
 import { 
   CheckCircle2, Clock, User, ArrowLeft, 
-  Calendar, CheckCircle, AlertCircle 
+  Calendar, CheckCircle, AlertCircle,
+  PlusCircle
 } from 'lucide-react';
 
 const TodayTasks = () => {
@@ -35,6 +36,14 @@ const TodayTasks = () => {
   const [selectedAdjustments, setSelectedAdjustments] = useState([]);
   const [selectedProducts, setSelectedProducts] = useState([]);
   const [finalPrice, setFinalPrice] = useState(0);
+  // 🆕 電卓（手動金額入力）用のState一式
+  const [isManualPrice, setIsManualPrice] = useState(false);
+  const [isCalculatorOpen, setIsCalculatorOpen] = useState(false);
+  const [tempPrice, setTempPrice] = useState('0');
+  const [prevValue, setPrevValue] = useState(null);
+  const [operator, setOperator] = useState(null);
+  const [waitingForNext, setWaitingForNext] = useState(false);
+
   const [openAdjCatId, setOpenAdjCatId] = useState(null);
   const [productCategories, setProductCategories] = useState([]); 
   const [openProdCatId, setOpenProdCatId] = useState(null);
@@ -353,6 +362,35 @@ const initialSvcs = opt.services || (opt.people ? opt.people.flatMap(p => p.serv
       alert("確定失敗: " + err.message);
     } finally {
       setIsSavingMemo(false);
+    }
+  };
+
+  // 🆕 修正：エラー解決のための「お会計戻し」関数
+  const handleRevertTask = async (task) => {
+    if (!window.confirm("この予約をお会計前の状態に戻しますか？\n（売上台帳の記録も一度削除されます）")) return;
+
+    try {
+      // 1. 予約のステータスを「完了」から「未完了（pending）」に戻す
+      const { error: resError } = await supabase
+        .from('reservations')
+        .update({ status: 'pending' })
+        .eq('id', task.id);
+
+      if (resError) throw resError;
+
+      // 2. 売上テーブル（sales）から今回の記録を消去する
+      const { error: saleError } = await supabase
+        .from('sales')
+        .delete()
+        .eq('reservation_id', task.id);
+
+      if (saleError) throw saleError;
+
+      showMsg("お会計を差し戻しました。再度レジ処理が可能です。");
+      fetchTodayTasks(); // リストを最新状態（レジへボタン復活）に更新
+    } catch (err) {
+      console.error("戻し処理エラー:", err);
+      alert("エラーが発生しました: " + err.message);
     }
   };
 
@@ -853,11 +891,29 @@ const handleSaveMemo = async () => {
               お客様に金額を提示する
             </button>
 
-            {/* 合計表示エリア（ここは維持） */}
-            <div style={{ background: '#f8fafc', padding: '20px', borderRadius: '20px', marginBottom: '25px', border: '1px solid #e2e8f0' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            {/* 🆕 修正：電卓ボタン付きの合計金額エリア */}
+            <div style={{ background: '#f8fafc', padding: '20px', borderRadius: '20px', marginBottom: '25px', border: isManualPrice ? `2px solid ${themeColor}` : '1px solid #e2e8f0' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span style={{ fontWeight: 'bold', color: '#1e293b' }}>最終合計金額</span>
-                <span style={{ fontSize: '2.2rem', fontWeight: '900', color: themeColor }}>¥{finalPrice.toLocaleString()}</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  
+                  {/* 電卓呼び出しボタン */}
+                  <button 
+                    onClick={() => { setTempPrice(finalPrice.toString()); setIsCalculatorOpen(true); }}
+                    style={{ background: isManualPrice ? `${themeColor}22` : '#fff', border: `1px solid ${isManualPrice ? themeColor : '#e2e8f0'}`, padding: '6px', borderRadius: '10px', cursor: 'pointer', color: themeColor, display: 'flex', alignItems: 'center' }}
+                  >
+                    <PlusCircle size={20} />
+                  </button>
+
+                  <span style={{ 
+                    fontSize: '2.2rem', 
+                    fontWeight: '900', 
+                    color: isManualPrice ? '#2563eb' : themeColor, // 💡 手動時は青色
+                    transition: 'color 0.3s'
+                  }}>
+                    ¥{finalPrice.toLocaleString()}
+                  </span>
+                </div>
               </div>
             </div>
 
@@ -1130,6 +1186,97 @@ const handleSaveMemo = async () => {
           </div>
         )}
       </AnimatePresence>
+
+      {/* 🆕 4. 一般的な電卓機能付きポップアップ（スマホ特化版） */}
+      {isCalculatorOpen && (
+        <div 
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', zIndex: 5000, display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(5px)' }}
+          onClick={() => setIsCalculatorOpen(false)}
+        >
+          <div 
+            style={{ background: '#fff', width: '90%', maxWidth: '340px', padding: '20px', borderRadius: '30px' }} 
+            onClick={e => e.stopPropagation()}
+          >
+            {/* 表示部 */}
+            <div style={{ textAlign: 'center', marginBottom: '20px' }}>
+              <div style={{ fontSize: '0.75rem', color: '#94a3b8', height: '1.2rem', fontWeight: 'bold' }}>
+                {prevValue !== null ? `${prevValue.toLocaleString()} ${operator || ''}` : 'CALCULATOR'}
+              </div>
+              <div style={{ 
+                fontSize: '2.6rem', 
+                fontWeight: '900', 
+                color: '#1e293b', 
+                marginTop: '5px', 
+                padding: '15px', 
+                background: '#f1f5f9', 
+                borderRadius: '18px',
+                textAlign: 'right'
+              }}>
+                ¥ {Number(tempPrice).toLocaleString()}
+              </div>
+            </div>
+            
+            {/* 電卓ボタン配置 */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px' }}>
+              {[
+                { label: 'AC', type: 'clear', color: '#fee2e2', txt: '#ef4444' },
+                { label: '÷', type: 'op', op: '÷', color: '#f8fafc', txt: themeColor },
+                { label: '×', type: 'op', op: '×', color: '#f8fafc', txt: themeColor },
+                { label: '－', type: 'op', op: '－', color: '#f8fafc', txt: themeColor },
+                '7', '8', '9', { label: '＋', type: 'op', op: '＋', color: '#f8fafc', txt: themeColor },
+                '4', '5', '6', { label: '＝', type: 'equal', color: themeColor, txt: '#fff' },
+                '1', '2', '3', '0',
+                '00', { label: 'OK', type: 'confirm', colSpan: 2, color: '#008000', txt: '#fff' }
+              ].map((btn, i) => {
+                const isObj = typeof btn === 'object';
+                const label = isObj ? btn.label : btn;
+
+                return (
+                  <button
+                    key={i}
+                    onClick={() => {
+                      if (!isObj || label === '00') {
+                        const val = isObj ? '00' : btn;
+                        if (waitingForNext) { setTempPrice(val); setWaitingForNext(false); }
+                        else { setTempPrice(prev => prev === '0' ? val : prev + val); }
+                      } else if (btn.type === 'op') {
+                        setPrevValue(Number(tempPrice)); setOperator(btn.op); setWaitingForNext(true);
+                      } else if (btn.type === 'equal') {
+                        if (prevValue === null || !operator) return;
+                        const current = Number(tempPrice);
+                        let result = 0;
+                        if (operator === '＋') result = prevValue + current;
+                        if (operator === '－') result = prevValue - current;
+                        if (operator === '×') result = prevValue * current;
+                        if (operator === '÷') result = current !== 0 ? prevValue / current : 0;
+                        setTempPrice(Math.round(result).toString()); setPrevValue(null); setOperator(null); setWaitingForNext(true);
+                      } else if (btn.type === 'clear') {
+                        setTempPrice('0'); setPrevValue(null); setOperator(null); setWaitingForNext(false);
+                      } else if (btn.type === 'confirm') {
+                        setFinalPrice(Number(tempPrice));
+                        setIsManualPrice(true);
+                        setIsCalculatorOpen(false);
+                        showMsg("金額を手動で確定しました");
+                      }
+                    }}
+                    style={{
+                      gridColumn: isObj && btn.colSpan ? `span ${btn.colSpan}` : 'auto',
+                      gridRow: label === '＝' ? 'span 2' : 'auto',
+                      padding: '18px 0', fontSize: '1.4rem', fontWeight: '900', borderRadius: '16px', border: 'none',
+                      background: isObj ? btn.color : '#f1f5f9',
+                      color: isObj ? btn.txt : '#1e293b',
+                      cursor: 'pointer', boxShadow: '0 3px 0px rgba(0,0,0,0.05)', transition: 'all 0.1s'
+                    }}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+            <button onClick={() => setIsCalculatorOpen(false)} style={{ width: '100%', marginTop: '20px', padding: '15px', border: 'none', background: 'none', color: '#94a3b8', cursor: 'pointer', fontWeight: 'bold' }}>閉じる</button>
+          </div>
+        </div>
+      )}
 
     </div> // 👈 ファイルの最後、一番外側の div
   );
