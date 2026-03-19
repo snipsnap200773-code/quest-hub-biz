@@ -1412,6 +1412,10 @@ if (startingHere.length === 1) {
           </a>
         )}
 
+        {key === 'name' && editFields.line_user_id && (
+                              <span style={badgeStyle('#06C755')}>LINE連携済み ✅</span>
+                            )}
+
         {/* 📍 マップを開くボタン (addressかつデータがある時のみ) */}
         {key === 'address' && editFields.address && (
           <a 
@@ -1758,6 +1762,21 @@ const mobileTabStyle = (active, color) => ({
   flex: 1, 
   padding: '8px 0', 
   transition: 'all 0.2s'
+});
+
+const badgeStyle = (color) => ({
+  textDecoration: 'none', 
+  background: color, 
+  color: '#fff',
+  padding: '2px 8px', 
+  borderRadius: '6px', 
+  fontSize: '0.65rem',
+  fontWeight: 'bold', 
+  display: 'inline-flex', // 横並びにする
+  alignItems: 'center', 
+  gap: '4px',
+  boxShadow: `0 2px 4px ${color}33`,
+  marginLeft: '10px' // お名前の横に少し隙間を作る
 });
 
 export default AdminReservations;

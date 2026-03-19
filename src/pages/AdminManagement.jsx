@@ -360,21 +360,23 @@ const completePayment = async () => {
     try {
       setIsSavingMemo(true);
 
-      // 1. 基本情報の整理（名前はeditFieldsを優先）
+      // 1. 基本情報の整理（名前はeditFieldsの入力値を最優先する）
       const totalSlots = checkoutServices.reduce((sum, s) => sum + (s.slots ?? 0), 0);
       const endTime = new Date(new Date(selectedRes.start_time).getTime() + totalSlots * (shop.slot_interval_min || 15) * 60000);
+      
+      // 💡 三土手さんが画面で入力した「お名前」を正解として採用する
       const normalizedName = (editFields.name || selectedRes.customer_name).replace(/　/g, ' ').trim();
 
-      // 2. メニュー名の組み立て（枝分かれ込み）
+      // 2. メニュー名の組み立て（「カット, カラー」などの文字列を作る）
       const currentBaseName = checkoutServices.map(s => s.name).join(', ');
       const info = parseReservationDetails(selectedRes);
       const branchNames = info.subItems.map(o => o.option_name).filter(Boolean);
       const dbMenuName = branchNames.length > 0 ? `${currentBaseName}（${branchNames.join(', ')}）` : currentBaseName;
 
-      // --- 🆕 ステップA：顧客名簿（マスタ）の自動登録・更新（名寄せ） ---
+      // --- ステップA：顧客名簿（マスタ）の自動登録・更新（名寄せ） ---
       let targetCustomerId = selectedCustomer?.id;
       
-      // まだIDが紐付いていない場合、名前で検索してみる
+      // まだIDが紐付いていない場合、名前で名簿を検索
       if (!targetCustomerId) {
         const { data: existingCust } = await supabase
           .from('customers')
@@ -400,6 +402,7 @@ const completePayment = async () => {
         symptoms: editFields.symptoms,
         request_details: editFields.request_details,
         memo: editFields.memo,
+        line_user_id: editFields.line_user_id || selectedRes.line_user_id, // 🆕 LINE IDを確保
         updated_at: new Date().toISOString()
       };
 
@@ -407,7 +410,7 @@ const completePayment = async () => {
         customerPayload.id = targetCustomerId;
       }
 
-      // 名簿を更新（なければ新規作成、あれば上書き）
+      // 名簿を更新（なければ作成、あれば上書き）
       const { data: savedCust } = await supabase
         .from('customers')
         .upsert(customerPayload, { onConflict: 'id' })
@@ -416,17 +419,26 @@ const completePayment = async () => {
       
       const finalCustomerId = savedCust?.id || targetCustomerId;
 
-      // --- 🆕 ステップB：予約データ（reservations）を確定内容で上書き ＆ ID紐付け ---
+      // --- 🆕 ステップB：【重要】過去の予約も一括で紐付け！ ---
+      // これにより、過去にIDが空っぽで「記録なし」になっていた予約もすべて名簿に紐付きます
+      await supabase
+        .from('reservations')
+        .update({ customer_id: finalCustomerId })
+        .eq('shop_id', cleanShopId)
+        .eq('customer_name', normalizedName)
+        .is('customer_id', null);
+
+      // --- ステップC：今回の予約データを確定内容で上書き保存 ---
+      // 💡 お会計時の金額とメニューをsnapshot保存するので、後でマスタを変えても0円になりません
       await supabase.from('reservations').update({ 
         total_price: finalPrice, 
         status: 'completed', 
-        customer_id: finalCustomerId, // ここでガッチリ名簿と繋ぐ！
+        customer_id: finalCustomerId, // ガッチリ紐付け
         customer_name: normalizedName,
         total_slots: totalSlots, 
         end_time: endTime.toISOString(), 
         menu_name: dbMenuName,
         options: { 
-          // visit_info(アンケート結果など)は維持しつつ、お会計内容を保存
           ...(selectedRes.options || {}),
           services: checkoutServices, 
           adjustments: checkoutAdjustments, 
@@ -436,16 +448,11 @@ const completePayment = async () => {
         }
       }).eq('id', selectedRes.id);
 
-      // --- ステップC：売上データ（sales）の記録 ---
+      // --- ステップD：売上データ（sales）の記録 ---
       const serviceAmt = checkoutServices.reduce((sum, s) => sum + (Number(s.price) || 0), 0);
       const productAmt = checkoutProducts.reduce((sum, p) => sum + (Number(p.price) || 0), 0);
       
-      const { data: existingSale } = await supabase
-        .from('sales')
-        .select('id')
-        .eq('reservation_id', selectedRes.id)
-        .maybeSingle();
-
+      const { data: existingSale } = await supabase.from('sales').select('id').eq('reservation_id', selectedRes.id).maybeSingle();
       const salePayload = { 
         shop_id: cleanShopId, 
         reservation_id: selectedRes.id, 
@@ -461,14 +468,14 @@ const completePayment = async () => {
         await supabase.from('sales').update(salePayload).eq('id', existingSale.id);
       } else {
         await supabase.from('sales').insert([salePayload]);
-        // 初回確定時のみマスタの来店回数を+1
+        // 初回確定時のみ来店回数を+1
         if (finalCustomerId) {
           const { data: cData } = await supabase.from('customers').select('total_visits').eq('id', finalCustomerId).single();
           await supabase.from('customers').update({ total_visits: (cData?.total_visits || 0) + 1 }).eq('id', finalCustomerId);
         }
       }
 
-      alert("お会計と名簿更新が完了しました！✨"); 
+      alert("お会計・名簿更新・全履歴の紐付けが完了しました！✨"); 
       setIsCheckoutOpen(false); 
       fetchInitialData();
     } catch (err) { 

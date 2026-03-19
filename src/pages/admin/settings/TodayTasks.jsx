@@ -46,6 +46,14 @@ const TodayTasks = () => {
   const [selectedOptions, setSelectedOptions] = useState({});
 
   const [categories, setCategories] = useState([]);
+  // 🆕 追加：名簿情報を自動更新するためのState（これがないとエラーになります）
+  const [editFields, setEditFields] = useState({
+    name: '', furigana: '', email: '', phone: '', 
+    zip_code: '', address: '', parking: '', 
+    building_type: '', care_notes: '', company_name: '', 
+    symptoms: '', request_details: '', 
+    memo: '', custom_answers: {}
+  });
 
   useEffect(() => {
       if (shopId) {
@@ -194,6 +202,18 @@ const syncReservationToSupabase = async (newSvcs, newOpts) => {
     setSelectedTask(task);
     setSelectedAdjustments([]);
     setSelectedProducts([]);
+
+    // 🆕 修正：現在の情報を editFields にセット（自動名寄せの準備）
+    const visitInfo = task.options?.visit_info || {};
+    setEditFields({
+      name: task.customers?.name || task.customer_name || '',
+      furigana: task.customers?.furigana || visitInfo.furigana || '',
+      phone: task.customers?.phone || task.customer_phone || '',
+      email: task.customers?.email || task.customer_email || '',
+      address: task.customers?.address || visitInfo.address || '',
+      memo: task.customers?.memo || '',
+      custom_answers: visitInfo.custom_answers || task.customers?.custom_answers || {}
+    });
     
     // 🆕 予約データのJSONから、現在選ばれているメニューを抽出してセット [cite: 2026-03-08]
     const opt = typeof task.options === 'string' ? JSON.parse(task.options) : (task.options || {});
@@ -233,63 +253,93 @@ const initialSvcs = opt.services || (opt.people ? opt.people.flatMap(p => p.serv
   // 🚀 アップグレード：お会計確定 ＆ サービス完了（売上台帳へも記録） [cite: 2026-03-08]
   const handleCompleteTask = async () => {
     try {
-// 1. 予約ステータスを完了にし、変更後のメニューと金額で上書き [cite: 2026-03-08]
+      setIsSavingMemo(true);
+
+      // 1. お名前とメニュー名の整理
+      const normalizedName = (editFields.name || selectedTask.customer_name).replace(/　/g, ' ').trim();
       const newMenuName = selectedServices.map(s => s.name).join(', ');
+
+      // --- 🆕 ステップA：顧客マスタ（マスタ）の自動登録・更新 ---
+      let targetCustomerId = selectedTask.customer_id;
+      if (!targetCustomerId) {
+        const { data: existingCust } = await supabase.from('customers').select('id').eq('shop_id', shopId).eq('name', normalizedName).maybeSingle();
+        targetCustomerId = existingCust?.id;
+      }
+
+      const customerPayload = {
+        shop_id: shopId,
+        name: normalizedName,
+        furigana: editFields.furigana,
+        phone: editFields.phone || selectedTask.customer_phone,
+        email: editFields.email || selectedTask.customer_email,
+        address: editFields.address,
+        memo: editFields.memo,
+        line_user_id: editFields.line_user_id || selectedTask.line_user_id, // LINE IDを確実に保存
+        updated_at: new Date().toISOString()
+      };
+
+      if (targetCustomerId) customerPayload.id = targetCustomerId;
+      const { data: savedCust } = await supabase.from('customers').upsert(customerPayload, { onConflict: 'id' }).select().single();
+      const finalCustomerId = savedCust?.id || targetCustomerId;
+
+      // --- 🆕 ステップB：【最重要】過去の予約も一括で紐付け！ ---
+      // これを入れないと、過去の履歴が「記録なし」に見えてしまいます
+      await supabase
+        .from('reservations')
+        .update({ customer_id: finalCustomerId })
+        .eq('shop_id', shopId)
+        .eq('customer_name', normalizedName)
+        .is('customer_id', null);
+
+      // --- ステップC：予約データの確定 ---
       const { error: resError } = await supabase
         .from('reservations')
         .update({ 
           status: 'completed', 
+          customer_id: finalCustomerId, 
+          customer_name: normalizedName,
           total_price: finalPrice,
-          menu_name: newMenuName, // 🆕 メニュー名も最新版に更新 [cite: 2026-03-08]
+          menu_name: newMenuName,
           options: { 
             ...selectedTask.options, 
             services: selectedServices,
             options: selectedOptions,
             adjustments: selectedAdjustments,
             products: selectedProducts,
-            quick_checkout: true 
+            isUpdatedFromTodayTasks: true 
           } 
         })
         .eq('id', selectedTask.id);
 
       if (resError) throw resError;
 
-      // 2. 売上管理（salesテーブル）に自動で1件記録を追加する [cite: 2026-03-08]
-      const { error: saleError } = await supabase.from('sales').insert([{
+      // --- ステップD：売上データ（sales）の記録 ---
+      const { data: existingSale } = await supabase.from('sales').select('id').eq('reservation_id', selectedTask.id).maybeSingle();
+      const salePayload = {
         shop_id: shopId,
         reservation_id: selectedTask.id,
+        customer_id: finalCustomerId,
         total_amount: finalPrice,
         sale_date: new Date().toLocaleDateString('sv-SE') 
-      }]);
+      };
 
-      if (saleError) console.error("売上台帳への記録に失敗:", saleError.message);
+      if (existingSale) {
+        await supabase.from('sales').update(salePayload).eq('id', existingSale.id);
+      } else {
+        await supabase.from('sales').insert([salePayload]);
+        if (finalCustomerId) {
+          const { data: cData } = await supabase.from('customers').select('total_visits').eq('id', finalCustomerId).single();
+          await supabase.from('customers').update({ total_visits: (cData?.total_visits || 0) + 1 }).eq('id', finalCustomerId);
+        }
+      }
 
-      showMsg("お会計とサービス完了を記録しました！✨");
+      showMsg("お会計と全履歴の紐付けを完了しました！✨");
       setIsCheckoutOpen(false);
       fetchTodayTasks(); 
     } catch (err) {
-      alert("確定エラー: " + err.message);
-    }
-  };
-/* ==========================================
-      🆕 追加：完了を取り消してレジをやり直す関数
-     ========================================== */
-  const handleRevertTask = async (task) => {
-    if (!window.confirm(`${task.customer_name} 様の「完了」を取り消して、お会計をやり直しますか？`)) return;
-
-    try {
-      // 1. 売上台帳（salesテーブル）から、この予約に紐づく記録を削除
-      await supabase.from('sales').delete().eq('reservation_id', task.id);
-
-      // 2. 予約ステータスを 'confirmed' に戻す
-      const { error } = await supabase.from('reservations').update({ status: 'confirmed' }).eq('id', task.id);
-      if (error) throw error;
-
-      // ✅ 修正：余計なタグを消しました
-      showMsg("完了を取り消しました。お会計を修正できます。");
-      fetchTodayTasks(); 
-} catch (err) {
-      alert("取り消しエラー: " + err.message);
+      alert("確定失敗: " + err.message);
+    } finally {
+      setIsSavingMemo(false);
     }
   };
 
