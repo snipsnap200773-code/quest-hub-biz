@@ -231,13 +231,67 @@ const otpRes = await fetch('https://api.resend.com/emails', {
 // ==========================================
 // 🆕 【ここを新しく追加！】パターンG：提携リクエスト通知
 // ==========================================
-if (type === 'partnership_request') {
+if (type === 'partnership_approved') {
   const { 
-    senderName,    // 送信元の名前（施設名 or 店名）
-    receiverEmail, // 受信先のメールアドレス
-    receiverId,    // 受信先のID
-    receiverType,  // 'shop' or 'facility'
-    targetUrl      // 承認画面へのリンク
+    shopName, 
+    facilityName, 
+    shopEmail, 
+    facilityEmail,
+    shopId,
+    facilityId
+  } = payload;
+
+  const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY');
+
+  // メール送信用の共通テンプレート関数
+  const sendEmail = async (to: string, roleName: string, partnerName: string, targetUrl: string) => {
+    return await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${RESEND_API_KEY}` },
+      body: JSON.stringify({
+        from: 'QUEST HUB 通知センター <infec@snipsnap.biz>',
+        to: [to],
+        subject: `【提携成立】${partnerName} 様との提携が完了しました！`,
+        html: `
+          <div style="font-family: sans-serif; color: #333; line-height: 1.6; max-width: 550px; margin: 0 auto; border: 1px solid #4f46e5; padding: 25px; border-radius: 12px; border-top: 8px solid #4f46e5;">
+            <h2 style="color: #4f46e5; margin-top: 0; text-align: center;">🎉 提携おめでとうございます！</h2>
+            <p><strong>${roleName} 様</strong></p>
+            <p><strong>${partnerName} 様</strong> との提携が正式に完了しました。</p>
+            <div style="background: #f5f3ff; padding: 20px; border-radius: 10px; margin: 20px 0; text-align: center;">
+              <p style="margin-bottom: 15px; font-size: 0.9rem; color: #4338ca;">これから名簿の共有や、システムを通じた訪問予約が可能になります。</p>
+              <a href="${targetUrl}" style="display: inline-block; background: #4f46e5; color: #fff; padding: 12px 25px; border-radius: 8px; text-decoration: none; font-weight: bold;">管理画面を確認する</a>
+            </div>
+            <p style="font-size: 0.8rem; color: #94a3b8; text-align: center; border-top: 1px solid #eee; padding-top: 15px;">
+              QUEST HUB は円滑な施設訪問と質の高いサービス提供を応援します。
+            </p>
+          </div>`
+      })
+    });
+  };
+
+  // 🆕 B案：設定フラグの判定を削除し、アドレスがあれば必ず送る
+  if (facilityEmail) {
+    await sendEmail(facilityEmail, facilityName, shopName, `https://quest-hub-five.vercel.app/facility-login/${facilityId}`);
+  }
+
+  if (shopEmail) {
+    await sendEmail(shopEmail, shopName, facilityName, `https://quest-hub-five.vercel.app/admin/${shopId}/facilities`);
+  }
+
+  return new Response(JSON.stringify({ success: true }), { status: 200, headers: corsHeaders });
+}
+
+// ==========================================
+// 🆕 【ここを新しく追加！】パターンH：提携完了（承認）通知 
+// ==========================================
+if (type === 'partnership_approved') {
+  const { 
+    shopName, 
+    facilityName, 
+    shopEmail, 
+    facilityEmail,
+    shopId,
+    facilityId
   } = payload;
 
   const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? "";
@@ -245,43 +299,47 @@ if (type === 'partnership_request') {
   const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY');
   const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-  // 1. 受信側の設定をDBから直接取得（独立したフラグ：email_notifications_enabled）
-  const table = receiverType === 'shop' ? 'profiles' : 'facility_users';
-  const { data: receiverData } = await supabaseAdmin
-    .from(table)
-    .select('email_notifications_enabled, business_name, facility_name')
-    .eq('id', receiverId)
-    .single();
+  // 1. 両方の通知設定（フラグ）をDBから取得
+  const { data: sData } = await supabaseAdmin.from('profiles').select('email_notifications_enabled').eq('id', shopId).single();
+  const { data: fData } = await supabaseAdmin.from('facility_users').select('email_notifications_enabled').eq('id', facilityId).single();
 
-  // ✅ 判定：受信側が「メール通知OFF」なら送信をスキップ
-  if (receiverData?.email_notifications_enabled === false) {
-    return new Response(JSON.stringify({ success: true, skipped: true }), { headers: corsHeaders });
+  // メール送信用の共通テンプレート関数
+  const sendEmail = async (to: string, roleName: string, partnerName: string, targetUrl: string) => {
+    return await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${RESEND_API_KEY}` },
+      body: JSON.stringify({
+        from: 'QUEST HUB 通知センター <infec@snipsnap.biz>',
+        to: [to],
+        subject: `【提携成立】${partnerName} 様との提携が完了しました！`,
+        html: `
+          <div style="font-family: sans-serif; color: #333; line-height: 1.6; max-width: 550px; margin: 0 auto; border: 1px solid #4f46e5; padding: 25px; border-radius: 12px; border-top: 8px solid #4f46e5;">
+            <h2 style="color: #4f46e5; margin-top: 0; text-align: center;">🎉 提携おめでとうございます！</h2>
+            <p><strong>${roleName} 様</strong></p>
+            <p><strong>${partnerName} 様</strong> との提携が正式に完了しました。</p>
+            <div style="background: #f5f3ff; padding: 20px; border-radius: 10px; margin: 20px 0; text-align: center;">
+              <p style="margin-bottom: 15px; font-size: 0.9rem; color: #4338ca;">これから名簿の共有や、システムを通じた訪問予約が可能になります。</p>
+              <a href="${targetUrl}" style="display: inline-block; background: #4f46e5; color: #fff; padding: 12px 25px; border-radius: 8px; text-decoration: none; font-weight: bold;">管理画面を確認する</a>
+            </div>
+            <p style="font-size: 0.8rem; color: #94a3b8; text-align: center; border-top: 1px solid #eee; padding-top: 15px;">
+              QUEST HUB は円滑な施設訪問と質の高いサービス提供を応援します。
+            </p>
+          </div>`
+      })
+    });
+  };
+
+  // 2. 施設側へ送信（設定がONの場合のみ）
+  if (fData?.email_notifications_enabled !== false && facilityEmail) {
+    await sendEmail(facilityEmail, facilityName, shopName, `https://quest-hub-five.vercel.app/facility-login/${facilityId}`);
   }
 
-  const receiverName = receiverData?.business_name || receiverData?.facility_name || "関係者";
+  // 3. 店舗側へ送信（設定がONの場合のみ）
+  if (sData?.email_notifications_enabled !== false && shopEmail) {
+    await sendEmail(shopEmail, shopName, facilityName, `https://quest-hub-five.vercel.app/admin/${shopId}/facilities`);
+  }
 
-  const subject = `【QUEST HUB】新しい提携申請（${senderName} 様より）`;
-  const html = `
-    <div style="font-family: sans-serif; color: #333; line-height: 1.6; max-width: 550px; margin: 0 auto; border: 1px solid #e2e8f0; padding: 25px; border-radius: 12px;">
-      <h2 style="color: #4f46e5; margin-top: 0;">🤝 新しい提携申請</h2>
-      <p><strong>${receiverName} 様</strong></p>
-      <p><strong>${senderName} 様</strong> より、新しく提携のリクエストが届きました。</p>
-      <div style="background: #f8fafc; padding: 20px; border-radius: 10px; border: 1px solid #e2e8f0; margin: 20px 0; text-align: center;">
-        <p style="margin-bottom: 15px; font-size: 0.9rem; color: #64748b;">内容を確認して承認・拒否を選択してください</p>
-        <a href="${targetUrl}" style="display: inline-block; background: #4f46e5; color: #fff; padding: 12px 25px; border-radius: 8px; text-decoration: none; font-weight: bold;">申請を確認する</a>
-      </div>
-      <p style="font-size: 0.8rem; color: #94a3b8; border-top: 1px solid #eee; padding-top: 15px;">
-        ※通知設定は管理画面の「設定」より変更可能です。
-      </p>
-    </div>`;
-
-  const mailRes = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${RESEND_API_KEY}` },
-    body: JSON.stringify({ from: 'QUEST HUB 通知センター <infec@snipsnap.biz>', to: [receiverEmail], subject, html })
-  });
-
-  return new Response(JSON.stringify({ success: mailRes.ok }), { status: 200, headers: corsHeaders });
+  return new Response(JSON.stringify({ success: true }), { status: 200, headers: corsHeaders });
 }
 
     // ==========================================

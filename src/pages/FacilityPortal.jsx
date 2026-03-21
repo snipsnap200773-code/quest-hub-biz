@@ -10,7 +10,9 @@ import {
   Settings, ShieldAlert,
   User, Mail, 
   Phone,
-  Send
+  Send,
+  MapPin,
+  ExternalLink
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -68,8 +70,9 @@ const FacilityPortal = () => {
   .select(`
     *, 
     profiles (
-      id, business_name, business_type, theme_color, phone, email_contact
-    )
+    id, business_name, business_type, theme_color, phone, email_contact,
+    address, official_url, description, intro_text, owner_name
+  )
   `)
   .eq('facility_user_id', facilityId)
   .in('status', ['active', 'pending']); // ✅ 両方取得する！
@@ -236,27 +239,41 @@ setConnectedShops(shopData || []);
     setIsUpdating(true);
     
     if (newStatus === 'rejected') {
-      // 🆕 拒否の場合は、データを残さず削除する
-      const { error } = await supabase
-        .from('shop_facility_connections')
-        .delete()
-        .eq('id', connectionId);
-
+      const { error } = await supabase.from('shop_facility_connections').delete().eq('id', connectionId);
       if (!error) {
-        alert('リクエストを拒否（削除）しました。');
+        alert('リクエストを拒否しました。');
         fetchData();
       } else {
         alert('エラーが発生しました: ' + error.message);
       }
     } else {
-      // 承認の場合は、今まで通り active に更新
-      const { error } = await supabase
-        .from('shop_facility_connections')
-        .update({ status: newStatus })
-        .eq('id', connectionId);
+      // --- 承認（active）の場合 ---
+      const { error } = await supabase.from('shop_facility_connections').update({ status: newStatus }).eq('id', connectionId);
 
       if (!error) {
-        alert('提携を承認しました！');
+        // 🆕 祝福メール送信
+        try {
+          const req = connectedShops.find(c => c.id === connectionId);
+          if (req) {
+            await fetch("https://vcfndmyxypgoreuykwij.supabase.co/functions/v1/resend", {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}` },
+              body: JSON.stringify({
+                type: 'partnership_approved',
+                shopName: req.profiles?.business_name,
+                facilityName: facility?.facility_name,
+                shopEmail: req.profiles?.email_contact || req.profiles?.email,
+                facilityEmail: facility?.email,
+                shopId: req.shop_id,
+                facilityId: facilityId
+              })
+            });
+          }
+        } catch (mailErr) {
+          console.error("祝福メール送信エラー:", mailErr);
+        }
+
+        alert('提携を承認しました！お互いに祝福メールを送信しました🎉');
         fetchData();
       } else {
         alert('エラーが発生しました: ' + error.message);
@@ -307,6 +324,7 @@ setConnectedShops(shopData || []);
 
 // 🆕 追加：設定画面のレンダリング
   const renderSettings = () => {
+    // 申請中のリスト（重複排除）
     const pendingRequests = connectedShops
       .filter(con => con.status === 'pending')
       .reduce((acc, current) => {
@@ -318,78 +336,99 @@ setConnectedShops(shopData || []);
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: '25px', paddingBottom: '100px' }}>
         
+        {/* --- A: 提携リクエストの状況（申請が届いている場合のみ表示） --- */}
         {pendingRequests.length > 0 && (
           <div style={{ ...panelStyle, border: '2px solid #f59e0b', background: '#fffbeb' }}>
-            {/* 🆕 タイトルを汎用的なものに変更 */}
             <h3 style={{ ...panelTitle, color: '#d97706' }}><ShieldAlert size={18} /> 提携リクエストの状況</h3>
             <p style={{ fontSize: '0.75rem', color: '#b45309', marginBottom: '15px' }}>
-              店舗との提携リクエストの状態を表示しています。
+              届いている申請を確認し、詳細をチェックしてから承認できます。
             </p>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              {pendingRequests.map(req => (
-                <div key={req.id} style={requestCardStyle}>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontWeight: 'bold', fontSize: '0.95rem', color: '#1e293b' }}>{req.profiles?.business_name}</div>
-                    <div style={{ fontSize: '0.7rem', color: '#64748b', marginBottom: '4px' }}>業種: {req.profiles?.business_type}</div>
-                    
-                    <div style={{ display: 'flex', gap: '10px', fontSize: '0.65rem', color: '#94a3b8' }}>
-                      <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><Phone size={10} /> {req.profiles?.phone || '-'}</span>
-                      <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><Mail size={10} /> {req.profiles?.email_contact || '-'}</span>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
+              {pendingRequests.map(req => {
+                const shop = req.profiles;
+                const themeColor = shop?.theme_color || '#4f46e5';
+                return (
+                  <div key={req.id} style={{ background: '#fff', padding: '20px', borderRadius: '24px', border: `2px solid ${themeColor}`, boxShadow: '0 10px 25px rgba(0,0,0,0.05)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '15px' }}>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ background: themeColor, color: '#fff', fontSize: '0.65rem', fontWeight: 'bold', padding: '2px 8px', borderRadius: '10px', display: 'inline-block', marginBottom: '5px' }}>{shop?.business_type}</div>
+                        <h4 style={{ margin: 0, fontSize: '1.2rem', fontWeight: '900', color: '#1a1a1a' }}>{shop?.business_name}</h4>
+                      </div>
+                      <div style={{ fontSize: '0.65rem', padding: '4px 10px', borderRadius: '20px', background: '#f1f5f9', color: '#64748b', fontWeight: 'bold' }}>
+                        {req.created_by_type === 'shop' ? '相手からの申請' : 'こちらから依頼中'}
+                      </div>
+                    </div>
+                    {/* 店舗の連絡先・住所（タップ可能） */}
+                    <div style={{ background: '#f8fafc', padding: '15px', borderRadius: '18px', display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '20px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '0.85rem', color: '#666' }}>
+                        <User size={16} color={themeColor} />
+                        <span>代表：<strong>{shop?.owner_name || '未登録'}</strong></span>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '0.85rem', color: '#666' }}>
+                        <MapPin size={16} color={themeColor} />
+                        <span>{shop?.address || '住所未登録'}</span>
+                      </div>
+                      {shop?.phone && (
+                        <a href={`tel:${shop.phone}`} style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '0.9rem', color: themeColor, textDecoration: 'none', fontWeight: 'bold' }}>
+                          <Phone size={16} />
+                          <span>{shop.phone} <span style={{fontSize:'0.7rem', fontWeight:'normal'}}>(タップで電話)</span></span>
+                        </a>
+                      )}
+                      <a href={`mailto:${shop?.email_contact}`} style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '0.9rem', color: themeColor, textDecoration: 'none' }}>
+                        <Mail size={16} />
+                        <span>{shop?.email_contact || 'メール未登録'}</span>
+                      </a>
+                    </div>
+                    {/* 承認ボタン */}
+                    <div style={{ display: 'flex', gap: '10px' }}>
+                      {shop?.official_url && (
+                        <a href={shop.official_url} target="_blank" rel="noreferrer" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', padding: '12px', borderRadius: '14px', background: '#f1f5f9', color: '#475569', fontSize: '0.85rem', textDecoration: 'none', fontWeight: 'bold' }}>
+                          <ExternalLink size={16} /> サイト
+                        </a>
+                      )}
+                      {req.created_by_type === 'shop' ? (
+                        <div style={{ flex: 2, display: 'flex', gap: '8px' }}>
+                          <button onClick={() => handleConnectionStatus(req.id, 'active')} style={{ ...approveBtnStyle, flex: 2, padding: '12px', fontSize: '0.9rem' }}>承認する</button>
+                          <button onClick={() => handleConnectionStatus(req.id, 'rejected')} style={{ ...rejectBtnStyle, flex: 1, padding: '12px', fontSize: '0.8rem' }}>拒否</button>
+                        </div>
+                      ) : (
+                        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', color: '#f97316', fontWeight: 'bold', fontSize: '0.9rem' }}><Send size={16} /> 返信待ちです</div>
+                      )}
                     </div>
                   </div>
-
-                  {/* 🆕 ここで出し分け！ */}
-                  <div style={{ display: 'flex', gap: '8px' }}>
-                    {req.created_by_type === 'shop' ? (
-                      // A：店舗から来た場合 ➔ 承認/拒否ボタンを出す
-                      <>
-                        <button 
-                          onClick={() => handleConnectionStatus(req.id, 'active')} 
-                          style={approveBtnStyle}
-                          disabled={isUpdating}
-                        >
-                          承認
-                        </button>
-                        <button 
-                          onClick={() => handleConnectionStatus(req.id, 'rejected')} 
-                          style={rejectBtnStyle}
-                          disabled={isUpdating}
-                        >
-                          拒否
-                        </button>
-                      </>
-                    ) : (
-                      // B：自分（施設）から送った場合 ➔ 「リクエスト中」の文字を出す
-                      <div style={{ 
-                        color: '#f97316', 
-                        fontWeight: 'bold', 
-                        fontSize: '0.85rem', 
-                        display: 'flex', 
-                        alignItems: 'center', 
-                        gap: '5px',
-                        padding: '8px 12px',
-                        background: '#fff7ed',
-                        borderRadius: '10px',
-                        border: '1px solid #fdba74'
-                      }}>
-                        <Send size={14} /> 提携リクエスト中
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         )}
 
-        {/* ❌ ここにあった「2. 届いている提携申請（既存の...）」というブロックはまるごと消しました */}
+        {/* --- B: 通知設定（ON/OFFスイッチ） --- */}
+        <div style={panelStyle}>
+          <h3 style={panelTitle}><Mail size={18} /> 通知設定</h3>
+          <p style={{ fontSize: '0.8rem', color: '#64748b', marginBottom: '20px' }}>
+            新しい提携リクエストが届いた際の通知方法を設定します。
+          </p>
+          <div style={settingRowStyle}>
+            <span style={{ fontWeight: 'bold', fontSize: '0.9rem' }}>メールでの新着通知</span>
+            <label style={switchStyle}>
+              <input 
+                type="checkbox" 
+                style={{ opacity: 0, width: 0, height: 0, position: 'absolute' }}
+                checked={facility?.email_notifications_enabled ?? true} 
+                onChange={(e) => updateAcceptStatus('email_notifications_enabled', e.target.checked)}
+                disabled={isUpdating}
+              />
+              <span style={{ ...sliderStyle, backgroundColor: (facility?.email_notifications_enabled ?? true) ? '#4f46e5' : '#cbd5e1' }}>
+                <div style={{ width: '18px', height: '18px', backgroundColor: 'white', borderRadius: '50%', position: 'absolute', top: '3px', left: (facility?.email_notifications_enabled ?? true) ? '24px' : '4px', transition: '0.3s' }} />
+              </span>
+            </label>
+          </div>
+        </div>
 
-        {/* B: 業種別の受付スイッチ設定（ここはそのまま残す） */}
+        {/* --- C: 外部業者からの提携申請制限 --- */}
         <div style={panelStyle}>
           <h3 style={panelTitle}><ShieldAlert size={18} /> 外部業者からの提携申請制限</h3>
-          <p style={{ fontSize: '0.8rem', color: '#64748b', marginBottom: '20px' }}>
-            提携していない店舗からの新規申請を、業種ごとに制限できます。
-          </p>          
+          <p style={{ fontSize: '0.8rem', color: '#64748b', marginBottom: '20px' }}>業種ごとに新規提携の受付を制限できます。</p>          
           <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
             {[
               { label: '美容・理容（カット・顔剃り等）', col: 'accept_salon' },
@@ -399,39 +438,73 @@ setConnectedShops(shopData || []);
               <div key={item.col} style={settingRowStyle}>
                 <span style={{ fontWeight: 'bold', fontSize: '0.9rem' }}>{item.label}</span>
                 <label style={switchStyle}>
-                  <input 
-                    type="checkbox" 
-                    style={{ opacity: 0, width: 0, height: 0, position: 'absolute' }}
-                    checked={facility?.[item.col] ?? true} 
-                    onChange={(e) => updateAcceptStatus(item.col, e.target.checked)}
-                    disabled={isUpdating}
-                  />
-                  <span style={{
-                    ...sliderStyle,
-                    backgroundColor: (facility?.[item.col] ?? true) ? '#4f46e5' : '#cbd5e1',
-                  }}>
-                    <div style={{
-                      width: '18px', height: '18px', backgroundColor: 'white', borderRadius: '50%',
-                      position: 'absolute', top: '3px',
-                      left: (facility?.[item.col] ?? true) ? '24px' : '4px',
-                      transition: '0.3s'
-                    }} />
+                  <input type="checkbox" style={{ opacity: 0, width: 0, height: 0, position: 'absolute' }} checked={facility?.[item.col] ?? true} onChange={(e) => updateAcceptStatus(item.col, e.target.checked)} disabled={isUpdating} />
+                  <span style={{ ...sliderStyle, backgroundColor: (facility?.[item.col] ?? true) ? '#4f46e5' : '#cbd5e1' }}>
+                    <div style={{ width: '18px', height: '18px', backgroundColor: 'white', borderRadius: '50%', position: 'absolute', top: '3px', left: (facility?.[item.col] ?? true) ? '24px' : '4px', transition: '0.3s' }} />
                   </span>
                 </label>
               </div>
             ))}
           </div>
-          <div style={{ marginTop: '20px', padding: '12px', background: '#fffbeb', borderRadius: '10px', border: '1px solid #fef3c7', fontSize: '0.75rem', color: '#92400e' }}>
-            ※OFFにすると、その業種の店舗側の「施設検索」にあなたの施設が表示されなくなります。
-          </div>
         </div>
 
-        {/* C: 施設情報表示（既存） */}
+        {/* --- D: 施設プロフィールの登録・編集 --- */}
         <div style={panelStyle}>
-          <h3 style={panelTitle}><Building2 size={18} /> 施設情報</h3>
-          <p style={{ fontSize: '0.85rem' }}>施設名: <strong>{facility?.facility_name}</strong></p>
-          <p style={{ fontSize: '0.85rem' }}>ログインID: <code>{facility?.login_id}</code></p>
-          <p style={{ fontSize: '0.7rem', color: '#94a3b8' }}>パスワードの変更は運営（三土手）までお問い合わせください。</p>
+          <h3 style={panelTitle}><Building2 size={18} /> 施設プロフィールの登録・編集</h3>
+          <p style={{ fontSize: '0.8rem', color: '#64748b', marginBottom: '20px' }}>ここで登録した連絡先が提携先の店舗（業者）に表示されます。</p>
+          
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
+            <label style={labelStyle}>施設名
+              <input style={{...inputStyle, background: '#f1f5f9', color: '#64748b'}} value={facility?.facility_name || ''} readOnly />
+              <span style={{fontSize: '0.7rem', color: '#94a3b8'}}>※施設名の変更は運営まで</span>
+            </label>
+
+            <label style={labelStyle}>担当者名
+              <input style={inputStyle} placeholder="例：山田 花子" value={facility?.contact_name || ''} onChange={(e) => setFacility({...facility, contact_name: e.target.value})} />
+            </label>
+
+            <label style={labelStyle}>郵便番号・住所
+              <input style={inputStyle} placeholder="例：東京都町田市..." value={facility?.address || ''} onChange={(e) => setFacility({...facility, address: e.target.value})} />
+            </label>
+
+            <label style={labelStyle}>電話番号
+              <input style={inputStyle} placeholder="例：090-0000-0000" value={facility?.tel || ''} onChange={(e) => setFacility({...facility, tel: e.target.value})} />
+            </label>
+
+            <label style={labelStyle}>公式サイトURL
+              <input style={inputStyle} placeholder="https://example.com" value={facility?.official_url || ''} onChange={(e) => setFacility({...facility, official_url: e.target.value})} />
+            </label>
+
+            <label style={labelStyle}>通知用メールアドレス
+              <input style={inputStyle} placeholder="例：info@example.com" value={facility?.email || ''} onChange={(e) => setFacility({...facility, email: e.target.value})} />
+            </label>
+
+            <button 
+              onClick={async () => {
+                setIsUpdating(true);
+                const { error } = await supabase.from('facility_users').update({ 
+                  address: facility.address, 
+                  tel: facility.tel, 
+                  email: facility.email, 
+                  contact_name: facility.contact_name, 
+                  official_url: facility.official_url 
+                }).eq('id', facilityId);
+                
+                if (!error) alert('プロフィールを更新しました！');
+                else alert('更新失敗: ' + error.message);
+                setIsUpdating(false);
+              }} 
+              style={{ ...saveBtnStyle, marginTop: '10px' }} 
+              disabled={isUpdating}
+            >
+              <Save size={18} /> プロフィールを保存
+            </button>
+          </div>
+          
+          <div style={{ marginTop: '25px', paddingTop: '20px', borderTop: '1px solid #f1f5f9' }}>
+            <p style={{ fontSize: '0.85rem' }}>ログインID: <code>{facility?.login_id}</code></p>
+            <p style={{ fontSize: '0.7rem', color: '#94a3b8' }}>パスワードの変更は運営（三土手）までお問い合わせください。</p>
+          </div>
         </div>
       </div>
     );
@@ -508,10 +581,55 @@ setConnectedShops(shopData || []);
                       </button>
                     </div>
 
-                    <div style={{ background: '#f8fafc', padding: '10px', borderRadius: '12px', fontSize: '0.75rem', color: '#64748b', display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '10px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><Phone size={12} /> {con.profiles?.phone || '電話未登録'}</div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><Mail size={12} /> {con.profiles?.email_contact || 'メール未登録'}</div>
-                    </div>
+                    <div style={{ background: '#f8fafc', padding: '15px', borderRadius: '18px', display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '15px' }}>
+  
+  {/* 代表者名（profilesに owner_name がある前提） */}
+  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '0.85rem', color: '#666' }}>
+    <User size={16} color={con.profiles?.theme_color || '#4f46e5'} />
+    <span>代表：<strong>{con.profiles?.owner_name || '三土手 真里'}</strong></span>
+  </div>
+
+  {/* 住所 ＆ Googleマップ連携 */}
+  {con.profiles?.address && (
+    <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', fontSize: '0.85rem', color: '#666' }}>
+      <MapPin size={16} color={con.profiles?.theme_color || '#4f46e5'} style={{ marginTop: '2px' }} />
+      <div style={{ flex: 1 }}>
+        <div style={{ lineHeight: '1.4' }}>{con.profiles.address}</div>
+        <a 
+          href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(con.profiles.address)}`} 
+          target="_blank" 
+          rel="noreferrer"
+          style={{ fontSize: '0.75rem', color: '#4f46e5', fontWeight: 'bold', textDecoration: 'none', marginTop: '4px', display: 'inline-block' }}
+        >
+          Googleマップで場所を確認
+        </a>
+      </div>
+    </div>
+  )}
+
+  {/* 電話：タップで発信 */}
+  {con.profiles?.phone && (
+    <a href={`tel:${con.profiles.phone}`} style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '0.9rem', color: '#4f46e5', textDecoration: 'none', fontWeight: 'bold' }}>
+      <Phone size={16} />
+      <span>{con.profiles.phone} <span style={{fontSize:'0.7rem', fontWeight:'normal'}}>(タップで電話)</span></span>
+    </a>
+  )}
+  
+  {/* メール：タップでメーラー起動 */}
+  {con.profiles?.email_contact && (
+    <a href={`mailto:${con.profiles.email_contact}`} style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '0.9rem', color: '#4f46e5', textDecoration: 'none' }}>
+      <Mail size={16} />
+      <span>{con.profiles.email_contact}</span>
+    </a>
+  )}
+</div>
+
+{/* 公式サイトがあれば表示 */}
+{con.profiles?.official_url && (
+  <a href={con.profiles.official_url} target="_blank" rel="noreferrer" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', padding: '12px', borderRadius: '14px', background: '#f1f5f9', color: '#475569', fontSize: '0.85rem', textDecoration: 'none', fontWeight: 'bold', marginBottom: '10px' }}>
+    <ExternalLink size={16} /> 公式サイト
+  </a>
+)}
 
                     <button 
                       onClick={() => navigate(`/shop/${con.shop_id}/reserve/time`, { 

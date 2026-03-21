@@ -4,7 +4,8 @@ import { supabase } from '../supabaseClient';
 import { 
   Search, Store, Send, CheckCircle2, 
   MapPin, ArrowRight, ChevronLeft,
-  AlertCircle, Phone, Mail
+  AlertCircle, Phone, Mail,
+  User, Link2, ExternalLink
 } from 'lucide-react';
 
 const ShopSearch = () => {
@@ -15,6 +16,7 @@ const ShopSearch = () => {
   const [connections, setConnections] = useState([]); 
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+  const [facility, setFacility] = useState(null); // 🆕 自分の施設情報を入れる箱
 
   useEffect(() => {
     if (facilityId) fetchInitialData();
@@ -23,6 +25,14 @@ const ShopSearch = () => {
   const fetchInitialData = async () => {
     setLoading(true);
     
+    // 0. 🆕 自分の施設名を取得
+    const { data: fData } = await supabase
+      .from('facility_users')
+      .select('facility_name')
+      .eq('id', facilityId)
+      .single();
+    if (fData) setFacility(fData);
+
     // 1. 既に申請・提携済みのリストを取得
     const { data: cData } = await supabase
       .from('shop_facility_connections')
@@ -41,25 +51,47 @@ const ShopSearch = () => {
   };
 
   // 施設から店舗へ提携リクエスト送信
-  const sendRequest = async (shopId) => {
+  const sendRequest = async (shop) => { // 🆕 引数を shop オブジェクトに変更
     setLoading(true);
+    const shopId = shop.id;
     
     // 過去のデータ（拒否等）があれば掃除
     await supabase.from('shop_facility_connections').delete()
       .eq('shop_id', shopId).eq('facility_user_id', facilityId);
 
-    // 新規申請（施設側からなので status: 'pending'）
+    // 1. DBへ新規申請を登録
     const { error } = await supabase.from('shop_facility_connections').insert([
-  { 
-    shop_id: shopId, 
-    facility_user_id: facilityId, 
-    status: 'pending',
-    created_by_type: 'facility' // 施設が送ったよ！と記録
-  }
-]);
+      { 
+        shop_id: shopId, 
+        facility_user_id: facilityId, 
+        status: 'pending',
+        created_by_type: 'facility' 
+      }
+    ]);
 
     if (!error) {
-      alert('店舗へ提携リクエストを送信しました！店舗側の承認をお待ちください。');
+      // 2. 🆕 Edge Function を呼び出してメール通知を送る
+      try {
+        await fetch("https://vcfndmyxypgoreuykwij.supabase.co/functions/v1/resend", {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`
+          },
+          body: JSON.stringify({
+            type: 'partnership_request',
+            senderName: facility?.facility_name || "ある施設",
+            receiverEmail: shop.email_contact || shop.email, // 店舗の通知先メール
+            receiverId: shopId,
+            receiverType: 'shop',
+            targetUrl: `https://quest-hub-five.vercel.app/admin/${shopId}/facilities` // 承認画面への直リンク
+          })
+        });
+      } catch (mailErr) {
+        console.error("通知メール送信失敗:", mailErr);
+      }
+
+      alert(`${shop.business_name} 様へ提携リクエストを送信しました！メールでも通知しました。`);
       fetchInitialData(); 
     } else {
       alert('申請失敗: ' + error.message);
@@ -98,36 +130,84 @@ const ShopSearch = () => {
       <div style={listStyle}>
         {filteredShops.map(s => {
           const connection = connections.find(c => c.shop_id === s.id);
+          const themeColor = s.theme_color || "#4f46e5";
           
           return (
             <div key={s.id} style={shopCardStyle}>
+              {/* 1. ヘッダー：アイコンと店名 */}
               <div style={cardHeaderStyle}>
-                <div style={{...iconBoxStyle, background: s.theme_color + '15'}}>
-                  <Store size={20} color={s.theme_color || "#4f46e5"} />
+                <div style={{...iconBoxStyle, background: themeColor + '15'}}>
+                  <Store size={20} color={themeColor} />
                 </div>
                 <div style={infoStyle}>
                   <h3 style={shopNameStyle}>{s.business_name}</h3>
-                  <div style={typeTagStyle}>{s.business_type || '未設定'}</div>
+                  <div style={{...typeTagStyle, background: themeColor + '10', color: themeColor}}>
+                    {s.business_type || '未設定'}
+                  </div>
                 </div>
               </div>
 
-              <div style={contactAreaStyle}>
-                <div style={contactItemStyle}><Phone size={14} /> {s.phone || '電話未登録'}</div>
-                <div style={contactItemStyle}><Mail size={14} /> {s.email_contact || 'メール未登録'}</div>
+              {/* 2. 🆕 店舗詳細エリア：タップで即アクション可能 */}
+              <div style={{ background: '#f8fafc', padding: '18px', borderRadius: '20px', display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '20px', border: '1px solid #eef2ff' }}>
+                
+                {/* 代表者名 */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.85rem', color: '#475569' }}>
+                  <User size={16} color={themeColor} /> 
+                  <span>代表：<strong>{s.owner_name || '未登録'}</strong></span>
+                </div>
+
+                {/* 住所 ＆ Googleマップ連携 */}
+                {s.address && (
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', fontSize: '0.85rem', color: '#475569' }}>
+                    <MapPin size={16} color={themeColor} style={{ marginTop: '2px' }} /> 
+                    <div style={{ flex: 1 }}>
+                      <div style={{ lineHeight: '1.4' }}>{s.address}</div>
+                      <a 
+                        href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(s.address)}`} 
+                        target="_blank" 
+                        rel="noreferrer"
+                        style={{ fontSize: '0.75rem', color: themeColor, fontWeight: 'bold', textDecoration: 'none', marginTop: '6px', display: 'inline-block', background: '#fff', padding: '4px 10px', borderRadius: '8px', border: '1px solid #e2e8f0' }}
+                      >
+                        Googleマップで場所を確認
+                      </a>
+                    </div>
+                  </div>
+                )}
+
+                {/* 電話番号（即発信） */}
+                {s.phone && (
+                  <a href={`tel:${s.phone}`} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.9rem', color: themeColor, textDecoration: 'none', fontWeight: 'bold' }}>
+                    <Phone size={16} /> {s.phone} 
+                    <span style={{ fontSize: '0.65rem', fontWeight: 'normal', opacity: 0.7 }}>(タップで電話)</span>
+                  </a>
+                )}
+
+                {/* 💡 メールアドレスは三土手さんの方針通り、あえて表示しません */}
+
+                {/* 公式サイト */}
+                {s.official_url && (
+                  <a href={s.official_url} target="_blank" rel="noreferrer" style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.85rem', color: themeColor, textDecoration: 'none', borderTop: '1px solid #eef2ff', paddingTop: '10px', marginTop: '4px' }}>
+                    <Link2 size={16} /> 公式サイトを表示 <ExternalLink size={12} />
+                  </a>
+                )}
               </div>
 
+              {/* 3. アクションエリア */}
               <div style={actionAreaStyle}>
                 {connection ? (
                   <div style={statusBadgeStyle(connection.status)}>
                     {connection.status === 'active' ? (
-                      <><CheckCircle2 size={16} /> 提携中</>
+                      <><CheckCircle2 size={18} /> 提携済み</>
                     ) : (
-                      <><Send size={16} /> 承認待ちです</>
+                      <>
+                        <Send size={18} /> 
+                        {connection.created_by_type === 'shop' ? '提携申請が届いています' : '承認待ちです'}
+                      </>
                     )}
                   </div>
                 ) : (
-                  <button onClick={() => sendRequest(s.id)} style={requestBtnStyle}>
-                    この店舗に提携リクエストを送る <ArrowRight size={16} />
+                  <button onClick={() => sendRequest(s)} style={{...requestBtnStyle, background: themeColor}}>
+                    この店舗に提携リクエストを送る <ArrowRight size={18} />
                   </button>
                 )}
               </div>

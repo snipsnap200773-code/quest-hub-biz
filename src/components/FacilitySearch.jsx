@@ -4,7 +4,8 @@ import { supabase } from '../supabaseClient';
 import { 
   Search, Building2, Send, CheckCircle2, 
   MapPin, Filter, ArrowRight, ChevronLeft,
-  AlertCircle
+  AlertCircle,
+  User, Phone, Mail, Link2, ExternalLink
 } from 'lucide-react';
 import { INDUSTRY_PRESETS } from '../constants/industryMaster';
 
@@ -43,22 +44,48 @@ const FacilitySearch = () => {
   };
 
   // 提携リクエスト送信
-  const sendRequest = async (facilityId) => {
+  const sendRequest = async (facility) => { // 🆕 引数を施設オブジェクトに変更
+    setLoading(true);
+    const facilityId = facility.id;
+
+    // 1. DBへ新規申請を登録
     const { error } = await supabase.from('shop_facility_connections').insert([
-  { 
-    shop_id: shopId, 
-    facility_user_id: facilityId, 
-    status: 'pending',
-    created_by_type: 'shop' // 店舗が送ったよ！と記録
-  }
-]);
+      { 
+        shop_id: shopId, 
+        facility_user_id: facilityId, 
+        status: 'pending',
+        created_by_type: 'shop' 
+      }
+    ]);
 
     if (!error) {
-      alert('リクエストを送信しました！施設側の承認をお待ちください。');
+      // 2. 🆕 Edge Function を呼び出して施設へメール通知を送る
+      try {
+        await fetch("https://vcfndmyxypgoreuykwij.supabase.co/functions/v1/resend", {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`
+          },
+          body: JSON.stringify({
+            type: 'partnership_request',
+            senderName: myProfile?.business_name || "ある店舗",
+            receiverEmail: facility.email, // 施設の登録メールアドレス
+            receiverId: facilityId,
+            receiverType: 'facility',
+            targetUrl: `https://quest-hub-five.vercel.app/facility-login/${facilityId}` // 施設側のログイン/受付設定画面へ
+          })
+        });
+      } catch (mailErr) {
+        console.error("通知メール送信失敗:", mailErr);
+      }
+
+      alert(`【${facility.facility_name}】様へ提携リクエストを送信しました！`);
       fetchInitialData(); 
     } else {
       alert('申請失敗: ' + error.message);
     }
+    setLoading(false);
   };
 
   // 🔍 industryMasterに基づいたフィルタリングロジック
@@ -114,6 +141,7 @@ const FacilitySearch = () => {
           
           return (
             <div key={f.id} style={facilityCardStyle}>
+              {/* 1. ヘッダー：アイコンと施設名 */}
               <div style={cardHeaderStyle}>
                 <div style={iconBoxStyle}><Building2 size={20} color="#4f46e5" /></div>
                 <div style={infoStyle}>
@@ -122,24 +150,68 @@ const FacilitySearch = () => {
                 </div>
               </div>
 
-              {/* 🆕 掃除されたので、データがあるかないか（connectionがあるか）だけで判定OK！ */}
-  {connection ? (
-    <div style={statusBadgeStyle(connection.status)}>
-  {connection.status === 'active' ? (
-    <><CheckCircle2 size={16} /> 提携中</>
-  ) : (
-    <>
-      <AlertCircle size={16} /> 
-      {connection.created_by_type === 'facility' ? '提携申請が届いています' : '承認待ちです'}
-    </>
-  )}
-</div>
-  ) : (
-    <button onClick={() => sendRequest(f.id)} style={requestBtnStyle}>
-      この施設に提携リクエストを送る <ArrowRight size={16} />
-    </button>
-  )}
-</div>
+              {/* 2. 🆕 施設詳細情報エリア（タップで即アクション可能） */}
+              <div style={{ background: '#f8fafc', padding: '15px', borderRadius: '18px', display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '20px', border: '1px solid #eef2ff' }}>
+                
+                {/* 担当者名 */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.8rem', color: '#475569' }}>
+                  <User size={14} color="#4f46e5" /> 
+                  <span>担当：<strong>{f.contact_name || '未登録'}</strong></span>
+                </div>
+
+                {/* 住所 ＆ Googleマップ連携 */}
+                {f.address && (
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', fontSize: '0.8rem', color: '#475569' }}>
+                    <MapPin size={14} color="#4f46e5" style={{marginTop: '2px'}} /> 
+                    <div style={{flex: 1}}>
+                      <div style={{lineHeight: '1.4'}}>{f.address}</div>
+                      <a 
+                        href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(f.address)}`} 
+                        target="_blank" 
+                        rel="noreferrer"
+                        style={{ fontSize: '0.7rem', color: '#4f46e5', fontWeight: 'bold', textDecoration: 'none', marginTop: '4px', display: 'inline-block' }}
+                      >
+                        Googleマップで場所を確認
+                      </a>
+                    </div>
+                  </div>
+                )}
+
+                {/* 電話（即発信リンク） */}
+                {f.tel && (
+                  <a href={`tel:${f.tel}`} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.85rem', color: '#4f46e5', textDecoration: 'none', fontWeight: 'bold' }}>
+                    <Phone size={14} /> {f.tel} <span style={{fontSize:'10px', fontWeight:'normal', opacity: 0.7}}>(タップで発信)</span>
+                  </a>
+                )}
+
+                {/* 公式サイト */}
+                {f.official_url && (
+                  <a href={f.official_url} target="_blank" rel="noreferrer" style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.8rem', color: '#4f46e5', textDecoration: 'none' }}>
+                    <Link2 size={14} /> 公式サイトを表示 <ExternalLink size={12} />
+                  </a>
+                )}
+              </div>
+
+              {/* 3. アクションエリア */}
+              <div style={actionAreaStyle}>
+                {connection ? (
+                  <div style={statusBadgeStyle(connection.status)}>
+                    {connection.status === 'active' ? (
+                      <><CheckCircle2 size={16} /> 提携中</>
+                    ) : (
+                      <>
+                        <AlertCircle size={16} /> 
+                        {connection.created_by_type === 'facility' ? '提携申請が届いています' : '承認待ちです'}
+                      </>
+                    )}
+                  </div>
+                ) : (
+                  <button onClick={() => sendRequest(f)} style={requestBtnStyle}>
+                    この施設に提携リクエストを送る <ArrowRight size={16} />
+                  </button>
+                )}
+              </div>
+            </div>
           );
         })}
 
