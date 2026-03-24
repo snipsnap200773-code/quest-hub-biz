@@ -8,6 +8,10 @@ const FacilityBooking_PC = ({ facilityId, setActiveTab }) => {
   const [drafts, setDrafts] = useState([]);
   const [shopInfo, setShopInfo] = useState(null);
 
+  // 🆕 施設情報を保存する箱（ここを追記！）
+  const [facilityName, setFacilityName] = useState('');
+  const [facilityEmail, setFacilityEmail] = useState('');
+
   // 🆕 定期キープ計算用のState
   const [manualKeeps, setManualKeeps] = useState([]);
   const [regularRules, setRegularRules] = useState([]);
@@ -33,14 +37,16 @@ const FacilityBooking_PC = ({ facilityId, setActiveTab }) => {
     
     // 2. 確保済みの日程データをバラバラに取得
     const [keepRes, exclRes] = await Promise.all([
-      supabase.from('keep_dates').select('date').eq('facility_user_id', facilityId),
+      // 🆕 start_time も取得
+      supabase.from('keep_dates').select('date, start_time').eq('facility_user_id', facilityId),
       supabase.from('regular_keep_exclusions').select('excluded_date').eq('facility_user_id', facilityId)
     ]);
 
     setDrafts(draftData || []);
     setShopInfo(connData?.profiles || null);
     setRegularRules(connData?.regular_rules || []);
-    setManualKeeps(keepRes.data?.map(k => k.date) || []);
+    // 🆕 配列ではなくオブジェクトのまま保存
+    setManualKeeps(keepRes.data || []);
     setExclusions(exclRes.data?.map(e => e.excluded_date) || []);
   };
 
@@ -50,22 +56,31 @@ const FacilityBooking_PC = ({ facilityId, setActiveTab }) => {
     const dom = date.getDate();
     const m = date.getMonth() + 1;
     const nthWeek = Math.ceil(dom / 7);
-    const tempNext = new Date(date); tempNext.setDate(dom + 7);
-    const isLastWeek = tempNext.getMonth() !== date.getMonth();
+    
+    const t7 = new Date(date); t7.setDate(dom + 7);
+    const isL1 = t7.getMonth() !== date.getMonth(); 
+    const t14 = new Date(date); t14.setDate(dom + 14);
+    const isL2 = t14.getMonth() !== date.getMonth() && !isL1;
 
-    let isMatch = false;
+    let matchTime = null;
     regularRules?.forEach(r => {
       const monthMatch = (r.monthType === 0) || (r.monthType === 1 && m % 2 !== 0) || (r.monthType === 2 && m % 2 === 0);
       const dayMatch = (r.day === day);
-      let weekMatch = (r.week === nthWeek) || (r.week === -1 && isLastWeek);
-      if (monthMatch && dayMatch && weekMatch) isMatch = true;
+      const weekMatch = (r.week === nthWeek) || (r.week === -1 && isL1) || (r.week === -2 && isL2);
+      if (monthMatch && dayMatch && weekMatch) matchTime = r.time;
     });
-    return isMatch;
+    return matchTime;
   };
 
   // 🆕 手動キープと定期キープを合算して「今月の訪問予定日」を算出
   const ensuredDates = useMemo(() => {
-    const list = [...manualKeeps];
+    const list = [];
+    
+    // 1. 手動キープ分
+    manualKeeps.forEach(k => {
+      list.push({ date: k.date, time: k.start_time || '09:00' });
+    });
+
     const now = new Date();
     const year = now.getFullYear();
     const month = now.getMonth();
@@ -74,12 +89,15 @@ const FacilityBooking_PC = ({ facilityId, setActiveTab }) => {
     for (let d = 1; d <= lastDate; d++) {
       const date = new Date(year, month, d);
       const dateStr = date.toLocaleDateString('sv-SE');
-      // 定期日であり、かつキャンセル（除外）されておらず、まだリストにない場合
-      if (checkIsRegularKeep(date) && !exclusions.includes(dateStr)) {
-        if (!list.includes(dateStr)) list.push(dateStr);
+      const regTime = checkIsRegularKeep(date);
+      
+      if (regTime && !exclusions.includes(dateStr)) {
+        if (!list.some(item => item.date === dateStr)) {
+          list.push({ date: dateStr, time: regTime });
+        }
       }
     }
-    return list.sort();
+    return list.sort((a, b) => a.date.localeCompare(b.date));
   }, [manualKeeps, regularRules, exclusions]);
 
   const handleFinalSubmit = async () => {
@@ -88,56 +106,57 @@ const FacilityBooking_PC = ({ facilityId, setActiveTab }) => {
 
     setLoading(true);
     try {
-      for (const date of ensuredDates) {
-        const { data: request, error: reqErr } = await supabase
-          .from('visit_requests')
-          .insert([{
-            facility_user_id: facilityId,
-            shop_id: shopInfo.id,
-            scheduled_date: date,
-            status: 'confirmed' // 💡 ここを 'confirmed' に変更！
-          }])
-          .select().single();
+      // 🚀 1. 予約の「親」を1件だけ登録
+      const { data: request, error: reqErr } = await supabase
+        .from('visit_requests')
+        .insert([{
+          facility_user_id: facilityId,
+          shop_id: shopInfo.id,
+          // 💡 重要：.date を付けて、塊（オブジェクト）ではなく日付の「文字」だけを渡す
+          scheduled_date: ensuredDates[0].date, 
+          end_date: ensuredDates[ensuredDates.length - 1].date, 
+          visit_date_list: ensuredDates, // ここはJSONBなので塊のままでOK
+          start_time: ensuredDates[0].time, 
+          status: 'confirmed'
+        }])
+        .select().single();
 
-        if (reqErr) throw reqErr;
+      if (reqErr) throw reqErr;
 
-        const residentPayloads = drafts.map(d => ({
-          visit_request_id: request.id,
-          member_id: d.member_id,
-          menu_name: d.menu_name
-        }));
+      // 🚀 2. 「子（利用者）」を人数分だけ登録
+      const residentPayloads = drafts.map(d => ({
+        visit_request_id: request.id,
+        member_id: d.member_id,
+        menu_name: d.menu_name
+      }));
 
-        const { error: resErr } = await supabase.from('visit_request_residents').insert(residentPayloads);
-        if (resErr) throw resErr;
-      }
+      const { error: resErr } = await supabase.from('visit_request_residents').insert(residentPayloads);
+      if (resErr) throw resErr;
 
-      // 掃除ロジック
-      await supabase.from('visit_list_drafts').delete().eq('facility_user_id', facilityId);
-      await supabase.from('keep_dates').delete().eq('facility_user_id', facilityId);
-
-      // ==========================================
-      // 🆕 【ここから追加】Edge Function (Resend) を呼び出してメール通知
-      // ==========================================
+      // 🚀 3. メール送信と掃除（ここはこれまでと同じ）
       const residentListText = drafts.map(d => `・${d.members?.name} 様 (${d.menu_name})`).join('\n');
+      const formattedDatesForMail = ensuredDates.map(d => `${d.date.replace(/-/g, '/')} (${d.time})`);
 
       await supabase.functions.invoke('resend', {
         body: {
           type: 'facility_booking',
           shopName: shopInfo.business_name,
-          shopEmail: shopInfo.email,
-          facilityName: facilityName, // Stateから取得
-          facilityEmail: facilityEmail, // Stateから取得
-          scheduledDates: ensuredDates,
+          shopEmail: shopInfo.email_contact,
+          facilityName: facilityName,
+          facilityEmail: facilityEmail,
+          // 💡 変換したテキスト版を送る
+          scheduledDates: formattedDatesForMail, 
           residentCount: drafts.length,
           residentListText: residentListText,
           shopId: shopInfo.id,
           facilityId: facilityId
         }
       });
-      // ==========================================
-      // 🆕 【ここまで追加】
 
-      alert("予約を確定しました！店舗へ通知を送信しました。");
+      await supabase.from('visit_list_drafts').delete().eq('facility_user_id', facilityId);
+      await supabase.from('keep_dates').delete().eq('facility_user_id', facilityId);
+
+      alert(`${ensuredDates.length}日間の訪問予約を確定しました！`);
       setActiveTab('status'); 
     } catch (err) {
       alert("エラー: " + err.message);
@@ -160,7 +179,12 @@ const FacilityBooking_PC = ({ facilityId, setActiveTab }) => {
             {/* 🆕 ensuredDates.length が正しく反映されます */}
             <div style={label}><Calendar size={16} /> 訪問予定日（{ensuredDates.length}日間）</div>
             <div style={dateList}>
-              {ensuredDates.map(d => <span key={d} style={dateTag}>{d.replace(/-/g,'/')}</span>)}
+              {ensuredDates.map(item => (
+                <span key={item.date} style={dateTag}>
+                  {item.date.replace(/-/g,'/')}
+                  <small style={{ marginLeft: '6px', opacity: 0.8 }}>({item.time?.substring(0, 5)})</small>
+                </span>
+              ))}
             </div>
           </div>
 

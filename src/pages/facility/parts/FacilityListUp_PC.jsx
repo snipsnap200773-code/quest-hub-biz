@@ -97,30 +97,50 @@ const FacilityListUp_PC = ({ facilityId, isMobile, setActiveTab }) => {
     const dom = date.getDate();
     const m = date.getMonth() + 1;
     const nthWeek = Math.ceil(dom / 7);
-    const tempNext = new Date(date); tempNext.setDate(dom + 7);
-    const isLastWeek = tempNext.getMonth() !== date.getMonth();
-    let isMatch = false;
+    
+    // 💡 カレンダー側と合わせた高度な週判定
+    const t7 = new Date(date); t7.setDate(dom + 7);
+    const isL1 = t7.getMonth() !== date.getMonth(); 
+    const t14 = new Date(date); t14.setDate(dom + 14);
+    const isL2 = t14.getMonth() !== date.getMonth() && !isL1;
+
+    let matchTime = null;
     regularRules?.forEach(r => {
       const monthMatch = (r.monthType === 0) || (r.monthType === 1 && m % 2 !== 0) || (r.monthType === 2 && m % 2 === 0);
       const dayMatch = (r.day === day);
-      let weekMatch = (r.week === nthWeek) || (r.week === -1 && isLastWeek);
-      if (monthMatch && dayMatch && weekMatch) isMatch = true;
+      
+      // 💡 1-4週 だけでなく -1(最終) や -2(最後から2番目) も判定
+      const weekMatch = (r.week === nthWeek) || (r.week === -1 && isL1) || (r.week === -2 && isL2);
+      
+      if (monthMatch && dayMatch && weekMatch) matchTime = r.time;
     });
-    return isMatch;
+    return matchTime;
   };
 
   const allEnsuredDates = useMemo(() => {
-    const list = [...manualKeeps.map(k => k.date)];
+    const list = [];
+    
+    // 1. 手動キープ分（start_time を保持）
+    manualKeeps.forEach(k => {
+      list.push({ date: k.date, time: k.start_time || '09:00' });
+    });
+
     const lastDate = new Date(year, month + 1, 0).getDate();
     for (let d = 1; d <= lastDate; d++) {
       const date = new Date(year, month, d);
       const dateStr = date.toLocaleDateString('sv-SE');
-      if (checkIsRegularKeep(date) && !exclusions.includes(dateStr)) {
-        if (!list.includes(dateStr)) list.push(dateStr);
+      const regTime = checkIsRegularKeep(date);
+      
+      // 2. 定期キープ分（自社の定期日であり、除外されておらず、手動と被っていない場合）
+      if (regTime && !exclusions.includes(dateStr)) {
+        if (!list.some(item => item.date === dateStr)) {
+          list.push({ date: dateStr, time: regTime });
+        }
       }
     }
-    return list.sort();
-  }, [manualKeeps, regularRules, exclusions]);
+    // 日付順に並び替え
+    return list.sort((a, b) => a.date.localeCompare(b.date));
+  }, [manualKeeps, regularRules, exclusions, year, month]);
 
   const addToList = async (resident) => {
     if (!shopId) return alert("提携業者が未設定です");
@@ -161,9 +181,16 @@ const FacilityListUp_PC = ({ facilityId, isMobile, setActiveTab }) => {
         <div style={keepInfoCard}>
           <div style={smallLabel}><Calendar size={14} /> 確保済みの訪問予定</div>
           <div style={badgeArea}>
-            {allEnsuredDates.map(date => <span key={date} style={keepBadge}>{date.replace(/-/g,'/')}</span>)}
-            {allEnsuredDates.length === 0 && <span style={noDataText}>訪問日が確保されていません</span>}
-          </div>
+  {allEnsuredDates.map(item => (
+    <span key={item.date} style={keepBadge}>
+      {item.date.replace(/-/g, '/')}
+      <span style={{ fontSize: '0.7rem', opacity: 0.8, marginLeft: '6px' }}>
+        ({item.time?.substring(0, 5)})
+      </span>
+    </span>
+  ))}
+  {allEnsuredDates.length === 0 && <span style={noDataText}>訪問日が確保されていません</span>}
+</div>
         </div>
         <div style={shopInfoCard}>
           <div style={smallLabel}><Scissors size={14} /> 今回の担当ショップ</div>

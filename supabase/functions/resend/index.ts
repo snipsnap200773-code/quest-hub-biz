@@ -371,7 +371,7 @@ if (type === 'facility_booking') {
     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${RESEND_API_KEY}` },
     body: JSON.stringify({
       from: 'QUEST HUB 通知センター <infec@snipsnap.biz>',
-      to: [shopEmail],
+      to: [email_contact],
       subject: `【新着】${facilityName} 様より訪問予約（${residentCount}名）が入りました`,
       html: `
         <div style="font-family: sans-serif; color: #333; line-height: 1.6; max-width: 550px; margin: 0 auto; border: 1px solid #eee; padding: 25px; border-radius: 12px; border-top: 8px solid #c5a059;">

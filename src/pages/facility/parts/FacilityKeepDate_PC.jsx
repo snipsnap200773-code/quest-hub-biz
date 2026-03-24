@@ -19,7 +19,8 @@ const FacilityKeepDate_PC = ({ facilityId, isMobile, setActiveTab }) => {
   const [regularRules, setRegularRules] = useState([]);
   const [residents, setResidents] = useState([]); 
   const [loading, setLoading] = useState(true);
-  const [exclusions, setExclusions] = useState([]); // 🆕 追加：定期キープのキャンセルリスト
+  const [exclusions, setExclusions] = useState([]); 
+  const [timeModal, setTimeModal] = useState({ show: false, dateStr: '', currentTime: '' });
 
   // 予約作成用のState
   const [selections, setSelections] = useState({}); 
@@ -81,14 +82,23 @@ const FacilityKeepDate_PC = ({ facilityId, isMobile, setActiveTab }) => {
     const dom = date.getDate();
     const m = date.getMonth() + 1;
     const nthWeek = Math.ceil(dom / 7);
-    const tempNext = new Date(date); tempNext.setDate(dom + 7);
-    const isLastWeek = tempNext.getMonth() !== date.getMonth();
+    const tempNext7 = new Date(date); tempNext7.setDate(dom + 7);
+    const isL1 = tempNext7.getMonth() !== date.getMonth(); 
+
+    const tempNext14 = new Date(date); tempNext14.setDate(dom + 14);
+    const isL2 = tempNext14.getMonth() !== date.getMonth() && !isL1;
+
     let result = null;
     regularRules.forEach(rule => {
       rule.regular_rules?.forEach(r => {
         const monthMatch = (r.monthType === 0) || (r.monthType === 1 && m % 2 !== 0) || (r.monthType === 2 && m % 2 === 0);
         const dayMatch = (r.day === day);
-        let weekMatch = (r.week === nthWeek) || (r.week === -1 && isLastWeek);
+        
+        // 💡 修正：第1〜4週(1-4) or 最終週(-1) or 最後から2番目(-2) をすべて判定
+        const weekMatch = (r.week === nthWeek) || 
+                          (r.week === -1 && isL1) || 
+                          (r.week === -2 && isL2);
+        
         if (monthMatch && dayMatch && weekMatch) result = { keeperId: rule.facility_user_id, time: r.time };
       });
     });
@@ -98,18 +108,49 @@ const FacilityKeepDate_PC = ({ facilityId, isMobile, setActiveTab }) => {
   const getStatus = (dateStr) => {
     const d = new Date(dateStr);
     const regKeep = checkIsRegularKeep(d);
-    const isExcluded = exclusions.includes(dateStr); // 🆕 キャンセル済みか
+    const isExcluded = exclusions.includes(dateStr);
 
     if (dateStr < todayStr) return 'past';
+
+    // 🆕 1. 長期休暇（特別休暇）の判定を追加
+    if (selectedShop?.special_holidays) {
+      const isSpecialHoliday = selectedShop.special_holidays.some(h => 
+        dateStr >= h.start && dateStr <= h.end
+      );
+      if (isSpecialHoliday) return 'ng';
+    }
     
-    // 🆕 定期日であり、かつキャンセルされていない場合のみ★
-    if (regKeep && !isExcluded) return { type: regKeep.keeperId === facilityId ? 'keeping' : 'other-keep', time: regKeep.time };
-    
+    // 🆕 2. 定休日の判定（構造に合わせて修正）
     const dayNames = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+    const dayKey = dayNames[d.getDay()];
     const nthWeek = Math.ceil(d.getDate() / 7);
-    if (selectedShop?.business_hours?.regular_holidays?.[`${nthWeek}-${dayNames[d.getDay()]}`]) return 'ng';
-    if (keepDates.some(k => k.date === dateStr && k.facility_user_id === facilityId)) return 'keeping';
-    if (occupiedDates.includes(dateStr)) return 'occupied'; 
+    
+    // 💡 第5週目に対応するため「最後」と「最後から2」を計算
+    const tempNext7 = new Date(d); tempNext7.setDate(d.getDate() + 7);
+    const t7 = new Date(d); t7.setDate(d.getDate() + 7);
+    const checkL1 = t7.getMonth() !== d.getMonth();
+    const t14 = new Date(d); t14.setDate(d.getDate() + 14);
+    const checkL2 = t14.getMonth() !== d.getMonth() && !checkL1;
+
+    const holidays = selectedShop?.business_hours?.regular_holidays || {};
+
+    const isHoliday = 
+      holidays[`${nthWeek}-${dayKey}`] ||
+      (checkL1 && holidays[`L1-${dayKey}`]) || 
+      (checkL2 && holidays[`L2-${dayKey}`]);
+
+    if (isHoliday) return 'ng';
+
+    // 定期キープ
+    if (regKeep && !isExcluded) {
+      return { type: regKeep.keeperId === facilityId ? 'keeping' : 'other-keep', time: regKeep.time };
+    }
+    
+    // 手動キープ
+    const manualKeep = keepDates.find(k => k.date === dateStr && k.facility_user_id === facilityId);
+    if (manualKeep) return { type: 'keeping', time: manualKeep.start_time || '09:00' };
+
+    if (occupiedDates.includes(dateStr)) return 'occupied';
     if (keepDates.some(k => k.date === dateStr)) return 'other-keep';
     return 'available';
   };
@@ -157,10 +198,27 @@ const FacilityKeepDate_PC = ({ facilityId, isMobile, setActiveTab }) => {
     if (['past', 'ng', 'occupied', 'other-keep'].includes(status)) return;
 
     if (status === 'keeping') {
-      await supabase.from('keep_dates').delete().match({ date: dateStr, facility_user_id: facilityId, shop_id: selectedShop.id });
+      // すでに選択中の場合は、時間を変更するためにポップアップを開く
+      setTimeModal({ show: true, dateStr, currentTime: statusData.time || '09:00' });
     } else {
-      await supabase.from('keep_dates').upsert({ date: dateStr, facility_user_id: facilityId, shop_id: selectedShop.id });
+      // 新規キープ：DBに保存してから、そのままポップアップを開く
+      const defaultTime = regKeep ? regKeep.time : '09:00';
+      await supabase.from('keep_dates').upsert({ 
+        date: dateStr, 
+        facility_user_id: facilityId, 
+        shop_id: selectedShop.id,
+        start_time: defaultTime 
+      });
+      fetchData();
+      setTimeModal({ show: true, dateStr, currentTime: defaultTime });
     }
+  };
+
+  // 🆕 追加：保存済みの時間を変更する関数
+  const handleTimeChange = async (dateStr, newTime) => {
+    await supabase.from('keep_dates')
+      .update({ start_time: newTime })
+      .match({ date: dateStr, facility_user_id: facilityId, shop_id: selectedShop.id });
     fetchData();
   };
 
@@ -345,6 +403,14 @@ const FacilityKeepDate_PC = ({ facilityId, isMobile, setActiveTab }) => {
                 <button onClick={() => setCurrentDate(new Date(year, month - 1, 1))} style={navBtn}><ChevronLeft /></button>
                 <h2 style={monthLabel}>{year}年 {month + 1}月</h2>
                 <button onClick={() => setCurrentDate(new Date(year, month + 1, 1))} style={navBtn}><ChevronRight /></button>
+                
+                {/* 🆕 【ここを追加】今日に戻るボタン */}
+                <button 
+                  onClick={() => setCurrentDate(new Date())} 
+                  style={todayBtn}
+                >
+                  今日
+                </button>
               </div>
               <div style={statusBanner(selectedShop?.theme_color)}>
                 <Info size={16} />
@@ -372,10 +438,20 @@ const FacilityKeepDate_PC = ({ facilityId, isMobile, setActiveTab }) => {
                 const s = config[status === 'other-keep' ? 'other_keep' : status] || config.past;
 
                 return (
-                  <div key={i} onClick={() => handleDateClick(day)} style={dayBox(s.bg, s.border, status)}>
+                  <div key={i} 
+                    onClick={() => handleDateClick(day)} // 🆕 シンプルにクリックだけに
+                    style={dayBox(s.bg, s.border, status)}
+                  >
                     <div style={{display:'flex', justifyContent:'space-between', alignItems:'center'}}>
                       <span style={dayNum(status)}>{day}</span>
-                      {status === 'keeping' && regTime && <span style={timeBadge}>{regTime}</span>}
+                      
+                      {/* 🆕 【ここを修正】セレクトボックスを消して時間バッジを表示 */}
+                      {status === 'keeping' && (
+                        <div style={timeBadgeBig}>
+                          {(statusData.time || '09:00').substring(0, 5)}
+                        </div>
+                      )}
+                      
                       <span style={{fontSize:'0.6rem', fontWeight:'bold', color: s.color}}>{s.label}</span>
                     </div>
                     <div style={statusIconArea(s.color)}>{s.icon}</div>
@@ -407,8 +483,80 @@ const FacilityKeepDate_PC = ({ facilityId, isMobile, setActiveTab }) => {
           </>
         )}
       </main>
-    </div>
-  );
+
+      {/* 🆕 【ここから追加】時間選択ポップアップ */}
+      <AnimatePresence>
+        {timeModal.show && (
+          <motion.div 
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            style={modalOverlay}
+            // 背景をクリックしたら閉じる
+            onClick={() => setTimeModal({ ...timeModal, show: false })}
+          >
+            <motion.div 
+              initial={{ y: 50, opacity: 0 }} 
+              animate={{ y: 0, opacity: 1 }} 
+              exit={{ y: 50, opacity: 0 }}
+              style={modalContent}
+              // 🆕 コンテンツ部分のクリックが背景に突き抜けないようにする
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div style={modalHeader}>
+                <h3 style={{ margin: 0, color: '#3d2b1f' }}>開始時間の選択</h3>
+                <div style={{ fontSize: '0.9rem', color: '#888', marginTop: '5px' }}>
+                  {timeModal.dateStr.replace(/-/g, '/')}
+                </div>
+              </div>
+              
+              <div style={timeListScroll}>
+                {(() => {
+                  // 🆕 その曜日の営業時間を取得
+                  const dayNames = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+                  const dayKey = dayNames[new Date(timeModal.dateStr).getDay()];
+                  const hours = selectedShop?.business_hours?.[dayKey] || { open: '09:00', close: '18:00' };
+                  
+                  // 08:00〜18:00の全リストから、営業時間内のものだけフィルタリング
+                  const allTimes = ['08:00','08:30','09:00','09:30','10:00','10:30','11:00','11:30','12:00','13:00','14:00','15:00','16:00','17:00','17:30','18:00'];
+                  
+                  return allTimes
+                    .filter(t => t >= hours.open && t <= hours.close)
+                    .map(t => (
+                      <button 
+                        key={t}
+                        onClick={() => {
+                          handleTimeChange(timeModal.dateStr, t);
+                          setTimeModal({ ...timeModal, show: false });
+                        }}
+                        style={timeCard(timeModal.currentTime.substring(0,5) === t)}
+                      >
+                        <Clock size={18} /> {t}
+                      </button>
+                    ));
+                })()}
+              </div>
+
+              <button 
+                onClick={async () => {
+                  await supabase.from('keep_dates').delete().match({ date: timeModal.dateStr, facility_user_id: facilityId });
+                  fetchData();
+                  setTimeModal({ ...timeModal, show: false });
+                }}
+                style={deleteKeepBtn}
+              >
+                <Trash2 size={16} /> この日の選択を解除する
+              </button>
+
+              <button onClick={() => setTimeModal({ ...timeModal, show: false })} style={closeBtn}>
+                閉じる
+              </button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+      {/* 🆕 【ここまで追加】 */}
+
+    </div>
+  );
 };
 
 // スタイル定義 (前回のまま)
@@ -423,6 +571,22 @@ const calHeaderStyle = { marginBottom: '20px' };
 const monthNav = { display: 'flex', alignItems: 'center', gap: '20px', marginBottom: '15px', justifyContent: 'center' };
 const monthLabel = { fontSize: '1.8rem', fontWeight: '900', color: '#3d2b1f', margin: 0, minWidth: '180px', textAlign: 'center' };
 const navBtn = { background: '#fff', border: '1px solid #ddd', borderRadius: '50%', width: '40px', height: '40px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' };
+const todayBtn = {
+  marginLeft: '15px',
+  padding: '6px 16px',
+  borderRadius: '20px',
+  border: '1px solid #e2e8f0',
+  background: '#fff',
+  color: '#3d2b1f',
+  fontSize: '0.85rem',
+  fontWeight: 'bold',
+  cursor: 'pointer',
+  transition: '0.2s',
+  boxShadow: '0 2px 4px rgba(0,0,0,0.05)',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center'
+};
 const statusBanner = (color) => ({ display: 'flex', alignItems: 'center', gap: '10px', padding: '12px 20px', background: '#fcfaf7', borderRadius: '12px', fontSize: '0.85rem', color: '#3d2b1f', border: '1px solid #f0e6d2' });
 const calendarGrid = { display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '8px', background: '#fff', padding: '15px', borderRadius: '24px', border: '1px solid #eee' };
 const weekHeader = { textAlign: 'center', padding: '10px', fontSize: '0.75rem', fontWeight: 'bold', color: '#94a3b8' };
@@ -448,5 +612,64 @@ const checkBox = (active) => ({ width: '22px', height: '22px', borderRadius: '6p
 const menuSelect = { padding: '8px', borderRadius: '8px', border: '1px solid #ddd', fontSize: '0.85rem', fontWeight: 'bold', outline: 'none' };
 const finalActionArea = { marginTop: '40px', paddingBottom: '100px' };
 const submitBtn = (loading) => ({ width: '100%', padding: '20px', background: loading ? '#ccc' : '#c5a059', color: '#3d2b1f', border: 'none', borderRadius: '15px', fontSize: '1.2rem', fontWeight: '900', cursor: loading ? 'default' : 'pointer', boxShadow: '0 10px 20px rgba(197, 160, 89, 0.3)' });
+
+const timeBadgeBig = {
+  fontSize: '0.75rem', background: '#3d2b1f', color: '#fff',
+  padding: '2px 6px', borderRadius: '6px', fontWeight: 'bold',
+  marginLeft: 'auto', marginRight: '6px'
+};
+
+// 🆕 背景自体を「真ん中寄せの箱」にします
+const modalOverlay = {
+  position: 'fixed', 
+  top: 0, 
+  left: 0, 
+  width: '100vw', 
+  height: '100vh',
+  background: 'rgba(0,0,0,0.6)', 
+  zIndex: 1000, 
+  backdropFilter: 'blur(4px)',
+  // ↓ 追加：中身を上下左右中央に配置
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center'
+};
+
+// 🆕 位置指定（top/left/transform）を削除してスッキリさせます
+const modalContent = {
+  width: '90%', 
+  maxWidth: '380px', 
+  background: '#fff', 
+  borderRadius: '30px',
+  padding: '30px', 
+  boxShadow: '0 25px 50px rgba(0,0,0,0.3)',
+  // 高くなりすぎた場合に備えて
+  maxHeight: '90vh',
+  display: 'flex',
+  flexDirection: 'column'
+};
+
+const modalHeader = { textAlign: 'center', marginBottom: '20px', borderBottom: '1px solid #eee', paddingBottom: '15px', flexShrink: 0 };
+
+const timeListScroll = {
+  maxHeight: '320px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '10px', padding: '5px'
+};
+
+const timeCard = (active) => ({
+  width: '100%', padding: '16px', borderRadius: '15px', border: active ? '2px solid #c5a059' : '1px solid #eee',
+  background: active ? '#fff9e6' : '#fff', color: active ? '#c5a059' : '#1e293b',
+  fontSize: '1.2rem', fontWeight: 'bold', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '12px', transition: '0.2s'
+});
+
+const deleteKeepBtn = {
+  width: '100%', marginTop: '20px', padding: '12px', background: '#fff', color: '#ef4444',
+  border: '1px solid #fee2e2', borderRadius: '15px', fontSize: '0.9rem', fontWeight: 'bold',
+  cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px'
+};
+
+const closeBtn = {
+  width: '100%', marginTop: '10px', padding: '12px', background: '#f1f5f9', color: '#64748b',
+  border: 'none', borderRadius: '15px', fontWeight: 'bold', cursor: 'pointer'
+};
 
 export default FacilityKeepDate_PC;
