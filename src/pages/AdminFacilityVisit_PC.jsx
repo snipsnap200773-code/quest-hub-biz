@@ -3,7 +3,8 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../supabaseClient'; // 💡 階層が一つ浅くなったので ../ に修正
 import { 
   ArrowLeft, CheckCircle2, Clock, XCircle, 
-  Building2, Loader2, CheckCircle, Calculator, ReceiptText // ✅ 全部ここにまとめます
+  Building2, Loader2, CheckCircle, Calculator, ReceiptText,
+  Plus
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -14,6 +15,12 @@ const AdminFacilityVisit_PC = () => {
   const [visit, setVisit] = useState(null);
   const [residents, setResidents] = useState([]);
   const [shopData, setShopData] = useState(null);
+
+  // 🆕 追加：入居者追加ポップアップ用
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [availableMembers, setAvailableMembers] = useState([]);
+  const [isAdding, setIsAdding] = useState(false);
+  const [sortMode, setSortMode] = useState('name');
 
   // 🆕 追加：売上計算用
   const [services, setServices] = useState([]); 
@@ -92,12 +99,74 @@ const AdminFacilityVisit_PC = () => {
     }
   };
 
+  // 🆕 ここから差し込む！！ ==========================================
+  
+  // 1. 追加可能な入居者（まだ今回のリストにいない人）を取得してモーダルを開く
+  const openAddModal = async () => {
+    if (!visit?.facility_user_id) return;
+    
+    // 現在のリストにいるメンバーのIDセットを作成
+    const currentMemberIds = residents.map(r => r.member_id);
+
+    // 施設に所属する全メンバー（membersテーブル）を取得
+    const { data: members, error } = await supabase
+      .from('members')
+      .select('*')
+      .eq('facility_user_id', visit.facility_user_id)
+      .order('name');
+
+    if (!error) {
+      // 💡 すでに名簿（residents）に入っている人は除外する
+      const filtered = members.filter(m => !currentMemberIds.includes(m.id));
+      setAvailableMembers(filtered);
+      setShowAddModal(true);
+    }
+  };
+
+  // 2. 選んだ人を今日の施術リスト（DB）に実際に挿入する
+  const handleAddMember = async (member) => {
+    setIsAdding(true);
+    const targetId = visit.parent_id || visit.id;
+
+    // ✅ 修正：テーブルにある列だけに絞る（shop_idを削除）
+    const newResident = {
+      visit_request_id: targetId,
+      member_id: member.id,
+      status: 'pending',
+      menu_name: 'カット' 
+    };
+
+    const { data, error } = await supabase
+      .from('visit_request_residents')
+      .insert([newResident])
+      .select('*, members(name, room, floor)')
+      .single();
+
+    if (!error && data) {
+      setResidents([...residents, data]);
+      setShowAddModal(false);
+      // alert(`${member.name} 様を追加しました！`); // 必要なら
+    } else {
+      // 💡 エラー内容をコンソールに出して、何が起きたか見えるようにします
+      console.error("Insert Error:", error);
+      alert("追加に失敗しました。原因: " + (error?.message || "不明なエラー"));
+    }
+    setIsAdding(false);
+  };
+
+  // 🏢 ここまで ======================================================
+
   // --- 🆕 ここから追加：売上集計・確定ロジック ---
 
   // 1. 本日の売上を計算（完了した人のメニュー単価をマスターから合計）
   const calculateTodayTotal = () => {
+    const todayStr = visit?.scheduled_date; // 今開いている画面の日付 (例: "2026-03-19")
+    
     return residents
-      .filter(r => r.status === 'completed') // 💡 条件をシンプルに（ポチポチしたもの全部）
+      .filter(r => {
+        // ✅ 修正：ステータスが「完了」かつ、完了した日付が「今日」の人だけ！
+        return r.status === 'completed' && r.completed_at?.startsWith(todayStr);
+      })
       .reduce((sum, res) => {
         const targetMenu = res.menu_name?.trim();
         const master = services.find(s => s.name?.trim() === targetMenu);
@@ -105,98 +174,68 @@ const AdminFacilityVisit_PC = () => {
       }, 0);
   };
 
-  // 2. 売上を確定して「店舗の売上台帳(sales)」に記録する
+  // 2. 確定ボタンを押した時の処理
   const handleFinalizeSales = async () => {
     const total = calculateTodayTotal();
-    const donePeople = residents.filter(r => r.status === 'completed');
+    const todayStr = visit?.scheduled_date;
 
-    if (donePeople.length === 0) {
-      alert("完了した施術が1件もありません。名簿を「完了」にしてから確定してください。");
-      return;
-    }
-
-    // ✅ 追加：価格が正しく拾えていない場合の警告
-    if (total === 0) {
-      alert("メニューの合計金額が 0円になっています。サービス設定のメニュー名（カット等）と入居者名簿のメニュー名が完全に一致しているか確認してください。");
-      return;
-    }
-
-    if (!window.confirm(`本日の売上 ¥${total.toLocaleString()} を確定し、店舗の売上台帳に記録しますか？`)) {
-      return;
-    }
-
-    setIsFinalizing(true);
-    try {
-      // A. 施設を「1人のお客様」として名簿(customers)から特定（または自動作成）
-      let customerId = null;
-      const facilityName = visit?.facility_users?.facility_name;
-
-      const { data: existingCust } = await supabase
-        .from('customers')
-        .select('id')
-        .eq('shop_id', shopId)
-        .eq('name', facilityName)
-        .maybeSingle();
-
-      if (existingCust) {
-        customerId = existingCust.id;
-      } else {
-        // 初めての施設なら顧客名簿に自動登録
-        const { data: newCust, error: cErr } = await supabase
-          .from('customers')
-          .insert([{ shop_id: shopId, name: facilityName, memo: '施設訪問（自動登録）' }])
-          .select()
-          .single();
-        if (cErr) throw cErr;
-        customerId = newCust.id;
-      }
-
-      // B. 売上テーブル(sales)に保存
-      // 💡 upsert を使うことで、もしボタンを2回押しても二重計上されないようにします
-      const targetDateMembers = residents
-      .filter(r => r.status === 'completed')
+    // ✅ 修正：今日(todayStr)に完了したメンバーだけを抽出
+    const targetDateMembers = residents
+      .filter(r => r.status === 'completed' && r.completed_at?.startsWith(todayStr))
       .map(r => ({
         name: r.members?.name,
         menu: r.menu_name,
         price: services.find(s => s.name?.trim() === r.menu_name?.trim())?.price || 0
       }));
 
-    const { error: saleErr } = await supabase
-    .from('sales')
-    .upsert([{
-      shop_id: shopId,
-      visit_request_id: visitId,
-      customer_id: customerId,
-      total_amount: total,
-      sale_date: visit.scheduled_date,
-      details: { 
-        is_facility: true,
-        residents_count: targetDateMembers.length,
-        // 🆕 ここで誰を売上にしたか保存！
-        members_list: targetDateMembers 
+    if (targetDateMembers.length === 0) {
+      alert("今日完了した施術がありません。名簿を「完了」にしてから確定してください。");
+      return;
+    }
+
+    if (!window.confirm(`本日の売上 ¥${total.toLocaleString()} (${targetDateMembers.length}名分) を確定しますか？`)) {
+      return;
+    }
+
+    setIsFinalizing(true);
+    try {
+      // 顧客特定（施設）
+      let customerId = null;
+      const facilityName = visit?.facility_users?.facility_name;
+      const { data: existingCust } = await supabase.from('customers').select('id').eq('shop_id', shopId).eq('name', facilityName).maybeSingle();
+      if (existingCust) { customerId = existingCust.id; } else {
+        const { data: newCust, error: cErr } = await supabase.from('customers').insert([{ shop_id: shopId, name: facilityName, memo: '施設訪問（自動登録）' }]).select().single();
+        if (cErr) throw cErr;
+        customerId = newCust.id;
       }
-    }], { onConflict: 'visit_request_id' });
 
-    if (saleErr) throw saleErr;
+      // 💡 売上テーブル(sales)に保存
+      const { error: saleErr } = await supabase
+        .from('sales')
+        .upsert([{
+          shop_id: shopId,
+          visit_request_id: visitId,
+          customer_id: customerId,
+          total_amount: total,
+          sale_date: visit.scheduled_date,
+          details: { 
+            is_facility: true,
+            residents_count: targetDateMembers.length,
+            // 🆕 これで18日の人と混ざらず、19日の人だけが保存されます！
+            members_list: targetDateMembers 
+          }
+        }], { onConflict: 'visit_request_id' });
 
-    // ✅ B. 訪問データ(visit_requests)自体のステータスも「完了」に更新する
-    // これをしないと、管理画面側で「まだ終わっていないタスク」として扱われてしまいます
-    const { error: visitUpdateErr } = await supabase
-      .from('visit_requests')
-      .update({ 
-        status: 'completed',
-        updated_at: new Date().toISOString() 
-      })
-      .eq('id', visitId);
+      if (saleErr) throw saleErr;
 
-    if (visitUpdateErr) throw visitUpdateErr;
+      // 訪問ステータスを完了へ
+      await supabase.from('visit_requests').update({ status: 'completed', updated_at: new Date().toISOString() }).eq('id', visitId);
 
-    alert("売上確定と訪問ステータスの更新が完了しました！✨");
-      navigate(-1); // 一覧（今日のタスク）に戻る
+      alert("19日分の売上を確定しました！✨");
+      navigate(-1);
 
     } catch (err) {
-      console.error("売上確定エラー:", err);
-      alert("エラーが発生しました: " + err.message);
+      alert("確定失敗: " + err.message);
     } finally {
       setIsFinalizing(false);
     }
@@ -261,6 +300,22 @@ const AdminFacilityVisit_PC = () => {
           {isFinalizing ? '処理中...' : '本日の施術を終了して売上を確定'}
         </button>
       </div>
+
+      {/* 🆕 ここから差し込む！！ ========================================== */}
+      <div style={{ marginBottom: '20px', display: 'flex', justifyContent: 'flex-end', padding: '0 5px' }}>
+        <button 
+          onClick={openAddModal}
+          style={{ 
+            padding: '10px 18px', background: '#fff', color: '#4f46e5', 
+            border: '2px solid #4f46e5', borderRadius: '14px', fontWeight: 'bold', 
+            fontSize: '0.9rem', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px',
+            boxShadow: '0 4px 6px -1px rgba(79, 70, 229, 0.1)'
+          }}
+        >
+          <Plus size={18} strokeWidth={3} /> 予定外の方を追加
+        </button>
+      </div>
+      {/* 🏢 ここまで ====================================================== */}
 
       {/* 利用者ポチポチリスト */}
       <div style={listContainer}>
@@ -367,6 +422,116 @@ const AdminFacilityVisit_PC = () => {
           作業を一時中断して一覧へ戻る
         </button>
       </footer>
+
+      {/* 🆕 ここから差し込む！！ ========================================== */}
+      <AnimatePresence>
+        {showAddModal && (
+          <div 
+            style={{ 
+              position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', 
+              zIndex: 1000, display: 'flex', alignItems: 'flex-end', 
+              backdropFilter: 'blur(4px)' 
+            }}
+            onClick={() => setShowAddModal(false)}
+          >
+            <motion.div 
+              initial={{ y: "100%" }} 
+              animate={{ y: 0 }} 
+              exit={{ y: "100%" }}
+              transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+              onClick={e => e.stopPropagation()}
+              style={{ 
+                background: '#fff', width: '100%', borderTopLeftRadius: '32px', 
+                borderTopRightRadius: '32px', padding: '32px 24px', 
+                maxHeight: '80vh', overflowY: 'auto', boxShadow: '0 -10px 25px rgba(0,0,0,0.1)'
+              }}
+            >
+              {/* ヘッダー部分 */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '1.2rem', fontWeight: '900', color: '#1e293b' }}>追加する方を選択</h3>
+                  <p style={{ margin: '4px 0 0', fontSize: '0.8rem', color: '#94a3b8' }}>名簿に未登録の方のみ表示されています</p>
+                </div>
+                <button 
+                  onClick={() => setShowAddModal(false)} 
+                  style={{ background: '#f1f5f9', border: 'none', borderRadius: '50%', width: '36px', height: '36px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+                >
+                  <XCircle size={24} color="#94a3b8" />
+                </button>
+              </div>
+
+              {/* メンバーリスト */}
+              <div style={{ display: 'flex', gap: '10px', marginBottom: '20px' }}>
+                <button 
+                  onClick={() => setSortMode('name')}
+                  style={{ 
+                    flex: 1, padding: '10px', borderRadius: '10px', fontSize: '0.8rem', fontWeight: 'bold', border: 'none',
+                    background: sortMode === 'name' ? '#4f46e5' : '#f1f5f9',
+                    color: sortMode === 'name' ? '#fff' : '#64748b', cursor: 'pointer'
+                  }}
+                >
+                  あいうえお順
+                </button>
+                <button 
+                  onClick={() => setSortMode('room')}
+                  style={{ 
+                    flex: 1, padding: '10px', borderRadius: '10px', fontSize: '0.8rem', fontWeight: 'bold', border: 'none',
+                    background: sortMode === 'room' ? '#4f46e5' : '#f1f5f9',
+                    color: sortMode === 'room' ? '#fff' : '#64748b', cursor: 'pointer'
+                  }}
+                >
+                  部屋番号順
+                </button>
+              </div>
+
+              {/* メンバーリスト */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', paddingBottom: '40px' }}>
+                {availableMembers.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: '40px', color: '#94a3b8', background: '#f8fafc', borderRadius: '20px' }}>
+                    追加可能なメンバーは全員リストに入っています。
+                  </div>
+                ) : (
+                  // ✅ 修正：表示する前にソートをかける
+                  [...availableMembers].sort((a, b) => {
+                    if (sortMode === 'room') {
+                      // 部屋番号順：数字が混ざっていても正しく並ぶように（A9 < A10）
+                      return (a.room || "").localeCompare(b.room || "", undefined, { numeric: true, sensitivity: 'base' });
+                    }
+                    // あいいうえお（名前）順
+                    return (a.name || "").localeCompare(b.name || "", 'ja');
+                  }).map(m => (
+                    <button 
+                      key={m.id}
+                      onClick={() => handleAddMember(m)}
+                      disabled={isAdding}
+                      style={{ 
+                        width: '100%', padding: '20px', borderRadius: '20px', 
+                        border: '1px solid #e2e8f0', background: '#f8fafc', 
+                        textAlign: 'left', display: 'flex', justifyContent: 'space-between', 
+                        alignItems: 'center', cursor: 'pointer'
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
+                        <div style={{ background: '#e0e7ff', color: '#4f46e5', width: '45px', height: '45px', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '900', fontSize: '0.8rem' }}>
+                          {m.room}
+                        </div>
+                        <div>
+                          <div style={{ fontWeight: '900', fontSize: '1.1rem', color: '#1e293b' }}>{m.name} 様</div>
+                          <div style={{ fontSize: '0.75rem', color: '#94a3b8' }}>{m.floor ? `${m.floor}階 / ` : ''}{m.room}号室</div>
+                        </div>
+                      </div>
+                      <div style={{ background: '#4f46e5', width: '32px', height: '32px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <Plus size={20} color="#fff" />
+                      </div>
+                    </button>
+                  ))
+                )}
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+      {/* 🏢 ここまで ====================================================== */}
     </div>
   );
 };

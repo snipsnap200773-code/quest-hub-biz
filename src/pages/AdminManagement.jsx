@@ -81,6 +81,10 @@ function AdminManagement() {
     first_arrival_date: '', memo: '', custom_answers: {}
   });
 
+  // --- 🆕 施設訪問の内訳ポップアップ用 ---
+  const [showFacilityMembersModal, setShowFacilityMembersModal] = useState(false);
+  const [selectedFacilitySale, setSelectedFacilitySale] = useState(null);
+
   // ==========================================
   // --- 🆕 画面サイズ管理（エラー解決のために追加） ---
   // ==========================================
@@ -1060,57 +1064,92 @@ return (
                         );
                         const isFinalized = !!saleRecord;
 
-                        // ✅ 2. 修正：確定前でもメニューから金額を算出する
-                        // 予約詳細（JSON）を解析して、紐づいているメニューの合計価格を取得
+                        // 2. 予定金額を算出
                         const details = parseReservationDetails(res);
-                        const estimatedPrice = res.total_price || details.totalPrice || 0;
-
-                        // 3. 表示する金額を決定（確定済みなら実績、未確定なら予定額）
+                        const estimatedPrice = isFacility ? (res.total_price || 0) : (res.total_price || details.totalPrice || 0);
                         const displayPrice = isFinalized ? saleRecord.total_amount : estimatedPrice;
 
                         return (
                           <tr key={rowKey} style={{ 
                             borderBottom: '1px solid #eee', 
-                            // 行をクリックでカルテ/施設詳細を開く（お会計列以外）
                             cursor: 'pointer',
                             background: isFacility ? '#f5f3ff' : '#fff' 
                           }}>
-                            {/* 担当者列 */}
-                            <td onClick={(e) => { if(!isFacility) { e.stopPropagation(); setStaffPickerRes(res); } }} style={tdStyle}>
-                              {isFacility ? '---' : (res.staffs?.name || 'フリー')}
+                            {/* --- ① 担当者列 --- */}
+                            <td 
+                              onClick={(e) => { 
+                                // スタッフが2人以上いる時だけ、クリックで選択パネルを開けるようにする
+                                if(!isFacility && staffs.length > 1) { 
+                                  e.stopPropagation(); 
+                                  setStaffPickerRes(res); 
+                                } 
+                              }} 
+                              style={{ 
+                                ...tdStyle, 
+                                fontWeight: 'bold', 
+                                color: isFacility ? '#94a3b8' : '#4b2c85',
+                                // 1人営業なら指マークを出さない
+                                cursor: staffs.length > 1 ? 'pointer' : 'default'
+                              }}
+                            >
+                              {/* ✅ 1人営業ならその人の名前、複数人なら既存の出し分けロジック */}
+                              {staffs.length === 1 
+                                ? staffs[0].name 
+                                : (isFacility ? '---' : (res.staffs?.name || 'フリー'))
+                              }
                             </td>
 
-                            {/* 時間列 */}
-                            <td style={tdStyle}>{new Date(res.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</td>
-
-                            {/* 名前 (カルテ) */}
-                            <td onClick={(e) => { e.stopPropagation(); if(!isFacility) openCustomerInfo(res); }} style={{ ...tdStyle, fontWeight: 'bold', color: isFacility ? '#4f46e5' : '#333' }}>
-                              {isFacility && '🏢 '}{res.customer_name} {isFinalized && '✓'}
+                            {/* --- ② 時間列 --- */}
+                            <td style={tdStyle}>
+                              {new Date(res.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                             </td>
 
-                            {/* メニュー列 */}
-                            <td style={tdStyle}>{isFacility ? '施設訪問 施術一式' : details.menuName}</td>
-
-                            {/* お会計 (レジ) 列 */}
+                            {/* --- ③ お客様名 (カルテ/内訳) --- */}
                             <td 
                               onClick={(e) => { 
                                 e.stopPropagation(); 
-                                // 個人予約かつ未確定の場合のみ、レジ画面を開ける
+                                if(isFacility) {
+                                  if(isFinalized) {
+                                    setSelectedFacilitySale(saleRecord);
+                                    setShowFacilityMembersModal(true);
+                                  } else {
+                                    alert("施術完了後に内訳が確認できるようになります。");
+                                  }
+                                } else {
+                                  openCustomerInfo(res); 
+                                }
+                              }} 
+                              style={{ 
+                                ...tdStyle, 
+                                fontWeight: 'bold', 
+                                color: isFacility ? '#4f46e5' : (res.status === 'completed' ? '#333' : '#fff'),
+                                background: isFacility ? 'transparent' : (res.status === 'completed' ? '#eee' : '#008000')
+                              }}
+                            >
+                              {isFacility && '🏢 '}{res.customer_name} {isFinalized && '✓'}
+                            </td>
+
+                            {/* --- ④ メニュー(予定)列 --- */}
+                            <td style={{ ...tdStyle, color: isFacility ? '#64748b' : '#333', fontSize: '0.8rem' }}>
+                              {isFacility ? '施設訪問 施術一式' : details.menuName}
+                            </td>
+
+                            {/* --- ⑤ お会計 (レジ) 列 --- */}
+                            <td 
+                              onClick={(e) => { 
+                                e.stopPropagation(); 
                                 if(!isFacility) openCheckout(res); 
                               }} 
                               style={{ 
                                 ...tdStyle, 
                                 fontWeight: '900', 
-                                // ✅ 確定前（予定）ならオレンジ、確定後は紺色にして区別
                                 color: isFinalized ? '#1e293b' : '#d34817', 
-                                cursor: isFacility ? 'default' : 'pointer',
-                                opacity: isFinalized ? 1 : 0.8
+                                cursor: isFacility ? 'default' : 'pointer'
                               }}
                             >
                               ¥ {Number(displayPrice).toLocaleString()}
-                              {/* ✅ 予定金額のときは小さく (予) と表示 */}
                               {!isFinalized && displayPrice > 0 && (
-                                <span style={{ fontSize: '0.6rem', marginLeft: '4px', verticalAlign: 'middle', fontWeight: 'normal' }}>(予)</span>
+                                <span style={{ fontSize: '0.6rem', marginLeft: '4px', fontWeight: 'normal' }}>(予)</span>
                               )}
                             </td>
                           </tr>
@@ -1943,6 +1982,45 @@ return (
           </div>
         </div>
       )}
+
+      {/* 🏢 ここから差し込む！！ ========================================== */}
+      {showFacilityMembersModal && selectedFacilitySale && (
+        <div style={modalOverlayStyle} onClick={() => setShowFacilityMembersModal(false)}>
+          <div style={{ ...modalContentStyle, maxWidth: '400px' }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', borderBottom: '2px solid #4f46e5', paddingBottom: '10px' }}>
+              <h3 style={{ margin: 0, fontSize: '1.1rem' }}>🏢 施術完了メンバー内訳</h3>
+              <button onClick={() => setShowFacilityMembersModal(false)} style={{ border: 'none', background: 'none', cursor: 'pointer' }}><X size={20}/></button>
+            </div>
+            
+            <div style={{ maxHeight: '40vh', overflowY: 'auto', marginBottom: '20px' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead style={{ background: '#f8fafc', fontSize: '0.75rem' }}>
+                  <tr>
+                    <th style={{ ...tdStyle, textAlign: 'left' }}>氏名</th>
+                    <th style={tdStyle}>メニュー</th>
+                    <th style={{ ...tdStyle, textAlign: 'right' }}>単価</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {selectedFacilitySale.details?.members_list?.map((m, idx) => (
+                    <tr key={idx} style={{ borderBottom: '1px solid #eee' }}>
+                      <td style={{ ...tdStyle, textAlign: 'left', fontSize: '0.85rem', fontWeight: 'bold' }}>{m.name} 様</td>
+                      <td style={{ ...tdStyle, fontSize: '0.8rem' }}>{m.menu}</td>
+                      <td style={{ ...tdStyle, textAlign: 'right', fontSize: '0.85rem' }}>¥{m.price?.toLocaleString()}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div style={{ background: '#f5f3ff', padding: '15px', borderRadius: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontWeight: 'bold', color: '#4f46e5' }}>合計 {selectedFacilitySale.details?.residents_count}名</span>
+              <span style={{ fontSize: '1.4rem', fontWeight: '900', color: '#1e293b' }}>¥{selectedFacilitySale.total_amount?.toLocaleString()}</span>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* 🏢 ここまで ====================================================== */}
 
       {/* 🆕 追加：レジ忘れアラート用の点滅アニメーション命令 */}
       <style>{`
