@@ -138,13 +138,37 @@ if (profile && profile.business_name) {
       const startOfYear = `${viewYear}-01-01`;
       const endOfYear = `${viewYear}-12-31`;
 
-      // 2. 予約データ取得
-      const { data: resData } = await supabase
-        .from('reservations')
-        .select('*, staffs(name)')
-        .eq('shop_id', cleanShopId)
-        .order('start_time', { ascending: true });
-      setAllReservations(resData || []);
+      // 2. 予約データ ＆ 施設訪問データを並列で取得（ここを大幅強化！）
+      const [resData, visitData] = await Promise.all([
+        supabase.from('reservations')
+          .select('*, staffs(name)')
+          .eq('shop_id', cleanShopId)
+          .order('start_time', { ascending: true }),
+        // ✅ エイリアス facility_data を使い、外部キー facility_user_id 経由で取得を安定させる
+        supabase.from('visit_requests')
+          .select('*, facility_data:facility_user_id(facility_name)')
+          .eq('shop_id', cleanShopId)
+      ]);
+
+      const individualTasks = (resData.data || []).map(r => ({ 
+        ...r, 
+        task_type: 'individual' 
+      }));
+
+      const facilityTasks = (visitData.data || []).map(v => {
+        // ✅ 配列・オブジェクト両対応で施設名を抽出
+        const fData = Array.isArray(v.facility_data) ? v.facility_data[0] : v.facility_data;
+        return { 
+          ...v, 
+          task_type: 'facility',
+          // ここが台帳に表示される名前になります
+          customer_name: fData?.facility_name || '名称未設定施設',
+          start_time: `${v.scheduled_date}T09:00:00` 
+        };
+      });
+
+      // 合体させてセット（これで台帳に両方並びます）
+      setAllReservations([...individualTasks, ...facilityTasks]);
 
       // 3. スタッフ名簿取得
       const { data: staffsData } = await supabase.from('staffs').select('*').eq('shop_id', cleanShopId);
@@ -172,7 +196,19 @@ if (profile && profile.business_name) {
       setSalesRecords(sDataRes.data || []);
       setAllCustomers(custAllRes.data || []);
 
-    } catch (err) { 
+    // 🔍 ここにデバッグコードを挿入！
+      console.log("--- クエストデータ取得デバッグ ---");
+      console.log("選択中の店舗ID (shopId):", cleanShopId);
+      console.log("取得した個人予約数:", resData.data?.length);
+      console.log("取得した施設訪問数:", visitData.data?.length);
+      console.log("施設訪問データの生の中身:", visitData.data);
+      if (visitData.data?.length > 0) {
+        console.log("1件目の予定日:", visitData.data[0].scheduled_date);
+        console.log("1件目の施設名:", visitData.data[0].facility_users?.facility_name);
+      }
+      console.log("------------------------------");
+
+    } catch (err) {
       console.error("Fetch Error:", err); 
     } finally { 
       setLoading(false); 
@@ -545,7 +581,18 @@ const completePayment = async () => {
     });
   };
 
-  const dailyTotalSales = useMemo(() => allReservations.filter(r => r.start_time.startsWith(selectedDate) && r.res_type === 'normal' && r.status === 'completed').reduce((sum, r) => sum + (r.total_price || 0), 0), [allReservations, selectedDate]);
+  // 🆕 修正：台帳（sales）にある「その日の確定売上」をすべて合計するロジック
+  const dailyTotalSales = useMemo(() => {
+    return salesRecords
+      .filter(s => {
+        if (!s.sale_date) return false;
+        // ✅ 形式がハイフン(-)でもスラッシュ(/)でも一致するように正規化
+        const sDate = s.sale_date.toString().split('T')[0].replace(/\//g, '-');
+        const tDate = selectedDate.toString().split('T')[0].replace(/\//g, '-');
+        return sDate === tDate;
+      })
+      .reduce((sum, s) => sum + (Number(s.total_amount) || 0), 0);
+  }, [salesRecords, selectedDate]);
 
   // 🆕 修正：過去の「レジ処理忘れ」を自動検知するロジック
   const oldestIncompleteDate = useMemo(() => {
@@ -553,69 +600,75 @@ const completePayment = async () => {
     
     const incomplete = allReservations
       .filter(r => 
-        r.res_type === 'normal' && 
-        r.status !== 'completed' &&      // 完了していない
-        r.start_time.split('T')[0] < today && // 今日より前
-        !isSalesExcludedRes(r)           // 見積りなどの売上対象外は除外
+        // ✅ 個人予約(individual)または施設訪問(facility)の両方を対象にする
+        (r.task_type === 'individual' || r.task_type === 'facility') && 
+        r.status !== 'completed' && 
+        r.start_time.split('T')[0] < today && 
+        !isSalesExcludedRes(r)
       )
-      .sort((a, b) => a.start_time.localeCompare(b.start_time)); // 古い順に並べる
+      .sort((a, b) => a.start_time.localeCompare(b.start_time));
 
-    // 一番古い「レジ忘れの日」を返す
     return incomplete.length > 0 ? incomplete[0].start_time.split('T')[0] : null;
   }, [allReservations, services]);
 
 // ✅ 売上の人数と金額のズレを完全に解消する集計ロジック（厳格・台帳連動版）
   const analyticsData = useMemo(() => {
-    const currentYear = viewYear;
-    const months = Array.from({ length: 12 }, (_, i) => ({
-      month: i + 1, total: 0, count: 0,
-      days: Array.from({ length: new Date(currentYear, i + 1, 0).getDate() }, (_, j) => ({ day: j + 1, total: 0, count: 0 }))
-    }));
+  const currentYear = viewYear;
+  const months = Array.from({ length: 12 }, (_, i) => ({
+    month: i + 1, total: 0, count: 0,
+    days: Array.from({ length: new Date(currentYear, i + 1, 0).getDate() }, (_, j) => ({ day: j + 1, total: 0, count: 0 }))
+  }));
 
-    // 1️⃣ 台帳に表示される「通常予約(normal)」のIDだけを正解リストとして抽出
-    const validNormalRes = allReservations.filter(r => r.res_type === 'normal');
-    const validResIds = new Set(validNormalRes.map(r => r.id));
+  // 1️⃣ ✅ 対象データを個人・施設の両方に広げる
+  const validTasks = allReservations.filter(r => r.task_type === 'individual' || r.task_type === 'facility');
+  const validResIds = new Set(validTasks.filter(r => r.task_type === 'individual').map(r => r.id));
+  const validVisitIds = new Set(validTasks.filter(r => r.task_type === 'facility').map(r => r.id));
 
-    // 2️⃣ 会計記録(sales)を集計（※現存する通常予約に紐付いているものだけ）
-    salesRecords.forEach(s => {
-      // 予約が削除されていたり、通常予約以外(✕印など)の売上は集計から除外
-      if (!s.reservation_id || !validResIds.has(s.reservation_id)) return;
+  // 2️⃣ 会計記録(sales)を集計
+  salesRecords.forEach(s => {
+    const isIndividualSale = s.reservation_id && validResIds.has(s.reservation_id);
+    const isFacilitySale = s.visit_request_id && validVisitIds.has(s.visit_request_id);
 
-      const d = new Date(s.sale_date);
-      if (d.getFullYear() === currentYear) {
-        const mIdx = d.getMonth();
-        const dIdx = d.getDate() - 1;
-        if (months[mIdx] && months[mIdx].days[dIdx]) {
-          months[mIdx].total += (Number(s.total_amount) || 0);
-          months[mIdx].count += 1;
-          months[mIdx].days[dIdx].total += (Number(s.total_amount) || 0);
-          months[mIdx].days[dIdx].count += 1;
-        }
+    if (!isIndividualSale && !isFacilitySale) return;
+
+    const d = new Date(s.sale_date);
+    if (d.getFullYear() === currentYear) {
+      const mIdx = d.getMonth();
+      const dIdx = d.getDate() - 1;
+      if (months[mIdx] && months[mIdx].days[dIdx]) {
+        months[mIdx].total += (Number(s.total_amount) || 0);
+        months[mIdx].count += 1;
+        months[mIdx].days[dIdx].total += (Number(s.total_amount) || 0);
+        months[mIdx].days[dIdx].count += 1;
       }
-    });
+    }
+  });
 
-    // 3️⃣ まだ会計(sales)に載っていない「完了済み予約(完了 ✓)」を補完
-    const accountedResIds = new Set(salesRecords.map(s => s.reservation_id));
-    
-    validNormalRes.filter(r => 
-      r.status === 'completed' && 
-      !accountedResIds.has(r.id)
-    ).forEach(r => {
-      const d = new Date(r.start_time);
-      if (d.getFullYear() === currentYear) {
-        const mIdx = d.getMonth();
-        const dIdx = d.getDate() - 1;
-        if (months[mIdx] && months[mIdx].days[dIdx]) {
-          months[mIdx].total += (Number(r.total_price) || 0);
-          months[mIdx].count += 1;
-          months[mIdx].days[dIdx].total += (Number(r.total_price) || 0);
-          months[mIdx].days[dIdx].count += 1;
-        }
+  // 3️⃣ ✅ 未会計の完了済みデータを補完（IDの照合を両タイプ対応させる）
+  const accountedIds = new Set([
+    ...salesRecords.map(s => s.reservation_id),
+    ...salesRecords.map(s => s.visit_request_id)
+  ].filter(Boolean));
+  
+  validTasks.filter(r => 
+    r.status === 'completed' && 
+    !accountedIds.has(r.id)
+  ).forEach(r => {
+    const d = new Date(r.start_time);
+    if (d.getFullYear() === currentYear) {
+      const mIdx = d.getMonth();
+      const dIdx = d.getDate() - 1;
+      if (months[mIdx] && months[mIdx].days[dIdx]) {
+        months[mIdx].total += (Number(r.total_price) || 0);
+        months[mIdx].count += 1;
+        months[mIdx].days[dIdx].total += (Number(r.total_price) || 0);
+        months[mIdx].days[dIdx].count += 1;
       }
-    });
+    }
+  });
 
-    return months;
-  }, [allReservations, salesRecords, viewYear]);  
+  return months;
+}, [allReservations, salesRecords, viewYear]);
   const groupedWholeAdjustments = useMemo(() => {
     const sorted = sortItems(adminAdjustments.filter(adj => adj.service_id === null));
     return sorted.reduce((acc, adj) => { const cat = adj.category || 'その他'; if (!acc[cat]) acc[cat] = []; acc[cat].push(adj); return acc; }, {});
@@ -985,39 +1038,100 @@ return (
                     </tr>
                   </thead>
                   <tbody>
-                    {allReservations.filter(r => r.start_time.startsWith(selectedDate) && r.res_type === 'normal' && !isSalesExcludedRes(r)).length > 0 ? 
-                      allReservations.filter(r => r.start_time.startsWith(selectedDate) && r.res_type === 'normal' && !isSalesExcludedRes(r)).map((res) => (
-                        <tr key={res.id} style={{ borderBottom: '1px solid #eee', cursor: 'pointer' }}>
-                          <td onClick={(e) => { e.stopPropagation(); setStaffPickerRes(res); }} style={{ ...tdStyle, fontWeight: 'bold', color: '#4b2c85', background: '#fdfbff' }}>
-                            {res.staffs?.name || 'フリー'}
-                          </td>
-                          <td onClick={() => openCheckout(res)} style={tdStyle}>
-                            {new Date(res.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                          </td>
-<td onClick={() => openCustomerInfo(res)} style={{ ...tdStyle, background: res.status === 'completed' ? '#eee' : '#008000', color: res.status === 'completed' ? '#333' : '#fff', fontWeight: 'bold' }}>
-  {/* 🆕 customer_name が NULL の場合に備えて '名前なし' を表示するガードを追加 */}
-  {res.customer_name || '名前なし'} {res.status === 'completed' && '✓'}
-</td>
-                          <td onClick={() => openCheckout(res)} style={tdStyle}>
-                            {parseReservationDetails(res).menuName}
-                          </td>
-                          <td onClick={() => openCheckout(res)} style={{ ...tdStyle, fontWeight: 'bold' }}>
-                            ¥ {Number(res.total_price || parseReservationDetails(res).totalPrice).toLocaleString()}
-                          </td>
-                        </tr>
-                      )) : (
-                        <tr><td colSpan="5" style={{ padding: '50px', textAlign: 'center', color: '#999' }}>予約なし</td></tr>
-                      )
-                    }
-                  </tbody>
+                    {/* ✅ 日付比較の形式を統一してフィルタリング */}
+                    {allReservations.filter(r => {
+                      const rDate = r.start_time.split('T')[0].replace(/\//g, '-');
+                      const sDate = selectedDate.split('T')[0].replace(/\//g, '-');
+                      return rDate === sDate && !isSalesExcludedRes(r);
+                    }).length > 0 ? 
+                      allReservations
+                        .filter(r => {
+                          const rDate = r.start_time.split('T')[0].replace(/\//g, '-');
+                          const sDate = selectedDate.split('T')[0].replace(/\//g, '-');
+                          return rDate === sDate && !isSalesExcludedRes(r);
+                        })
+                        .map((res) => {
+                        const isFacility = res.task_type === 'facility';
+                        const rowKey = `${res.task_type}-${res.id}`;
+                        
+                        // 1. 売上実績データ（確定済み）があるか探す
+                        const saleRecord = salesRecords.find(s => 
+                          isFacility ? s.visit_request_id === res.id : s.reservation_id === res.id
+                        );
+                        const isFinalized = !!saleRecord;
+
+                        // ✅ 2. 修正：確定前でもメニューから金額を算出する
+                        // 予約詳細（JSON）を解析して、紐づいているメニューの合計価格を取得
+                        const details = parseReservationDetails(res);
+                        const estimatedPrice = res.total_price || details.totalPrice || 0;
+
+                        // 3. 表示する金額を決定（確定済みなら実績、未確定なら予定額）
+                        const displayPrice = isFinalized ? saleRecord.total_amount : estimatedPrice;
+
+                        return (
+                          <tr key={rowKey} style={{ 
+                            borderBottom: '1px solid #eee', 
+                            // 行をクリックでカルテ/施設詳細を開く（お会計列以外）
+                            cursor: 'pointer',
+                            background: isFacility ? '#f5f3ff' : '#fff' 
+                          }}>
+                            {/* 担当者列 */}
+                            <td onClick={(e) => { if(!isFacility) { e.stopPropagation(); setStaffPickerRes(res); } }} style={tdStyle}>
+                              {isFacility ? '---' : (res.staffs?.name || 'フリー')}
+                            </td>
+
+                            {/* 時間列 */}
+                            <td style={tdStyle}>{new Date(res.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</td>
+
+                            {/* 名前 (カルテ) */}
+                            <td onClick={(e) => { e.stopPropagation(); if(!isFacility) openCustomerInfo(res); }} style={{ ...tdStyle, fontWeight: 'bold', color: isFacility ? '#4f46e5' : '#333' }}>
+                              {isFacility && '🏢 '}{res.customer_name} {isFinalized && '✓'}
+                            </td>
+
+                            {/* メニュー列 */}
+                            <td style={tdStyle}>{isFacility ? '施設訪問 施術一式' : details.menuName}</td>
+
+                            {/* お会計 (レジ) 列 */}
+                            <td 
+                              onClick={(e) => { 
+                                e.stopPropagation(); 
+                                // 個人予約かつ未確定の場合のみ、レジ画面を開ける
+                                if(!isFacility) openCheckout(res); 
+                              }} 
+                              style={{ 
+                                ...tdStyle, 
+                                fontWeight: '900', 
+                                // ✅ 確定前（予定）ならオレンジ、確定後は紺色にして区別
+                                color: isFinalized ? '#1e293b' : '#d34817', 
+                                cursor: isFacility ? 'default' : 'pointer',
+                                opacity: isFinalized ? 1 : 0.8
+                              }}
+                            >
+                              ¥ {Number(displayPrice).toLocaleString()}
+                              {/* ✅ 予定金額のときは小さく (予) と表示 */}
+                              {!isFinalized && displayPrice > 0 && (
+                                <span style={{ fontSize: '0.6rem', marginLeft: '4px', verticalAlign: 'middle', fontWeight: 'normal' }}>(予)</span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                    }) : (
+                      <tr><td colSpan="5" style={{ padding: '50px', textAlign: 'center', color: '#999' }}>予約なし</td></tr>
+                    )
+                  }
+                </tbody>
                 </table>
               ) : (
                 /* ==========================================
                    📱 スマホ版：見やすい「売上カード」形式
                    ========================================== */
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                  {allReservations.filter(r => r.start_time.startsWith(selectedDate) && r.res_type === 'normal' && !isSalesExcludedRes(r)).length > 0 ? (
-                    allReservations.filter(r => r.start_time.startsWith(selectedDate) && r.res_type === 'normal' && !isSalesExcludedRes(r)).map((res) => {
+                  {allReservations
+  .filter(r => r.start_time.startsWith(selectedDate) && !isSalesExcludedRes(r)) // 💡 res_type の縛りを解除！
+  .length > 0 ? (
+    allReservations
+      .filter(r => r.start_time.startsWith(selectedDate) && !isSalesExcludedRes(r))
+      .map((res) => {
                       const details = parseReservationDetails(res);
                       const isCompleted = res.status === 'completed';
                       return (
@@ -1159,10 +1273,11 @@ return (
                   .map(cust => {
                     // 🆕 修正：ここでお客様ごとの「完了済み予約」をリアルタイムに計算します
                     const realVisitCount = allReservations.filter(r => 
-                      (r.customer_name === cust.name || r.customer_id === cust.id) && 
-                      r.status === 'completed' && 
-                      r.res_type === 'normal'
-                    ).length;
+  (r.customer_name === cust.name || r.customer_id === cust.id) && 
+  r.status === 'completed' && 
+  // ✅ res_type ではなく task_type または存在確認で判定する
+  (r.task_type === 'individual' || r.task_type === 'facility')
+).length;
 
                     return (
                       <div 

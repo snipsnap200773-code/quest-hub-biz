@@ -395,27 +395,37 @@ const initialSvcs = opt.services || (opt.people ? opt.people.flatMap(p => p.serv
 
   // 🆕 修正：エラー解決のための「お会計戻し」関数
   const handleRevertTask = async (task) => {
-    if (!window.confirm("この予約をお会計前の状態に戻しますか？\n（売上台帳の記録も一度削除されます）")) return;
+    const isFacility = task.task_type === 'facility';
+    const msg = isFacility 
+      ? "施設訪問の売上確定を取り消しますか？\n（名簿の完了状態は維持されますが、台帳から売上が削除されます）"
+      : "この予約をお会計前の状態に戻しますか？\n（売上台帳の記録も一度削除されます）";
+
+    if (!window.confirm(msg)) return;
 
     try {
-      // 1. 予約のステータスを「完了」から「未完了（pending）」に戻す
-      const { error: resError } = await supabase
-        .from('reservations')
+      // 1. 適切なテーブルのステータスを「pending（未完了）」に戻す
+      const targetTable = isFacility ? 'visit_requests' : 'reservations';
+      
+      const { error: statusError } = await supabase
+        .from(targetTable)
         .update({ status: 'pending' })
         .eq('id', task.id);
 
-      if (resError) throw resError;
+      if (statusError) throw statusError;
 
       // 2. 売上テーブル（sales）から今回の記録を消去する
+      // 💡 施設なら visit_request_id、個人なら reservation_id を指定
+      const deleteField = isFacility ? 'visit_request_id' : 'reservation_id';
+      
       const { error: saleError } = await supabase
         .from('sales')
         .delete()
-        .eq('reservation_id', task.id);
+        .eq(deleteField, task.id);
 
       if (saleError) throw saleError;
 
-      showMsg("お会計を差し戻しました。再度レジ処理が可能です。");
-      fetchTodayTasks(); // リストを最新状態（レジへボタン復活）に更新
+      showMsg("お会計を差し戻しました。再度実行が可能です。");
+      fetchTodayTasks(); // リストを更新
     } catch (err) {
       console.error("戻し処理エラー:", err);
       alert("エラーが発生しました: " + err.message);
@@ -918,11 +928,14 @@ const handleSaveMemo = async () => {
               
               {/* 💡 ここ！メニュー名の横に変更ボタンを設置しました [cite: 2026-03-08] */}
               {selectedServices.length > 0 && (
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', alignItems: 'center' }}>
-                  <span style={{ fontWeight: 'bold' }}>メニュー:</span>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{ color: '#1e293b', fontWeight: 'bold' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px', alignItems: 'flex-start' }}>
+                  <span style={{ fontWeight: 'bold', whiteSpace: 'nowrap' }}>メニュー:</span>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
+                    <span style={{ color: '#1e293b', fontWeight: 'bold', textAlign: 'right' }}>
                       {selectedServices.map(s => s.name).join(', ')}
+                    </span>
+                    <span style={{ fontSize: '0.75rem', color: themeColor, fontWeight: 'bold' }}>
+                      施術予定額: ¥{calculateInitialPrice(selectedTask).toLocaleString()}
                     </span>
                     {/* 🆕 このボタンがメニュー変更ポップアップを呼び出します [cite: 2026-03-08] */}
                     <button 
@@ -975,13 +988,19 @@ const handleSaveMemo = async () => {
                   <span style={{ 
                     fontSize: '2.2rem', 
                     fontWeight: '900', 
-                    color: isManualPrice ? '#2563eb' : themeColor, // 💡 手動時は青色
+                    color: isManualPrice ? '#2563eb' : themeColor,
                     transition: 'color 0.3s'
                   }}>
                     ¥{finalPrice.toLocaleString()}
                   </span>
                 </div>
               </div>
+              {/* ✅ 🆕 ここに追加：自動計算であることを伝えるラベル */}
+              {!isManualPrice && (
+                <div style={{ textAlign: 'right', fontSize: '0.65rem', color: '#94a3b8', marginTop: '4px' }}>
+                  ※マスター設定に基づき自動計算中
+                </div>
+              )}
             </div>
 
             {/* 確定ボタン */}
@@ -1225,9 +1244,18 @@ const handleSaveMemo = async () => {
                           {isToday && <span style={{ background: themeColor, color: '#fff', padding: '1px 6px', borderRadius: '4px', fontSize: '0.6rem' }}>今回</span>}
                           {isFuture && <span style={{ background: '#0ea5e9', color: '#fff', padding: '1px 6px', borderRadius: '4px', fontSize: '0.6rem' }}>次回の予約</span>}
                         </div>
-                        {/* 💰 金額表示：total_price を優先して表示 */}
+                        {/* 💰 修正：お会計前(0円)でも予定金額を計算して表示する */}
                         <div style={{ color: isFuture ? '#94a3b8' : '#d34817' }}>
-                          {isFuture ? '---' : `¥${(h.total_price ?? 0).toLocaleString()}`}
+                          {isFuture ? '---' : (() => {
+                            const displayPrice = calculateInitialPrice(h);
+                            const isConfirmed = h.status === 'completed' && h.total_price > 0;
+                            return (
+                              <>
+                                ¥{displayPrice.toLocaleString()}
+                                {!isConfirmed && <span style={{fontSize:'0.6rem', marginLeft:'2px'}}>(予)</span>}
+                              </>
+                            );
+                          })()}
                         </div>
                       </div>
 

@@ -147,10 +147,14 @@ let catQuery = supabase.from('service_categories')
           const catRes = await catQuery;
         
         if (catRes.data) {
-          // 2. 入り口識別キー（url_key）による絞り込み
-          const filteredCats = entryType 
-            ? catRes.data.filter(c => c.url_key === entryType) 
-            : catRes.data.filter(c => !c.url_key);
+          // ✅ 修正：施設専用（is_facility_only）フラグをチェックする
+          const filteredCats = catRes.data.filter(c => {
+            // 1. 施設専用フラグが TRUE のものは、一般予約フォームでは常に非表示にする
+            if (c.is_facility_only) return false;
+
+            // 2. 既存の入り口識別キー（url_key）による絞り込み
+            return entryType ? c.url_key === entryType : !c.url_key;
+          });
           
           setCategories(filteredCats);
 

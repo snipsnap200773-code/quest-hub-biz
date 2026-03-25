@@ -25,6 +25,36 @@ const getCustomerColor = (name, type) => { // 💡 typeを引数に追加
   };
 };
 
+const parseReservationDetails = (res) => {
+  if (!res) return { menuName: '', totalPrice: 0, items: [], subItems: [] };
+  const opt = typeof res.options === 'string' ? JSON.parse(res.options) : (res.options || {});
+  let items = [];
+  let subItems = [];
+
+  if (opt.people && Array.isArray(opt.people)) {
+    items = opt.people.flatMap(p => p.services || []);
+    subItems = opt.people.flatMap(p => Object.values(p.options || {}));
+  } else {
+    items = opt.services || [];
+    subItems = Object.values(opt.options || {});
+  }
+
+  const baseNames = items.map(s => s.name).join(', ');
+  const optionNames = subItems.map(o => o.option_name).join(', ');
+  const fullMenuName = res.menu_name || (optionNames ? `${baseNames}（${optionNames}）` : (baseNames || 'メニューなし'));
+
+  // 合計金額の計算
+  let basePrice = items.reduce((sum, item) => sum + (Number(item.price) || 0), 0);
+  const optPrice = subItems.reduce((sum, o) => sum + (Number(o.additional_price) || 0), 0);
+
+  return { 
+    menuName: fullMenuName, 
+    totalPrice: basePrice + optPrice, 
+    items, 
+    subItems 
+  };
+};
+
 function AdminReservations() {
   const { shopId } = useParams();
   const navigate = useNavigate();
@@ -256,7 +286,7 @@ const { data: resData } = await supabase
       .from('visit_requests')
       .select('*, facility_users(facility_name), visit_request_residents(count)')
       .eq('shop_id', shopId)
-      .neq('status', 'completed')
+      // ✅ .neq('status', 'completed') を削除することで、完了分もカレンダーに表示されます
       .neq('status', 'canceled');
 
     // 🆕 【重要：ここがエラーの場所でした】
@@ -846,20 +876,9 @@ const getStatusAt = (dateStr, timeStr) => {
     }
 
     // --- 🏆 優先度3：施設訪問日の「それ以外の時間」をステルスブロック ---
-    const hasAnyConfirmedVisitThisDay = visitRequests.some(v => 
-      v.status === 'confirmed' && 
-      (v.scheduled_date === dateStr || (Array.isArray(v.visit_date_list) && v.visit_date_list.some(d => d.date === dateStr)))
-    );
-    const hasAnyKeepThisDay = manualKeeps.some(k => k.date === dateStr) || checkIsRegularKeep(dateObj);
-
-    if (hasAnyConfirmedVisitThisDay || hasAnyKeepThisDay) {
-      return [{ res_type: 'facility_day_stealth', customer_name: '', start_time: `${dateStr}T${timeStr}:00` }];
-    }
-
-    // --- 🏆 優先度4：通常の予約やプライベート予定 ---
     const currentSlotStart = new Date(`${dateStr}T${timeStr}:00`).getTime();
 
-    // お客様の予約
+    // 1. お客様の予約（ねじ込み含む）
     const resMatches = reservations.filter(r => {
       const start = new Date(r.start_time).getTime();
       const end = new Date(r.end_time).getTime();
@@ -871,7 +890,7 @@ const getStatusAt = (dateStr, timeStr) => {
       return false;
     });
 
-    // プライベート予定
+    // 2. プライベート予定
     const privMatches = privateTasks.filter(p => {
       const start = new Date(p.start_time).getTime();
       const end = new Date(p.end_time).getTime();
@@ -879,7 +898,19 @@ const getStatusAt = (dateStr, timeStr) => {
     }).map(p => ({ ...p, res_type: 'private_task', customer_name: p.title }));
 
     const matches = [...resMatches, ...privMatches];
-    if (matches.length > 0) return matches;
+    if (matches.length > 0) return matches; // ✅ 予約があれば即座にそれを表示！
+
+    // --- 🏆 優先度4：予約がない枠だけ、施設訪問日の「ステルスブロック」をかける ---
+    // status に 'completed' も含めることで、お会計後もブロックを維持します
+    const hasAnyConfirmedVisitThisDay = visitRequests.some(v => 
+      (v.status === 'confirmed' || v.status === 'completed') && 
+      (v.scheduled_date === dateStr || (Array.isArray(v.visit_date_list) && v.visit_date_list.some(d => d.date === dateStr)))
+    );
+    const hasAnyKeepThisDay = manualKeeps.some(k => k.date === dateStr) || checkIsRegularKeep(dateObj);
+
+    if (hasAnyConfirmedVisitThisDay || hasAnyKeepThisDay) {
+      return [{ res_type: 'facility_day_stealth', customer_name: '', start_time: `${dateStr}T${timeStr}:00` }];
+    }
 
     // --- 🏆 優先度5：定休日・長期休暇・営業時間内判定 ---
     const isSpecialHoliday = checkIsSpecialHoliday(dateObj);
@@ -1283,27 +1314,40 @@ return (
                               isStart ? (
                                 <div style={{ fontWeight: 'bold', fontSize: isPC ? '0.85rem' : '0.7rem', color: isOtherShop ? '#94a3b8' : colors.text, textAlign: 'center', whiteSpace: 'nowrap', padding: '0 4px' }}>
                                   {(() => {
-                                    if (startingHere.length === 1) {
-                                      const res = startingHere[0];
-                                      if (res.res_type === 'facility_visit') {
-                                        return (
-                                          <div style={{ display: 'flex', flexDirection: isPC ? 'row' : 'column', alignItems: 'center', gap: '4px', color: '#4f46e5' }}>
-                                            <Building2 size={isPC ? 16 : 12} strokeWidth={2.5} />
-                                            <span style={{ fontSize: isPC ? '0.8rem' : '0.65rem' }}>{isPC ? res.customer_name : res.customer_name.slice(0, 4)}</span>
-                                          </div>
-                                        );
-                                      }
-                                      const masterName = res.res_type === 'private_task' ? res.customer_name : (res.customers?.name || res.customer_name);
-                                      const name = masterName.split(/[\s　]+/)[0];
-                                      const countSuffix = reservationCount > 1 ? ` (${reservationCount}名)` : " 様";
-                                      return isPC ? (`${name}${countSuffix}`) : (
-                                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', lineHeight: 1 }}>
-                                          <span style={{ writingMode: 'vertical-rl', textOrientation: 'upright' }}>{name}</span>
-                                        </div>
-                                      );
-                                    }
-                                    return `👥 ${reservationCount}名`;
-                                  })()}
+  if (startingHere.length === 1) {
+    const res = startingHere[0];
+    
+    // --- 🏢 施設訪問の場合 ---
+    if (res.res_type === 'facility_visit') {
+      return (
+        <div style={{ display: 'flex', flexDirection: isPC ? 'row' : 'column', alignItems: 'center', gap: '4px', color: '#4f46e5' }}>
+          <Building2 size={isPC ? 16 : 12} strokeWidth={2.5} />
+          {/* ✅ 施設名のみ表示（金額を削除しました） */}
+          <span style={{ fontSize: isPC ? '0.8rem' : '0.65rem', fontWeight: 'bold' }}>
+            {isPC ? res.customer_name : res.customer_name.slice(0, 4)}
+          </span>
+        </div>
+      );
+    }
+
+    // --- 👤 個人・プライベート予定の場合 ---
+    const masterName = res.res_type === 'private_task' ? res.customer_name : (res.customers?.name || res.customer_name);
+    const name = masterName?.split(/[\s　]+/)[0] || "名前なし";
+    const countSuffix = reservationCount > 1 ? ` (${reservationCount}名)` : " 様";
+
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', lineHeight: 1.1 }}>
+        {isPC ? (
+          <span style={{ fontSize: '0.85rem', fontWeight: 'bold' }}>{name}{countSuffix}</span>
+        ) : (
+          <span style={{ writingMode: 'vertical-rl', textOrientation: 'upright', fontSize: '0.75rem', fontWeight: 'bold' }}>{name}</span>
+        )}
+        {/* ✅ 個人の枠内も金額を削除しました */}
+      </div>
+    );
+  }
+  return <div style={{ fontWeight: 'bold', fontSize: '0.8rem', color: '#64748b' }}>👥 {reservationCount}名</div>;
+})()}
                                 </div>
                               ) : null
                             )}
@@ -1677,7 +1721,16 @@ return (
                         <div key={h.id} style={{ padding: '15px', borderBottom: '1px solid #eee', background: '#fff', borderRadius: isToday ? '12px' : '0', border: isToday ? `2px solid ${themeColor}` : 'none' }}>
                           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '5px' }}>
                             <span style={{ fontWeight: 'bold' }}>{hDate.toLocaleDateString('ja-JP')}</span>
-                            <span style={{ color: '#e11d48', fontWeight: 'bold' }}>¥{(h.total_price || 0).toLocaleString()}</span>
+                            {(() => {
+  // 実績(total_price)があればそれを使い、なければ予定額を計算する
+  const displayPrice = h.total_price > 0 ? h.total_price : parseReservationDetails(h).totalPrice;
+  return (
+    <span style={{ color: '#e11d48', fontWeight: 'bold' }}>
+      ¥{displayPrice.toLocaleString()}
+      {h.total_price === 0 && <small style={{fontSize:'0.6rem', marginLeft:'2px'}}>(予)</small>}
+    </span>
+  );
+})()}
                           </div>
                           <div style={{ color: '#475569', fontSize: '0.8rem' }}>{h.menu_name}</div>
                         </div>
