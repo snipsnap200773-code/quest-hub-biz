@@ -875,127 +875,127 @@ const completePayment = async () => {
   const handlePrintInvoice = (mode, data) => {
     const printWin = window.open('', '_blank', 'width=900,height=1000');
     
-    // 🆕 修正：施設訪問と個人の両方のデータ形式から明細を生成する
     const members = data.flatMap(s => {
-      // A. 施設訪問の場合（members_listがある場合）
       if (s.details?.members_list) {
         return s.details.members_list.map(m => ({ ...m, date: s.sale_date }));
       }
-      
-      // B. 個人のお客様の場合
       const baseNames = (s.details?.services || []).map(svc => svc.name).join(', ');
-      // 枝メニュー名（リタッチ等）を結合
-      const optNames = s.details?.options 
-        ? Object.values(s.details.options).map(o => o.option_name).join(', ') 
-        : '';
+      const optNames = s.details?.options ? Object.values(s.details.options).map(o => o.option_name).join(', ') : '';
       const fullMenu = optNames ? `${baseNames}（${optNames}）` : (baseNames || 'メニューなし');
-      
       return [{
         date: s.sale_date,
-        name: invoiceTarget.name, // 顧客名
+        name: invoiceTarget.name,
         floor: '-',
         menu: fullMenu,
         price: s.total_amount
       }];
     });
 
+    members.sort((a, b) => (a.date || "").localeCompare(b.date || ""));
     const total = data.reduce((sum, s) => sum + Number(s.total_amount), 0);
+    const displayMonth = invoiceMonth;
 
     let content = `
       <html>
         <head>
-          <title>請求書類_${invoiceTarget?.name || '無題'}</title>
+          <title> </title>
           <style>
-            /* 🆕 ここを修正：上下の余白を 25mm、左右を 12mm に設定 */
             @page { 
               size: A4; 
-              margin: ${mode === 'full' ? '25mm 12mm' : '0'}; 
+              margin: ${mode === 'full' ? '20mm 15mm' : '0'}; 
             }
-            
             body { 
               font-family: "MS Mincho", "Hiragino Mincho ProN", serif; 
-              margin: 0; 
-              padding: 0; 
-              background: white; 
+              margin: 0; padding: 0; background: white; color: black;
             }
-
-            /* 🆕 明細モードのスタイル調整 */
-            .page { 
-              width: 100%; 
-              box-sizing: border-box; 
-              color: black; 
-            }
-
-            h1 { text-align: center; font-size: 28pt; letter-spacing: 15px; border-bottom: 3px solid #000; padding-bottom: 10px; margin-bottom: 30px; }
+            .page { width: 100%; box-sizing: border-box; position: relative; }
             .flex { display: flex; justify-content: space-between; align-items: flex-start; }
-            .invoice-title { border-bottom: 2px solid #000; display: inline-block; min-width: 300px; font-size: 18pt; }
-            .total-box { font-size: 24pt; border-bottom: 3px double #000; margin: 30px 0; padding: 10px 0; }
             
-            table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-            th, td { border: 1px solid black; padding: 10px; text-align: left; font-size: 11pt; }
-            th { background: #f2f2f2; }
-            
-            /* 🆕 ページまたぎで表の行が泣き別れしないようにする設定 */
+            /* テーブルデザイン：左右の線を消し、ストライプを導入 */
+            table { 
+              width: 100%; border-collapse: collapse; margin-top: 20px; table-layout: fixed;
+              border-top: 2px solid #000; 
+            }
+            th, td { 
+              padding: 10px 4px; text-align: left; font-size: 10.5pt; word-wrap: break-word; 
+              border: none; border-bottom: 1px solid #ccc; 
+            }
+            th { 
+              background: #fff; text-align: center; font-weight: bold; border-bottom: 1px solid #000; 
+            }
+            tbody tr:nth-child(even) { background-color: #f8fafc; }
+            thead { display: table-header-group; }
             tr { page-break-inside: avoid; }
             
-            .bank-info { 
-              margin-top: 40px; 
-              border: 1px solid #000; 
-              padding: 20px; 
-              font-size: 11pt; 
-              line-height: 1.6;
-              /* 🆕 振込先がページの最後に来たときに切れないようにする */
-              page-break-inside: avoid; 
-            }
-            
-            /* 8分割領収書（チケット）の設定は維持 */
+            .summary-total-container { margin-top: 30px; text-align: center; margin-bottom: 30px; }
+            .summary-total { font-size: 20pt; font-weight: 900; border-bottom: 3px double #000; padding: 10px 20px; display: inline-block; }
+            .bank-info { margin-top: 0px; border: 1px solid #000; padding: 15px; font-size: 11pt; line-height: 1.6; page-break-inside: avoid; }
             .ticket-page { width: 210mm; height: 297mm; display: flex; flex-wrap: wrap; align-content: flex-start; page-break-after: always; }
-            .ticket { width: 105mm; height: 74.25mm; padding: 12mm; box-sizing: border-box; display: flex; flex-direction: column; border: 0.1mm dashed #ccc; position: relative; }
+            .ticket { width: 105mm; height: 74.25mm; padding: 10mm; box-sizing: border-box; display: flex; flex-direction: column; border: 0.1mm dashed #ccc; position: relative; }
           </style>
         </head>
         <body>
     `;
 
     if (mode === 'full') {
-      // --- 📄 明細請求書モード ---
       content += `
         <div class="page">
-          <h1>請 求 書</h1>
-          <div class="flex" style="margin-top: 50px;">
-            <div>
-              <div class="invoice-title">${invoiceTarget?.name} 御中</div>
-              <p style="margin-top: 20px; font-size: 12pt;">下記の通り、御請求申し上げます。</p>
-              <div class="total-box">ご請求金額： ¥ ${total.toLocaleString()} -</div>
+          
+          <div class="flex" style="margin-bottom: 40px; align-items: flex-start;">
+            <div style="font-size: 20pt; font-weight: bold; border-bottom: 2px solid #000; padding-bottom: 5px; width: 350px;">
+              ${displayMonth}月度 請求明細書
             </div>
-            <div style="text-align: right; line-height: 1.5;">
-              <p style="font-weight: bold; font-size: 14pt; margin: 0;">${shop?.business_name || '美容室名'}</p>
-              <p style="margin: 5px 0 0;">〒${shop?.zip_code || ''}</p>
+            
+            <div style="text-align: right; line-height: 1.4; font-size: 10pt; width: 300px;">
+              <p style="font-weight: bold; font-size: 12pt; margin: 0 0 5px 0;">${shop?.business_name || '美容室名'}</p>
+              <p style="margin: 0;">〒${shop?.zip_code || ''}</p>
               <p style="margin: 0;">${shop?.address || ''}</p>
               <p style="margin: 0;">TEL: ${shop?.phone || ''}</p>
             </div>
           </div>
+
+          <div style="text-align: left; margin-bottom: 30px;">
+             <div style="font-size: 22pt; font-weight: bold; border-bottom: 3px solid #000; display: inline-block; padding-bottom: 5px; min-width: 400px; ">
+               ${invoiceTarget?.name} 御中
+             </div>
+             <p style="margin: 15px 0 0 0; font-size: 12pt;">下記の通り、御請求申し上げます。</p>
+          </div>
+
           <table>
             <thead>
-  <tr>
-    <th style="width:15%">日付</th>
-    <th style="width:7%">階</th>
-    <th style="width:25%">名前</th>
-    <th style="width:40%">メニュー</th>
-    <th style="width:13%; text-align:right;">金額</th>
-  </tr>
-</thead>
+              <tr>
+                <th style="width: 5%;">No</th>
+                <th style="width: 12%;">日付</th>
+                <th style="width: 9%;">階数</th>
+                <th style="width: 22%;">名前</th>
+                <th style="width: 39%;">メニュー</th>
+                <th style="width: 13%; text-align:right;">金額</th>
+              </tr>
+            </thead>
             <tbody>
-              ${members.map(m => `
-                <tr>
-                  <td>${m.date?.replace(/-/g, '/')}</td>
-                  <td style="text-align:center;">${m.floor || '-'}</td>
-                  <td><strong>${m.name} 様</strong></td>
-                  <td>${m.menu}</td>
-                  <td style="text-align:right;">¥${Number(m.price || 0).toLocaleString()}</td>
-                </tr>
-              `).join('')}
+              ${members.map((m, index) => {
+                const dateObj = m.date ? new Date(m.date) : null;
+                const formattedDate = dateObj ? `${dateObj.getMonth() + 1}/${dateObj.getDate()}` : '---';
+                return `
+                  <tr>
+                    <td style="text-align:center;">${index + 1}</td>
+                    <td style="text-align:center;">${formattedDate}</td>
+                    <td style="text-align:center;">${m.floor || '-'}</td>
+                    <td><strong>${m.name} 様</strong></td>
+                    <td style="font-size: 9.5pt;">${m.menu}</td>
+                    <td style="text-align:right; font-weight: bold;">¥${Number(m.price || 0).toLocaleString()}</td>
+                  </tr>
+                `;
+              }).join('')}
             </tbody>
           </table>
+
+          <div class="summary-total-container">
+            <div class="summary-total">
+               ご請求金額： ¥ ${total.toLocaleString()} - (税込)
+            </div>
+          </div>
+
           <div class="bank-info">
             <span style="font-weight:bold; text-decoration:underline;">【お振込先】</span><br/>
             ${shop?.bank_name || '---'} ${shop?.bank_branch || '---'} / ${shop?.bank_account_type || '普通'} ${shop?.bank_account_number || '---'} / ${shop?.bank_account_holder || '---'}
@@ -1003,24 +1003,45 @@ const completePayment = async () => {
         </div>
       `;
     } else {
-      // --- ✂️ 8分割領収書モード ---
+      // --- ✂️ 8分割領収書モード（デザイン修正版） ---
       const pages = Math.ceil(members.length / 8);
+      
       for (let p = 0; p < pages; p++) {
         content += `<div class="ticket-page">`;
-        members.slice(p * 8, (p + 1) * 8).forEach(m => {
+        
+        // 1ページ内の8件分を処理
+        members.slice(p * 8, (p + 1) * 8).forEach((m, i) => {
+          // 🚀 全体での通し番号（No.）を計算
+          const absoluteNo = (p * 8) + i + 1;
+
           content += `
             <div class="ticket">
-              <div style="border-bottom:1px solid #000; font-size:11pt; padding-bottom:2px;">領収書</div>
-              <div style="text-align:center; margin:15px 0;">
-  <span style="font-size:16pt; font-weight:bold; border-bottom:1px solid #000; padding:0 15px;">
-    ${m.name} 様
-  </span>
-</div>
-              <div style="background:#eee; text-align:center; font-size:20pt; font-weight:bold; padding:8px; -webkit-print-color-adjust: exact;">¥${Number(m.price || 0).toLocaleString()}</div>
-              <div style="border-bottom:1px solid #000; margin:10px 0; font-size:10pt;">但 ${m.menu} 代として</div>
-              <div style="margin-top:auto; font-size:9pt; display:flex; justify-content:space-between; align-items:flex-end;">
-                <span>${m.date?.replace(/-/g, '/')}</span>
-                <div style="text-align:right;"><strong>${shop?.business_name}</strong></div>
+              <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #000; padding-bottom: 2px; margin-bottom: 5px;">
+                <div style="font-size: 11pt;">領収書</div>
+                <div style="font-size: 10pt; font-weight: bold;">No. ${absoluteNo}</div>
+              </div>
+
+              <div style="text-align: center; margin: 12px 0;">
+                <span style="font-size: 16pt; font-weight: bold; border-bottom: 1px solid #000; padding: 0 15px;">
+                  ${m.name} 様
+                </span>
+              </div>
+
+              <div style="background: #eee; text-align: center; font-size: 20pt; font-weight: bold; padding: 8px; -webkit-print-color-adjust: exact;">
+                ¥${Number(m.price || 0).toLocaleString()}
+              </div>
+
+              <div style="border-bottom: 1px solid #000; margin: 10px 0; font-size: 10pt;">
+                但 ${m.menu} 代として
+              </div>
+
+              <div style="margin-top: auto; display: flex; justify-content: space-between; align-items: flex-end;">
+                <span style="font-size: 12pt; font-weight: bold;">
+                  ${m.date?.replace(/-/g, '/')}
+                </span>
+                <div style="text-align: right; font-size: 9pt;">
+                  <strong>${shop?.business_name}</strong>
+                </div>
               </div>
             </div>
           `;

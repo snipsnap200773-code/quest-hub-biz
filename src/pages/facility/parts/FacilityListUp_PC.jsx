@@ -21,6 +21,8 @@ const FacilityListUp_PC = ({ facilityId, isMobile, setActiveTab }) => {
   const [facilityName, setFacilityName] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
 
+  const [sortMode, setSortMode] = useState('floor');
+
   const currentDate = new Date();
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();
@@ -168,10 +170,26 @@ const FacilityListUp_PC = ({ facilityId, isMobile, setActiveTab }) => {
     setDraftList(draftList.map(d => d.id === id ? { ...d, menu_name: menu } : d));
   };
 
-  const unselectedResidents = residents.filter(r => 
-    !draftList.some(d => d.member_id === r.id) && 
-    (r.name.includes(searchTerm) || (r.room || '').includes(searchTerm))
-  );
+  const unselectedResidents = residents
+    .filter(r => 
+      !draftList.some(d => d.member_id === r.id) && 
+      (r.name.includes(searchTerm) || (r.room || '').includes(searchTerm))
+    )
+    .sort((a, b) => {
+      if (sortMode === 'floor') {
+        // --- 階数順 ---
+        const fA = parseInt(String(a.floor).replace(/[^0-9]/g, '')) || 999;
+        const fB = parseInt(String(b.floor).replace(/[^0-9]/g, '')) || 999;
+        if (fA !== fB) return fA - fB;
+        // 階数が同じなら部屋番号順
+        return (a.room || "").localeCompare(b.room || "", undefined, { numeric: true });
+      } else {
+        // --- あいうえお順 ---
+        const kanaA = (a.kana || a.name || "").trim();
+        const kanaB = (b.kana || b.name || "").trim();
+        return kanaA.localeCompare(kanaB, 'ja');
+      }
+    });
 
   if (loading) return <div style={centerStyle}>読込中...</div>;
 
@@ -205,6 +223,21 @@ const FacilityListUp_PC = ({ facilityId, isMobile, setActiveTab }) => {
                <h3 style={sectionTitle}><Users size={20} /> 入居者名簿</h3>
                <span style={countBadgeGray}>{unselectedResidents.length}名</span>
             </div>
+            <div style={{ display: 'flex', gap: '4px', background: '#f1f5f9', padding: '4px', borderRadius: '10px' }}>
+              <button 
+                onClick={() => setSortMode('floor')}
+                style={sortTabStyle(sortMode === 'floor')}
+              >
+                階数
+              </button>
+              <button 
+                onClick={() => setSortMode('name')}
+                style={sortTabStyle(sortMode === 'name')}
+              >
+                名前
+              </button>
+            </div>
+
             <div style={searchBox}>
               <Search size={16} color="#999" />
               <input type="text" placeholder="名前/部屋番号..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} style={searchInput}/>
@@ -318,6 +351,18 @@ const nextStepBtn = (active) => ({
   fontSize: '1.2rem', fontWeight: '900', cursor: active ? 'pointer' : 'default', 
   display: 'flex', alignItems: 'center', gap: '15px', margin: '0 auto',
   boxShadow: active ? '0 10px 20px rgba(61, 43, 31, 0.2)' : 'none' 
+});
+const sortTabStyle = (active) => ({
+  padding: '6px 12px',
+  borderRadius: '8px',
+  fontSize: '0.7rem',
+  fontWeight: 'bold',
+  cursor: 'pointer',
+  border: 'none',
+  background: active ? '#fff' : 'transparent',
+  color: active ? '#3d2b1f' : '#64748b',
+  boxShadow: active ? '0 2px 4px rgba(0,0,0,0.05)' : 'none',
+  transition: '0.2s'
 });
 
 export default FacilityListUp_PC;

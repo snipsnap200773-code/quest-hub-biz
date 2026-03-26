@@ -29,9 +29,12 @@ export default function FacilityUserList_PC({ facilityId }) {
     init();
   }, [facilityId]);
 
-  const fetchResidents = async (targetName) => {
+  const fetchResidents = async () => {
     setLoading(true);
-    const { data } = await supabase.from('members').select('*').eq('facility', targetName || facilityName);
+    const { data } = await supabase
+      .from('members')
+      .select('*')
+      .eq('facility_user_id', facilityId); // 👈 ここを ID 検索にしました
     setResidents(data || []);
     setLoading(false);
   };
@@ -57,22 +60,49 @@ export default function FacilityUserList_PC({ facilityId }) {
 
     if (editingId) {
       const { error } = await supabase.from('members').update(userData).eq('id', editingId);
-      if (!error) { setEditingId(null); fetchResidents(); }
+      if (error) {
+        alert("更新に失敗しました: " + error.message);
+      } else {
+        setEditingId(null);
+        // 🆕 await をつけて、読み込みが終わるのをしっかり待ちます
+        await fetchResidents(); 
+        resetForm();
+      }
     } else {
       const { error } = await supabase.from('members').insert([userData]);
-      if (!error) fetchResidents();
+      if (error) {
+        alert("登録に失敗しました: " + error.message);
+      } else {
+        // 🆕 ここで自動リロード（最新リストの取得）を実行！
+        await fetchResidents(); 
+        resetForm();
+        alert("名簿に新しく追加しました！✨");
+      }
     }
-    setNewRoom(''); setNewName(''); setNewKana(''); setNewNotes(''); setIsBedCut(false); setNewFloor('1F');
   };
 
+  // 🆕 フォームをリセットする関数（handleSubmit の外、 trStyle の上あたりに追加してください）
+  const resetForm = () => {
+    setNewRoom(''); 
+    setNewName(''); 
+    setNewKana(''); 
+    setNewNotes(''); 
+    setIsBedCut(false); 
+    setNewFloor('1F');
+  };
+
+  // 💡 🚀 ここから追加：消えてしまった「編集開始」関数を復活させます
   const startEdit = (res) => {
-    setEditingId(res.id);
+    // 編集中のIDをセット（これでボタンが「保存する」に変わります）
+    setEditingId(res.id); 
+    
+    // 左側のフォームに、今選んだ人の情報を流し込む
     setNewFloor(res.floor || '1F');
     setNewRoom(res.room || '');
     setNewName(res.name || '');
     setNewKana(res.kana || ''); 
     setNewNotes(res.notes || ''); 
-    setIsBedCut(!!res.isBedCut);
+    setIsBedCut(!!res.isBedCut); // 💡 !! をつけると、確実に true か false になります
   };
 
   const handleDelete = async (id) => {
