@@ -3,60 +3,62 @@ import { supabase } from '../../../supabaseClient';
 import { CheckCircle2, Calendar, Users, ArrowLeft, Send, Loader2 } from 'lucide-react';
 import { motion } from 'framer-motion';
 
-const FacilityBooking_PC = ({ facilityId, setActiveTab }) => {
+const FacilityBooking_PC = ({ facilityId, setActiveTab, sharedDate }) => {
   const [loading, setLoading] = useState(false);
   const [drafts, setDrafts] = useState([]);
   const [shopInfo, setShopInfo] = useState(null);
-
-  // 🆕 施設情報を保存する箱（ここを追記！）
   const [facilityName, setFacilityName] = useState('');
   const [facilityEmail, setFacilityEmail] = useState('');
 
-  // 🆕 定期キープ計算用のState
+  // 🚀 🆕 【ここを確実に！】定期キープ ＆ すでに予約済みのState
   const [manualKeeps, setManualKeeps] = useState([]);
   const [regularRules, setRegularRules] = useState([]);
+  const [confirmedDates, setConfirmedDates] = useState([]); // 💡 履歴表示用
   const [exclusions, setExclusions] = useState([]);
 
   useEffect(() => { fetchSummary(); }, [facilityId]);
 
   const fetchSummary = async () => {
-    // 1. 下書きと提携先情報を取得
+    const targetDate = sharedDate || new Date(); 
+    const startOfMonth = `${targetDate.getFullYear()}-${String(targetDate.getMonth() + 1).padStart(2, '0')}-01`;
+    const endOfMonth = `${targetDate.getFullYear()}-${String(targetDate.getMonth() + 1).padStart(2, '0')}-${new Date(targetDate.getFullYear(), targetDate.getMonth() + 1, 0).getDate()}`;
+    // 1. 基本情報の取得
     const { data: draftData } = await supabase.from('visit_list_drafts').select('*, members(*)').eq('facility_user_id', facilityId);
     const { data: connData } = await supabase.from('shop_facility_connections').select('shop_id, regular_rules, profiles(*)').eq('facility_user_id', facilityId).eq('status', 'active').single();
-    
-    // 🆕 施設の情報を取得（メール送信に使用）
     const { data: facData } = await supabase.from('facility_users').select('facility_name, email').eq('id', facilityId).single();
+
+    // 🚀 🆕 【ここを追加！】今月の既存予約（完了分も含む）を取得
+    const { data: visitDatesRes } = await supabase
+      .from('visit_requests')
+      .select('scheduled_date, status, start_time')
+      .eq('facility_user_id', facilityId)
+      .gte('scheduled_date', startOfMonth)
+      .lte('scheduled_date', endOfMonth)
+      .neq('status', 'canceled');
 
     setDrafts(draftData || []);
     setShopInfo(connData?.profiles || null);
     setRegularRules(connData?.regular_rules || []);
-    
-    // 🆕 Stateに施設情報を保持（もしなければ追加してください）
     setFacilityName(facData?.facility_name || '');
     setFacilityEmail(facData?.email || '');
-    
-    // 2. 確保済みの日程データをバラバラに取得
+    setConfirmedDates(visitDatesRes || []);
+
+    // 2. 確保済み日程の取得
     const [keepRes, exclRes] = await Promise.all([
-      // 🆕 start_time も取得
       supabase.from('keep_dates').select('date, start_time').eq('facility_user_id', facilityId),
       supabase.from('regular_keep_exclusions').select('excluded_date').eq('facility_user_id', facilityId)
     ]);
 
-    setDrafts(draftData || []);
-    setShopInfo(connData?.profiles || null);
-    setRegularRules(connData?.regular_rules || []);
-    // 🆕 配列ではなくオブジェクトのまま保存
     setManualKeeps(keepRes.data || []);
     setExclusions(exclRes.data?.map(e => e.excluded_date) || []);
   };
 
-  // 🆕 定期キープの判定ロジック（カレンダーと同じもの）
+  // 定期キープの判定ロジック
   const checkIsRegularKeep = (date) => {
     const day = date.getDay();
     const dom = date.getDate();
     const m = date.getMonth() + 1;
     const nthWeek = Math.ceil(dom / 7);
-    
     const t7 = new Date(date); t7.setDate(dom + 7);
     const isL1 = t7.getMonth() !== date.getMonth(); 
     const t14 = new Date(date); t14.setDate(dom + 14);
@@ -72,33 +74,46 @@ const FacilityBooking_PC = ({ facilityId, setActiveTab }) => {
     return matchTime;
   };
 
-  // 🆕 手動キープと定期キープを合算して「今月の訪問予定日」を算出
+  // 🚀 🆕 【ここがポイント！】今回送る「新規予約」だけを抽出
   const ensuredDates = useMemo(() => {
     const list = [];
-    
-    // 1. 手動キープ分
     manualKeeps.forEach(k => {
-      list.push({ date: k.date, time: k.start_time || '09:00' });
+      // すでに予約(confirmedDates)に入っている日は除外
+      if (!confirmedDates.some(cd => cd.scheduled_date === k.date)) {
+        list.push({ date: k.date, time: k.start_time || '09:00' });
+      }
     });
 
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = now.getMonth();
-    const lastDate = new Date(year, month + 1, 0).getDate();
+    // 🚀 🆕 【修正！】今日ではなく、Portalで選んだ月（sharedDate）を基準にする
+    const baseDate = sharedDate || new Date();
+    const targetYear = baseDate.getFullYear();
+    const targetMonth = baseDate.getMonth();
+    const lastDate = new Date(targetYear, targetMonth + 1, 0).getDate();
 
     for (let d = 1; d <= lastDate; d++) {
-      const date = new Date(year, month, d);
+      const date = new Date(targetYear, targetMonth, d);
       const dateStr = date.toLocaleDateString('sv-SE');
       const regTime = checkIsRegularKeep(date);
-      
-      if (regTime && !exclusions.includes(dateStr)) {
-        if (!list.some(item => item.date === dateStr)) {
-          list.push({ date: dateStr, time: regTime });
-        }
+
+      // 定期日 ＆ 除外されていない ＆ 手動と被っていない ＆ まだ予約されていない日
+      if (regTime && !exclusions.includes(dateStr) && !list.some(item => item.date === dateStr) && !confirmedDates.some(cd => cd.scheduled_date === dateStr)) {
+        list.push({ date: dateStr, time: regTime });
       }
     }
     return list.sort((a, b) => a.date.localeCompare(b.date));
-  }, [manualKeeps, regularRules, exclusions]);
+  }, [manualKeeps, regularRules, exclusions, confirmedDates, sharedDate]);
+
+  // 🚀 🆕 【表示用】全日程（完了・確定・新規）を合算
+  const allDisplayVisits = useMemo(() => {
+    const list = ensuredDates.map(d => ({ ...d, type: 'new' }));
+    confirmedDates.forEach(cd => {
+      if (!list.some(l => l.date === cd.scheduled_date)) {
+        list.push({ date: cd.scheduled_date, time: cd.start_time, type: cd.status }); 
+      }
+    });
+    return list.sort((a, b) => a.date.localeCompare(b.date));
+  }, [ensuredDates, confirmedDates]);
+  // 🚀 🆕 ここまで追加
 
   const handleFinalSubmit = async () => {
     if (ensuredDates.length === 0) return alert("訪問日が確保されていません。");
@@ -188,15 +203,34 @@ const FacilityBooking_PC = ({ facilityId, setActiveTab }) => {
 
         <div style={grid}>
           <div style={infoBox}>
-            {/* 🆕 ensuredDates.length が正しく反映されます */}
-            <div style={label}><Calendar size={16} /> 訪問予定日（{ensuredDates.length}日間）</div>
+            <div style={label}><Calendar size={16} /> 今月の訪問予定（{allDisplayVisits.length}日間）</div>
             <div style={dateList}>
-              {ensuredDates.map(item => (
-                <span key={item.date} style={dateTag}>
-                  {item.date.replace(/-/g,'/')}
-                  <small style={{ marginLeft: '6px', opacity: 0.8 }}>({item.time?.substring(0, 5)})</small>
-                </span>
-              ))}
+              {allDisplayVisits.map(item => {
+                // 🎨 ステータスによって色を出し分け
+                const isCompleted = item.type === 'completed';
+                const isConfirmed = item.type === 'confirmed';
+
+                return (
+                  <span 
+                    key={item.date} 
+                    style={{
+                      ...dateTag,
+                      background: isCompleted ? '#f1f5f9' : (isConfirmed ? '#10b981' : '#3d2b1f'),
+                      color: isCompleted ? '#94a3b8' : '#fff',
+                      border: isCompleted ? '1px solid #e2e8f0' : 'none',
+                      opacity: isCompleted ? 0.7 : 1,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '4px'
+                    }}
+                  >
+                    {isCompleted && <CheckCircle2 size={12} />}
+                    {item.date.replace(/-/g,'/')}
+                    <small style={{ marginLeft: '4px', opacity: 0.8 }}>({item.time?.substring(0, 5)})</small>
+                    {isCompleted && <span style={{ fontSize: '0.6rem' }}>[完了]</span>}
+                  </span>
+                );
+              })}
             </div>
           </div>
 

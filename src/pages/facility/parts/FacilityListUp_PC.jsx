@@ -2,13 +2,16 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../../../supabaseClient';
 import { 
   Users, UserPlus, UserMinus, Calendar, ArrowRight, 
-  CheckCircle2, Search, Info, ListChecks, Scissors 
+  CheckCircle2, Search, Info, ListChecks, Scissors,
+  ChevronLeft, ChevronRight
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
-const FacilityListUp_PC = ({ facilityId, isMobile, setActiveTab }) => {
+const FacilityListUp_PC = ({ facilityId, isMobile, setActiveTab, sharedDate: viewDate, setSharedDate: setViewDate }) => {
   const [residents, setResidents] = useState([]);
   const [draftList, setDraftList] = useState([]);
+  const [completedMemberIds, setCompletedMemberIds] = useState([]);
+  const [confirmedDates, setConfirmedDates] = useState([]);
   const [manualKeeps, setManualKeeps] = useState([]);
   const [regularRules, setRegularRules] = useState([]);
   const [exclusions, setExclusions] = useState([]);
@@ -17,16 +20,15 @@ const FacilityListUp_PC = ({ facilityId, isMobile, setActiveTab }) => {
   const [shopId, setShopId] = useState(null);
   const [shopName, setShopName] = useState('');
   const [shopServices, setShopServices] = useState([]); 
-  
   const [facilityName, setFacilityName] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
-
   const [sortMode, setSortMode] = useState('floor');
 
-  const currentDate = new Date();
-  const year = currentDate.getFullYear();
-  const month = currentDate.getMonth();
+  // 🚀 🆕 【ここを修正！】「今日」固定ではなく、Stateで月を管理します
+  const year = viewDate.getFullYear();
+  const month = viewDate.getMonth();
 
+  // 🚀 🆕 viewDate が変わるたびに再取得するように依存配列に追加
   useEffect(() => { 
     const init = async () => {
       setLoading(true);
@@ -38,18 +40,31 @@ const FacilityListUp_PC = ({ facilityId, isMobile, setActiveTab }) => {
       setLoading(false);
     };
     init();
-  }, [facilityId]);
+  }, [facilityId, viewDate]); // 💡 viewDate を追加
 
   const fetchData = async (targetFacilityName) => {
     try {
-      const [resData, draftData, connData] = await Promise.all([
+      const startOfMonth = `${year}-${String(month + 1).padStart(2, '0')}-01`;
+      const endOfMonth = `${year}-${String(month + 1).padStart(2, '0')}-${new Date(year, month + 1, 0).getDate()}`;
+
+      const [resData, draftData, connData, visitedRes, visitDatesRes] = await Promise.all([
         supabase.from('members').select('*').eq('facility', targetFacilityName).order('room'),
         supabase.from('visit_list_drafts').select('*, members(*)').eq('facility_user_id', facilityId),
-        supabase.from('shop_facility_connections').select('shop_id, regular_rules, profiles(business_name)').eq('facility_user_id', facilityId).eq('status', 'active').limit(1).maybeSingle()
+        supabase.from('shop_facility_connections').select('shop_id, regular_rules, profiles(business_name)').eq('facility_user_id', facilityId).eq('status', 'active').limit(1).maybeSingle(),
+        // 今月の完了者取得（既存）
+        supabase.from('visit_request_residents').select('member_id, visit_requests!inner(scheduled_date)').eq('status', 'completed').eq('visit_requests.facility_user_id', facilityId).gte('visit_requests.scheduled_date', startOfMonth).lte('visit_requests.scheduled_date', endOfMonth),
+        // 🚀 🆕 追加：今月の予約日程とそのステータスを取得
+        supabase.from('visit_requests').select('scheduled_date, status').eq('facility_user_id', facilityId).gte('scheduled_date', startOfMonth).lte('scheduled_date', endOfMonth)
       ]);
 
       setResidents(resData.data || []);
       setDraftList(draftData.data || []);
+      setCompletedMemberIds(visitedRes.data?.map(r => r.member_id) || []);
+      setConfirmedDates(visitDatesRes.data || []);
+
+      // 🚀 🆕 完了したメンバーのIDだけを配列にまとめる
+      const doneIds = visitedRes.data?.map(r => r.member_id) || [];
+      setCompletedMemberIds(doneIds);
       
       if (connData.data) {
         const sid = connData.data.shop_id;
@@ -172,7 +187,11 @@ const FacilityListUp_PC = ({ facilityId, isMobile, setActiveTab }) => {
 
   const unselectedResidents = residents
     .filter(r => 
+      // 1. 今のドラフト（選択中）に入っていない
       !draftList.some(d => d.member_id === r.id) && 
+      // 🚀 2. 🆕 今月すでに「完了」していない人だけを表示
+      !completedMemberIds.includes(r.id) &&
+      // 3. 検索ワードに一致する
       (r.name.includes(searchTerm) || (r.room || '').includes(searchTerm))
     )
     .sort((a, b) => {
@@ -197,18 +216,51 @@ const FacilityListUp_PC = ({ facilityId, isMobile, setActiveTab }) => {
     <div style={containerStyle(isMobile)}>
       <header style={statusHeader}>
         <div style={keepInfoCard}>
-          <div style={smallLabel}><Calendar size={14} /> 確保済みの訪問予定</div>
+          {/* 🚀 🆕 【ここを差し替え】ラベルと月切り替えボタンのセット */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '15px', flexWrap: 'wrap', gap: '10px' }}>
+             <div style={{ ...smallLabel, marginBottom: 0 }}><Calendar size={14} /> 訪問予定の確認・選択月</div>
+             
+             <div style={{ display: 'flex', alignItems: 'center', gap: '12px', background: '#f8fafc', padding: '4px 12px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
+               <button onClick={() => setViewDate(new Date(year, month - 1, 1))} style={navMiniBtn}><ChevronLeft size={16}/></button>
+               <span style={{ fontWeight: '900', fontSize: '1rem', color: '#3d2b1f', minWidth: '80px', textAlign: 'center' }}>
+                 {year} / {month + 1}
+               </span>
+               <button onClick={() => setViewDate(new Date(year, month + 1, 1))} style={navMiniBtn}><ChevronRight size={16}/></button>
+             </div>
+          </div>
+
           <div style={badgeArea}>
-  {allEnsuredDates.map(item => (
-    <span key={item.date} style={keepBadge}>
-      {item.date.replace(/-/g, '/')}
-      <span style={{ fontSize: '0.7rem', opacity: 0.8, marginLeft: '6px' }}>
-        ({item.time?.substring(0, 5)})
-      </span>
-    </span>
-  ))}
-  {allEnsuredDates.length === 0 && <span style={noDataText}>訪問日が確保されていません</span>}
-</div>
+  {allEnsuredDates.map(item => {
+              // 🚀 🆕 この日の予約ステータスをチェック
+              const dateStatus = confirmedDates.find(d => d.scheduled_date === item.date)?.status;
+              const isCompleted = dateStatus === 'completed'; // 完了済み
+              const isConfirmed = dateStatus === 'pending';   // 予約確定（施術前）
+              const isNew = !dateStatus;                     // まだ予約になっていない新規
+
+              return (
+                <span 
+                  key={item.date} 
+                  style={{
+                    ...keepBadge,
+                    // 🎨 ステータスに合わせて色を変える
+                    background: isCompleted ? '#f1f5f9' : (isConfirmed ? '#10b981' : '#3d2b1f'),
+                    color: isCompleted ? '#94a3b8' : '#fff',
+                    border: isCompleted ? '1px solid #e2e8f0' : 'none',
+                    opacity: isCompleted ? 0.8 : 1,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '4px'
+                  }}
+                >
+                  {isCompleted && <CheckCircle2 size={12} />}
+                  {item.date.replace(/-/g, '/')}
+                  <span style={{ fontSize: '0.65rem', opacity: 0.7 }}>({item.time?.substring(0, 5)})</span>
+                  {isCompleted && <span style={{ fontSize: '0.6rem', fontWeight: 'normal' }}>[完了]</span>}
+                </span>
+              );
+            })}
+            {allEnsuredDates.length === 0 && <span style={noDataText}>訪問日が確保されていません</span>}
+          </div>
         </div>
         <div style={shopInfoCard}>
           <div style={smallLabel}><Scissors size={14} /> 今回の担当ショップ</div>
@@ -364,5 +416,19 @@ const sortTabStyle = (active) => ({
   boxShadow: active ? '0 2px 4px rgba(0,0,0,0.05)' : 'none',
   transition: '0.2s'
 });
-
+// 🆕 月切り替え用の丸いボタン
+const navMiniBtn = {
+  background: '#fff', 
+  border: '1px solid #ddd', 
+  borderRadius: '50%',
+  width: '28px', 
+  height: '28px', 
+  cursor: 'pointer', 
+  display: 'flex', 
+  alignItems: 'center', 
+  justifyContent: 'center', 
+  color: '#3d2b1f',
+  transition: '0.2s',
+  boxShadow: '0 2px 4px rgba(0,0,0,0.05)'
+};
 export default FacilityListUp_PC;

@@ -194,6 +194,23 @@ const handleCancelKeep = async (facilityId, dateStr, facilityName) => {
     alert("エラー: " + err.message);
   }
 };
+
+// 🚀 🆕 確定済みの施設訪問（visit_request）を削除する関数
+const handleDeleteVisit = async (visitId, dateStr, facilityName) => {
+  if (!window.confirm(`${dateStr.replace(/-/g, '/')} の ${facilityName} 様の予約をキャンセルし、枠を空けますか？\n（名簿の紐付けも解除されます）`)) return;
+
+  try {
+    // visit_request を削除
+    const { error } = await supabase.from('visit_requests').delete().eq('id', visitId);
+    if (error) throw error;
+
+    showMsg("施設訪問の予約をキャンセルしました。");
+    fetchData(); // カレンダー更新
+  } catch (err) {
+    alert("エラー: " + err.message);
+  }
+};
+
 const [editFields, setEditFields] = useState({ 
     name: '',       // ✅ 表のお名前用
     admin_name: '', // ✅ 裏のメモ名用
@@ -1236,7 +1253,8 @@ return (
                 return (
                   <td 
                     key={`${dStr}-${time}`} 
-                    onClick={() => { 
+                    // 🚀 🆕 async を追加して、中で await を使えるようにします
+                    onClick={async () => { 
                       setSelectedDate(dStr); 
                       setTargetTime(time);
                       
@@ -1245,19 +1263,17 @@ return (
                       const isBgBlock = firstItem?.isRegularHoliday || firstItem?.res_type === 'system_blocked';
 
                       // --- 1. データが何もない、または「定休日」枠の場合 ---
-                      // 💡 ここに isBgBlock の判定を追加することで、定休日でも新規追加画面が開きます
                       if (!hasRes || isBgBlock) {
                         if (isStandardTime && !isRegularHoliday) {
-                          setShowMenuModal(true); // 通常の新規予約
+                          setShowMenuModal(true);
                         } else {
-                          // ⭐ 定休日の上でクリックした時は、ここが実行されるようになります
                           setPrivateTaskFields({ title: '', note: '' });
                           setShowPrivateModal(true); 
                         }
                         return;
                       }
 
-                      // --- 2. 実際の予約データ（個人・施設・手動ブロック）がある場合 ---
+                      // --- 2. 実際の予約データがある場合 ---
                       const items = Array.isArray(resAt) ? resAt : [resAt];
 
                       if (items.length > 1) {
@@ -1268,8 +1284,22 @@ return (
 
                       const activeTask = items[0];
 
+                      // 🚀 🆕 【ここから施設訪問のガード判定】
                       if (activeTask.res_type === 'facility_visit') {
-                        openVisitDetail(activeTask.visitId, activeTask.customer_name, activeTask.visitData);
+                        // 1人でも「完了」している人がいるか、その場でDBに問い合わせます
+                        const { count } = await supabase
+                          .from('visit_request_residents')
+                          .select('id', { count: 'exact', head: true })
+                          .eq('visit_request_id', activeTask.visitId)
+                          .eq('status', 'completed');
+
+                        if (count > 0) {
+                          // 💡 1人でも終わっていれば、詳細（名簿）を開く
+                          openVisitDetail(activeTask.visitId, activeTask.customer_name, activeTask.visitData);
+                        } else {
+                          // 💡 全員未完了なら、削除の確認（handleDeleteVisit）へ
+                          handleDeleteVisit(activeTask.visitId, dStr, activeTask.customer_name);
+                        }
                       } 
                       else if (activeTask.res_type === 'facility_keep') {
                         handleCancelKeep(activeTask.facility_user_id, dStr, activeTask.customer_name.replace(' 予定', ''));

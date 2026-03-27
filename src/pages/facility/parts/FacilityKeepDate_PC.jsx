@@ -7,15 +7,15 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
-const FacilityKeepDate_PC = ({ facilityId, isMobile, setActiveTab }) => {
+const FacilityKeepDate_PC = ({ facilityId, isMobile, setActiveTab, sharedDate: currentDate, setSharedDate: setCurrentDate }) => {
   const navigate = useNavigate();
   // --- 状態管理 ---
   const [step, setStep] = useState('calendar'); 
   const [shops, setShops] = useState([]);
   const [selectedShop, setSelectedShop] = useState(null);
-  const [currentDate, setCurrentDate] = useState(new Date());
   const [occupiedDates, setOccupiedDates] = useState([]); 
   const [keepDates, setKeepDates] = useState([]); 
+  const [confirmedVisits, setConfirmedVisits] = useState([]);
   const [regularRules, setRegularRules] = useState([]);
   const [residents, setResidents] = useState([]); 
   const [loading, setLoading] = useState(true);
@@ -57,7 +57,7 @@ const FacilityKeepDate_PC = ({ facilityId, isMobile, setActiveTab }) => {
     const [resData, privData, visitData, ngData, keeps, conns, exclData] = await Promise.all([
       supabase.from('reservations').select('start_time').eq('shop_id', shopId).gte('start_time', startOfMonth).lte('start_time', endOfMonth + 'T23:59:59'),
       supabase.from('private_tasks').select('start_time').eq('shop_id', shopId).gte('start_time', startOfMonth).lte('start_time', endOfMonth + 'T23:59:59'),
-      supabase.from('visit_requests').select('scheduled_date').eq('shop_id', shopId).neq('status', 'canceled'),
+      supabase.from('visit_requests').select('scheduled_date, status').eq('shop_id', shopId).eq('facility_user_id', facilityId).neq('status', 'canceled'),
       supabase.from('shop_ng_dates').select('date').eq('shop_id', shopId),
       supabase.from('keep_dates').select('*').eq('shop_id', shopId),
       supabase.from('shop_facility_connections').select('facility_user_id, regular_rules').eq('shop_id', shopId),
@@ -72,6 +72,7 @@ const FacilityKeepDate_PC = ({ facilityId, isMobile, setActiveTab }) => {
 
     setOccupiedDates(Array.from(dates));
     setKeepDates(keeps.data || []);
+    setConfirmedVisits(visitData.data || []);
     setRegularRules(conns.data || []);
     setExclusions(exclData.data?.map(e => e.excluded_date) || []); // 🆕
     setLoading(false);
@@ -147,10 +148,11 @@ const FacilityKeepDate_PC = ({ facilityId, isMobile, setActiveTab }) => {
     }
     
     // 手動キープ
+    const confirmedVisit = confirmedVisits.find(v => v.scheduled_date === dateStr);
+    if (confirmedVisit) return 'booked'; // 新しいステータス 'booked' を返す
+
     const manualKeep = keepDates.find(k => k.date === dateStr && k.facility_user_id === facilityId);
     if (manualKeep) return { type: 'keeping', time: manualKeep.start_time || '09:00' };
-
-    if (occupiedDates.includes(dateStr)) return 'occupied';
     if (keepDates.some(k => k.date === dateStr)) return 'other-keep';
     return 'available';
   };
@@ -158,20 +160,28 @@ const FacilityKeepDate_PC = ({ facilityId, isMobile, setActiveTab }) => {
   // 🆕 ボタン表示と確定用に「手動キープ + 有効な定期キープ」を合算する
   // 💡 days の計算よりも後に定義することでエラーを解消
   const allActiveKeeps = useMemo(() => {
+    // 1. 手動でキープした日（まだ予約になっていないもの）
     const list = [...keepDates.filter(k => k.facility_user_id === facilityId)];
+    
+    // 2. 定期日の判定
     days.forEach(day => {
       if (!day) return;
       const dStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
       const regKeep = checkIsRegularKeep(new Date(dStr));
-      // 自施設の定期日であり、かつ除外されていない日をリストに追加
-      if (regKeep && regKeep.keeperId === facilityId && !exclusions.includes(dStr)) {
+      
+      // 🚀 🆕【ここがポイント！】
+      // 定期日であり、かつ「まだ予約(confirmedVisits)に入っていない日」だけをカウントします
+      const isAlreadyBooked = confirmedVisits.some(v => v.scheduled_date === dStr);
+
+      if (regKeep && regKeep.keeperId === facilityId && !exclusions.includes(dStr) && !isAlreadyBooked) {
         if (!list.some(k => k.date === dStr)) {
           list.push({ date: dStr, isRegular: true });
         }
       }
     });
     return list.sort((a, b) => a.date.localeCompare(b.date));
-  }, [keepDates, regularRules, exclusions, year, month, days, facilityId]);
+    // 💡 依存配列に confirmedVisits を追加します
+  }, [keepDates, regularRules, exclusions, year, month, days, facilityId, confirmedVisits]);
 
   const handleDateClick = async (day) => {
     if (!day || !selectedShop) return;
@@ -429,6 +439,7 @@ const FacilityKeepDate_PC = ({ facilityId, isMobile, setActiveTab }) => {
 
                 const config = {
                   keeping: { bg: '#fff9e6', border: '#c5a059', color: '#c5a059', label: '選択中', icon: '★' },
+                  booked: { bg: '#f0fdf4', border: '#10b981', color: '#10b981', label: '予約確定', icon: '✓' }, // 🆕 追加
                   occupied: { bg: '#fef2f2', border: '#fee2e2', color: '#94a3b8', label: '予約あり', icon: '✕' },
                   ng: { bg: '#f8fafc', border: '#f1f5f9', color: '#94a3b8', label: '定休日', icon: '✕' },
                   other_keep: { bg: '#f8fafc', border: '#f1f5f9', color: '#94a3b8', label: '他施設', icon: '✕' },
@@ -467,19 +478,39 @@ const FacilityKeepDate_PC = ({ facilityId, isMobile, setActiveTab }) => {
               <div style={legendItem}><span style={dot('#fff', '#eee')}></span> ◎ 空き</div>
             </div>
 
-            {allActiveKeeps.length > 0 && (
-    <div style={actionBox}>
-      <div style={keepInfo}>
-        確保済みの訪問日：<strong>{allActiveKeeps.length}日間</strong>
-      </div>
-      <button 
-        onClick={() => setActiveTab('list-up')} // 🆕 navigate ではなく State を変える
-        style={nextBtn}
-      >
-        リストアップしよう！ <ArrowRight size={18} />
-      </button>
-    </div>
-  )}
+            {(allActiveKeeps.length > 0 || confirmedVisits.length > 0) && (
+              <div style={actionBox}>
+                {allActiveKeeps.length > 0 ? (
+                  /* --- ケースA：まだ「確保中」の日がある場合（リストアップへ促す） --- */
+                  <>
+                    <div style={keepInfo}>
+                      確保済みの訪問日：<strong>{allActiveKeeps.length}日間</strong>
+                    </div>
+                    <button 
+                      onClick={() => setActiveTab('list-up')}
+                      style={nextBtn}
+                    >
+                      リストアップしよう！ <ArrowRight size={18} />
+                    </button>
+                  </>
+                ) : (
+                  /* --- ケースB：確保日はすべて予約に回ったが、予約データ（visit_requests）がある場合 --- */
+                  <>
+                    <div style={keepInfo}>
+                      <span style={{ color: '#10b981', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <CheckCircle2 size={20} /> 予約確定しました！
+                      </span>
+                    </div>
+                    <button 
+                      onClick={() => setActiveTab('status')} // 🆕 進捗管理タブへ飛ばす
+                      style={{ ...nextBtn, background: '#fff', color: '#3d2b1f' }}
+                    >
+                      予約状況を確認する <ArrowRight size={18} />
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
           </>
         )}
       </main>

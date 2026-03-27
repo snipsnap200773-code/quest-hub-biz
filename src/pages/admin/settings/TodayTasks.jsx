@@ -6,6 +6,7 @@ import {
   CheckCircle2, Clock, User, ArrowLeft, 
   Calendar, CheckCircle, AlertCircle,
   PlusCircle,
+  Minus,
   Building2, ClipboardCheck
 } from 'lucide-react';
 
@@ -24,6 +25,7 @@ const TodayTasks = () => {
 
   const [tasks, setTasks] = useState([]);
   const [targetDate, setTargetDate] = useState(new Date().toLocaleDateString('sv-SE'));
+  const [oldestIncompleteDate, setOldestIncompleteDate] = useState(null);
   const [shopData, setShopData] = useState(null);
   // 🆕 金額計算のためにマスターを保持する箱を追加
   const [services, setServices] = useState([]);
@@ -173,8 +175,26 @@ const fetchTodayTasks = async () => {
     });
 
     setTasks(combined);
-    console.log(`[デバッグ] 今日の総タスク数: ${combined.length}件 (施設: ${facilityTasks.length}件)`);
 
+    // 🚀 🆕 【ここから追加】過去のレジ忘れ（statusがcompleted以外）を1件だけ探す
+    const todayStr = new Date().toLocaleDateString('sv-SE');
+    const { data: incomplete } = await supabase
+      .from('reservations')
+      .select('start_time')
+      .eq('shop_id', shopId)
+      .neq('status', 'completed') // 完了していない
+      .lt('start_time', `${todayStr} 00:00:00`) // 今日より前の日付
+      .order('start_time', { ascending: true }) // 一番古い順
+      .limit(1);
+
+    if (incomplete && incomplete.length > 0) {
+      setOldestIncompleteDate(incomplete[0].start_time.split('T')[0]);
+    } else {
+      setOldestIncompleteDate(null);
+    }
+    // 🚀 【ここまで追加】
+
+    console.log(`[デバッグ] 今日の総タスク数: ${combined.length}件 (施設: ${facilityTasks.length}件)`);
   } catch (error) {
     console.error("タスク取得中に致命的なエラーが発生しました:", error.message);
     showMsg("データの取得に失敗しました。");
@@ -266,7 +286,7 @@ const syncReservationToSupabase = async (newSvcs, newOpts) => {
     
     // 🆕 予約データのJSONから、現在選ばれているメニューを抽出してセット [cite: 2026-03-08]
     const opt = typeof task.options === 'string' ? JSON.parse(task.options) : (task.options || {});
-const initialSvcs = opt.services || (opt.people ? opt.people.flatMap(p => p.services || []) : []);
+    const initialSvcs = opt.services || (opt.people ? opt.people.flatMap(p => p.services || []) : []);
     setSelectedServices(initialSvcs);
 
     // 🆕 追加：既存の枝分かれオプションを読み込む [cite: 2026-03-08]
@@ -277,6 +297,36 @@ const initialSvcs = opt.services || (opt.people ? opt.people.flatMap(p => p.serv
     setFinalPrice(initialPrice); 
     setIsCheckoutOpen(true);
   };
+
+  /* 🚀 🆕 【ここから追加】商品を個数つきで増減させるための関数 🚀 */
+  
+  // 商品を1個増やす（または新規追加）
+  const addCheckoutProduct = (prod) => {
+    setSelectedProducts(prev => {
+      const existing = prev.find(p => p.id === prod.id);
+      if (existing) {
+        // すでにリストにあれば、個数(quantity)をプラス1する
+        return prev.map(p => p.id === prod.id ? { ...p, quantity: (p.quantity || 1) + 1 } : p);
+      }
+      // なければ新しく個数1として追加する
+      return [...prev, { ...prod, quantity: 1 }];
+    });
+  };
+
+  // 商品を1個減らす（左肩のマイナスボタン用）
+  const removeCheckoutProduct = (productId) => {
+    setSelectedProducts(prev => {
+      const existing = prev.find(p => p.id === productId);
+      if (existing && (existing.quantity || 1) > 1) {
+        // 2個以上あれば、個数をマイナス1する
+        return prev.map(p => p.id === productId ? { ...p, quantity: p.quantity - 1 } : p);
+      }
+      // 1個しかなければ、リストから消す
+      return prev.filter(p => p.id !== productId);
+    });
+  };
+
+  /* 🚀 【ここまで追加】 🚀 */
   
 // 🆕 修正：有効なオプションのみを集計するロジック [cite: 2026-03-08]
   useEffect(() => {
@@ -295,7 +345,7 @@ const initialSvcs = opt.services || (opt.people ? opt.people.flatMap(p => p.serv
       else total += adj.is_minus ? -adj.price : adj.price;
     });
 
-    selectedProducts.forEach(prod => total += (prod.price || 0));
+    selectedProducts.forEach(prod => total += (prod.price || 0) * (prod.quantity || 1));
     setFinalPrice(Math.max(0, Math.round(total)));
   }, [selectedServices, selectedOptions, selectedAdjustments, selectedProducts, selectedTask]);
   
@@ -607,6 +657,19 @@ const handleSaveMemo = async () => {
               style={arrowBtnStyle}
             >▶</button>
           </div>
+
+          {/* 🚀 🆕 レジ忘れアラートボタン。クリックでその日にジャンプ！ */}
+          {oldestIncompleteDate && (
+            <motion.button
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              onClick={() => setTargetDate(oldestIncompleteDate)}
+              style={alertBadgeStyle}
+            >
+              <AlertCircle size={14} /> 
+              未処理あり！ ({oldestIncompleteDate.replace(/-/g, '/')})
+            </motion.button>
+          )}
         </div>
 
         {/* ✅ 帰り道スイッチ（既存のまま） */}
@@ -888,24 +951,42 @@ const handleSaveMemo = async () => {
                     {products
                       .filter(p => p.category === productCategories.find(c => c.id === openProdCatId)?.name)
                       .map(prod => {
-                        const isSel = selectedProducts.find(p => p.id === prod.id);
+                        const selected = selectedProducts.find(p => p.id === prod.id);
+                        const qty = selected?.quantity || 0;
                         return (
-                          <button 
-                            key={prod.id} 
-                            onClick={() => setSelectedProducts(prev => isSel ? prev.filter(p => p.id !== prod.id) : [...prev, prod])}
-                            style={{ 
-                              width: '100%', padding: '18px', borderRadius: '15px', textAlign: 'left',
-                              border: `2px solid ${isSel ? '#008000' : '#f1f5f9'}`, 
-                              background: isSel ? '#f0fdf4' : '#fff', 
-                              color: isSel ? '#008000' : '#475569', 
-                              fontWeight: 'bold', fontSize: '0.9rem', cursor: 'pointer',
-                              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                              boxShadow: '0 2px 4px rgba(0,0,0,0.03)'
-                            }}
-                          >
-                            <span>{isSel ? '✅ ' : ''}{prod.name}</span>
-                            <span style={{ fontWeight: '900' }}>¥{(prod.price || 0).toLocaleString()}</span>
-                          </button>
+                          <div key={prod.id} style={{ position: 'relative', width: '100%', marginBottom: '10px' }}>
+                            {/* 🚀 左肩：個数を減らすボタン（スマホ対応） */}
+                            {qty > 0 && (
+                              <button
+                                onClick={(e) => { e.stopPropagation(); removeCheckoutProduct(prod.id); }}
+                                style={minusBtnBadge}
+                              >
+                                <Minus size={16} strokeWidth={3} />
+                              </button>
+                            )}
+
+                            {/* 🚀 メイン：商品ボタン */}
+                            <button 
+                              onClick={() => addCheckoutProduct(prod)}
+                              style={{ 
+                                width: '100%', padding: '20px 18px', borderRadius: '15px', textAlign: 'left',
+                                border: `2px solid ${qty > 0 ? '#008000' : '#f1f5f9'}`, 
+                                background: qty > 0 ? '#f0fdf4' : '#fff', 
+                                color: qty > 0 ? '#008000' : '#475569', 
+                                fontWeight: 'bold', fontSize: '0.9rem', cursor: 'pointer',
+                                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                                boxShadow: '0 2px 4px rgba(0,0,0,0.03)'
+                              }}
+                            >
+                              <span>{qty > 0 ? '✅ ' : ''}{prod.name}</span>
+                              <span style={{ fontWeight: '900' }}>¥{(prod.price || 0).toLocaleString()}</span>
+
+                              {/* 🚀 右肩：個数バッジ */}
+                              {qty > 0 && (
+                                <span style={qtyBadgeStyle}>{qty}</span>
+                              )}
+                            </button>
+                          </div>
                         );
                     })}
                   </div>
@@ -958,7 +1039,9 @@ const handleSaveMemo = async () => {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                 <span style={{ fontWeight: 'bold', whiteSpace: 'nowrap', marginRight: '10px' }}>店販商品:</span>
                 <span style={{ textAlign: 'right', color: '#1e293b' }}>
-                  {selectedProducts.length > 0 ? selectedProducts.map(p => p.name).join(', ') : 'なし'}
+                  {selectedProducts.length > 0 
+                    ? selectedProducts.map(p => `${p.name}${p.quantity > 1 ? ` x ${p.quantity}` : ''}`).join(', ') 
+                    : 'なし'}
                 </span>
               </div>
             </div>
@@ -1409,4 +1492,51 @@ const navSwitchBtnStyle = {
   gap: '4px',
   boxShadow: '0 2px 4px rgba(0,0,0,0.05)'
 };
+const minusBtnBadge = {
+  position: 'absolute', top: '-8px', left: '-8px',
+  width: '32px', height: '32px', borderRadius: '50%',
+  background: '#fff', border: '2px solid #ef4444', color: '#ef4444',
+  display: 'flex', alignItems: 'center', justifyContent: 'center',
+  cursor: 'pointer', zIndex: 10, boxShadow: '0 2px 8px rgba(239, 68, 68, 0.3)', padding: 0
+};
+
+// 🆕 個数バッジ（右肩の白い数字）
+const qtyBadgeStyle = {
+  position: 'absolute', top: '-8px', right: '-8px',
+  background: '#ef4444', color: '#fff', borderRadius: '50%',
+  width: '28px', height: '28px', display: 'flex', alignItems: 'center', 
+  justifyContent: 'center', fontSize: '0.85rem', fontWeight: '900',
+  border: '2px solid #fff', boxShadow: '0 2px 4px rgba(0,0,0,0.2)', zIndex: 1
+};
+
+const alertBadgeStyle = {
+  background: '#ffeb3b',
+  color: '#d34817',
+  border: 'none',
+  padding: '6px 12px',
+  borderRadius: '20px',
+  fontSize: '0.75rem',
+  fontWeight: '900',
+  cursor: 'pointer',
+  display: 'flex',
+  alignItems: 'center',
+  gap: '5px',
+  marginTop: '10px',
+  animation: 'blinkRed 1.5s infinite',
+  boxShadow: '0 4px 12px rgba(255, 235, 59, 0.4)'
+};
+
+// 🆕 点滅アニメーションの定義（グローバルなstyleタグとして追加）
+if (typeof document !== 'undefined') {
+  const style = document.createElement('style');
+  style.innerHTML = `
+    @keyframes blinkRed {
+      0% { background-color: #ffeb3b; transform: scale(1); }
+      50% { background-color: #ff5722; color: #fff; transform: scale(1.05); }
+      100% { background-color: #ffeb3b; transform: scale(1); }
+    }
+  `;
+  document.head.appendChild(style);
+}
+
 export default TodayTasks;

@@ -216,7 +216,8 @@ if (profile && profile.business_name) {
       console.log("施設訪問データの生の中身:", visitData.data);
       if (visitData.data?.length > 0) {
         console.log("1件目の予定日:", visitData.data[0].scheduled_date);
-        console.log("1件目の施設名:", visitData.data[0].facility_users?.facility_name);
+        // 🔍 修正：facility_users ではなく facility_data を見ます
+        console.log("1件目の施設名:", visitData.data[0].facility_data?.facility_name);
       }
       console.log("------------------------------");
 
@@ -331,7 +332,7 @@ if (profile && profile.business_name) {
     const optPrice = Object.values(currentOpts).reduce((sum, o) => sum + (Number(o.additional_price) || 0), 0);
     total += optPrice;
 
-    currentProds.forEach(p => total += Number(p.price || 0));
+    currentProds.forEach(p => total += Number(p.price || 0) * (p.quantity || 1));
     currentAdjs.filter(a => !a.is_percent).forEach(a => {
       total += a.is_minus ? -Number(a.price) : Number(a.price);
     });
@@ -348,11 +349,37 @@ if (profile && profile.business_name) {
     calculateFinalTotal(checkoutServices, newSelection, checkoutProducts);
   };
 
-  const toggleCheckoutProduct = (prod) => {
-    const isSelected = checkoutProducts.find(p => p.id === prod.id);
-    const newSelection = isSelected ? checkoutProducts.filter(p => p.id !== prod.id) : [...checkoutProducts, prod];
-    setCheckoutProducts(newSelection);
-    calculateFinalTotal(checkoutServices, checkoutAdjustments, newSelection);
+  const addCheckoutProduct = (prod) => {
+    setCheckoutProducts(prev => {
+      const existing = prev.find(p => p.id === prod.id);
+      let next;
+      if (existing) {
+        // すでにリストにあれば、個数を+1
+        next = prev.map(p => p.id === prod.id ? { ...p, quantity: (p.quantity || 1) + 1 } : p);
+      } else {
+        // なければ新しく追加（個数1）
+        next = [...prev, { ...prod, quantity: 1 }];
+      }
+      calculateFinalTotal(checkoutServices, checkoutAdjustments, next);
+      return next;
+    });
+  };
+
+  // 🆕 商品を1個減らす（スマホのーボタンや右クリック用）
+  const removeCheckoutProduct = (productId) => {
+    setCheckoutProducts(prev => {
+      const existing = prev.find(p => p.id === productId);
+      let next;
+      if (existing && existing.quantity > 1) {
+        // 2個以上なら個数を-1
+        next = prev.map(p => p.id === productId ? { ...p, quantity: p.quantity - 1 } : p);
+      } else {
+        // 1個ならリストから完全に削除
+        next = prev.filter(p => p.id !== productId);
+      }
+      calculateFinalTotal(checkoutServices, checkoutAdjustments, next);
+      return next;
+    });
   };
 
   const toggleCheckoutService = (svc) => {
@@ -1572,21 +1599,23 @@ return (
                             </div>
                           </div>
                           
-                          {/* 🆕 請求書ボタン（施設っぽい名前や、売上実績がある場合に表示） */}
-                          <button 
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setInvoiceTarget({ id: cust.id, name: cust.name });
-                              setShowInvoiceModal(true);
-                            }}
-                            style={{ 
-                              padding: '4px 10px', background: '#f3f0ff', color: '#4b2c85', 
-                              border: '1px solid #4b2c85', borderRadius: '6px', fontSize: '0.7rem', 
-                              fontWeight: 'bold', cursor: 'pointer' 
-                            }}
-                          >
-                            <ReceiptText size={12} style={{marginRight:'3px'}} /> 請求書発行
-                          </button>
+                          {/* 🚀 🆕 スッキリ！DBの施設フラグが true の顧客のみボタンを表示 */}
+                          {cust.is_facility === true && (
+                            <button 
+                              onClick={(e) => {
+                                e.stopPropagation();
+                setInvoiceTarget({ id: cust.id, name: cust.name });
+                setShowInvoiceModal(true);
+              }}
+              style={{ 
+                padding: '4px 10px', background: '#f3f0ff', color: '#4b2c85', 
+                border: '1px solid #4b2c85', borderRadius: '6px', fontSize: '0.7rem', 
+                fontWeight: 'bold', cursor: 'pointer', marginTop: '5px'
+              }}
+            >
+              <ReceiptText size={12} style={{marginRight:'3px'}} /> 請求書発行
+            </button>
+          )}
                         </div>
                       </div>
                     );
@@ -1807,7 +1836,58 @@ return (
                 <div key={catName} style={{ marginBottom: '10px' }}><button onClick={() => setOpenAdjCategory(openAdjCategory === catName ? null : catName)} style={categoryToggleStyle}><span>{catName}</span><ChevronRight size={18} /></button>
                 {openAdjCategory === catName && (<div style={{display:'flex', flexWrap:'wrap', gap:'8px', padding:'10px'}}>{adjs.map(adj => (<button key={adj.id} onClick={() => toggleCheckoutAdj(adj)} style={adjBtnStyle(checkoutAdjustments.some(a => a.id === adj.id))}>{adj.name}</button>))}</div>)}</div>
               ))}
-              <div style={{ marginTop: '30px' }}><SectionTitle icon={<ShoppingBag size={16} />} title="店販商品" color="#008000" /><div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>{products.map(prod => (<button key={prod.id} onClick={() => toggleCheckoutProduct(prod)} style={{ ...adjBtnStyle(checkoutProducts.some(p => p.id === prod.id)), borderColor: '#008000', color: checkoutProducts.some(p => p.id === prod.id) ? '#fff' : '#008000', background: checkoutProducts.some(p => p.id === prod.id) ? '#008000' : '#fff' }}>{prod.name} (¥{prod.price.toLocaleString()})</button>))}</div></div>
+              <div style={{ marginTop: '30px' }}><SectionTitle icon={<ShoppingBag size={16} />} title="店販商品" color="#008000" /><div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '15px', padding: '10px 0' }}>
+  {products.map(prod => {
+    const selected = checkoutProducts.find(p => p.id === prod.id);
+    const qty = selected?.quantity || 0;
+
+    return (
+      <div key={prod.id} style={{ position: 'relative' }}>
+        {/* 🚀 【マイナスボタン】個数が1以上の時だけ左肩に表示（スマホ対応） */}
+        {qty > 0 && (
+          <button
+            onClick={(e) => { 
+              e.stopPropagation(); // 下のプラス判定が動かないようにブロック
+              removeCheckoutProduct(prod.id); 
+            }}
+            style={minusBtnBadge}
+          >
+            <Minus size={14} strokeWidth={3} />
+          </button>
+        )}
+
+        {/* 🚀 【商品ボタン】タップで個数アップ */}
+        <button 
+          onClick={() => addCheckoutProduct(prod)}
+          onContextMenu={(e) => { e.preventDefault(); removeCheckoutProduct(prod.id); }} // PCなら右クリックでも減らせる
+          style={{ 
+            ...adjBtnStyle(qty > 0), 
+            borderColor: '#008000', 
+            color: qty > 0 ? '#fff' : '#008000', 
+            background: qty > 0 ? '#008000' : '#fff',
+            position: 'relative',
+            padding: '12px 25px',
+            minWidth: '130px',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: '2px'
+          }}
+        >
+          <span style={{ fontWeight: 'bold' }}>{prod.name}</span>
+          <span style={{ fontSize: '0.7rem', opacity: 0.8 }}>¥{prod.price.toLocaleString()}</span>
+          
+          {/* 🔢 【個数バッジ】右肩に表示 */}
+          {qty > 0 && (
+            <span style={qtyBadgeStyle}>{qty}</span>
+          )}
+        </button>
+      </div>
+    );
+  })}
+</div>
+                </div></div>
             </div>
 <div style={checkoutFooterStyle}>
               {/* 合計金額表示行 */}
@@ -1901,6 +1981,22 @@ return (
               {/* 🆕 順番固定・ボタン付きの最強カルテUI */}
               <div style={{ background: '#fff', padding: '20px', borderRadius: '15px', border: '1px solid #eee', marginBottom: '20px' }}>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  
+                  {/* 🚀 🆕 施設フラグの切り替えスイッチを追加 */}
+                  <div style={{ background: '#f0fdf4', padding: '12px', borderRadius: '10px', border: '1px solid #bbf7d0', marginBottom: '10px' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }}>
+                      <input 
+                        type="checkbox" 
+                        checked={editFields.is_facility || false}
+                        onChange={(e) => setEditFields({...editFields, is_facility: e.target.checked})}
+                        style={{ width: '18px', height: '18px' }}
+                      />
+                      <span style={{ fontSize: '0.85rem', fontWeight: 'bold', color: '#166534' }}>
+                        提携施設として登録（請求書発行機能を有効にする）
+                      </span>
+                    </label>
+                  </div>
+
                   {(() => {
                     const fieldOrder = [
                       'name', 'furigana', 'email', 'phone', 
@@ -2477,4 +2573,45 @@ const circleBtn = {
   justifyContent: 'center',
   transition: 'all 0.2s'
 };
+const minusBtnBadge = {
+  position: 'absolute',
+  top: '-10px',
+  left: '-10px',
+  width: '30px',
+  height: '30px',
+  borderRadius: '50%',
+  background: '#fff',
+  border: '2px solid #ef4444',
+  color: '#ef4444',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  cursor: 'pointer',
+  zIndex: 10,
+  boxShadow: '0 2px 8px rgba(239, 68, 68, 0.3)',
+  padding: 0
+};
+
+// 🆕 個数バッジ（右肩の白い数字）
+const qtyBadgeStyle = {
+  position: 'absolute',
+  top: '-10px',
+  right: '-10px',
+  background: '#ef4444',
+  color: '#fff',
+  borderRadius: '50%',
+  width: '26px',
+  height: '26px',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  fontSize: '0.8rem',
+  fontWeight: '900',
+  border: '2px solid #fff',
+  boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
+  zIndex: 1
+};
+
+/* --- 🚀 ここまで追加 --- */
+
 export default AdminManagement;

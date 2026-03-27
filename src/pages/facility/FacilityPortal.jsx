@@ -16,6 +16,8 @@ import FacilityKeepDate_PC from './parts/FacilityKeepDate_PC';
 import FacilityListUp_PC from './parts/FacilityListUp_PC.jsx';
 import FacilityBooking_PC from './parts/FacilityBooking_PC';
 import FacilityStatus_PC from './parts/FacilityStatus_PC';
+import FacilityHistory_PC from './parts/FacilityHistory_PC';
+import FacilityInvoice_PC from './parts/FacilityInvoice_PC';
 
 // 今後作成するパーツたちをインポートするための準備（今はコメントアウト）
 // import FacilityUserList_PC from './parts/FacilityUserList_PC';
@@ -26,7 +28,8 @@ const FacilityPortal = () => {
   const navigate = useNavigate();
   const [facility, setFacility] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState('residents'); // 初期タブ
+  const [activeTab, setActiveTab] = useState('residents');
+  const [sharedDate, setSharedDate] = useState(new Date());
 
   // 🆕 追加：スマホ判定とメニュー開閉State
   const [isMobile, setIsMobile] = useState(window.innerWidth < 1024);
@@ -162,13 +165,22 @@ const FacilityPortal = () => {
 ) : activeTab === 'partners' ? (
   <FacilityPartnerShops_PC facilityId={facilityId} isMobile={isMobile} />
 ) : activeTab === 'keep' ? (
-  <FacilityKeepDate_PC facilityId={facilityId} isMobile={isMobile} setActiveTab={setActiveTab} /> // 🆕 差し替え
+  /* 🚀 sharedDateを渡す */
+  <FacilityKeepDate_PC facilityId={facilityId} isMobile={isMobile} setActiveTab={setActiveTab} sharedDate={sharedDate} setSharedDate={setSharedDate} /> 
 ) : activeTab === 'list-up' ? (
-  <FacilityListUp_PC facilityId={facilityId} isMobile={isMobile} setActiveTab={setActiveTab} />
+  /* 🚀 sharedDateを渡す */
+  <FacilityListUp_PC facilityId={facilityId} isMobile={isMobile} setActiveTab={setActiveTab} sharedDate={sharedDate} setSharedDate={setSharedDate} />
 ) : activeTab === 'booking' ? ( 
-  <FacilityBooking_PC facilityId={facilityId} isMobile={isMobile} setActiveTab={setActiveTab} />
+  /* 🚀 sharedDateを渡す */
+  <FacilityBooking_PC facilityId={facilityId} isMobile={isMobile} setActiveTab={setActiveTab} sharedDate={sharedDate} setSharedDate={setSharedDate} />
 ) : activeTab === 'status' ? (
 <FacilityStatus_PC facilityId={facilityId} isMobile={isMobile} />
+) : activeTab === 'history' ? ( 
+  /* 🚀 過去の訪問記録を表示 */
+<FacilityHistory_PC facilityId={facilityId} isMobile={isMobile} sharedDate={sharedDate} setSharedDate={setSharedDate} />
+) : activeTab === 'invoice' ? ( 
+  /* 🚀 🆕 利用明細・精算確認を表示（ここを追加！） */
+  <FacilityInvoice_PC facilityId={facilityId} sharedDate={sharedDate} setSharedDate={setSharedDate} />
 ) : activeTab === 'find_shops' ? (
   <FacilityFindShops_PC facilityId={facilityId} isMobile={isMobile} />
 ) : activeTab === 'settings' ? (
