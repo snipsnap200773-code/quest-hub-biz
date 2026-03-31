@@ -432,6 +432,118 @@ if (type === 'facility_booking') {
 }
 // 🆕 【ここまで追加】
 
+// ==========================================
+// 🚀 🆕 【修正版】パターンJ：お問い合わせ通知（スイッチ連動）
+// ==========================================
+if (type === 'inquiry') {
+  const { 
+    shopId, 
+    name, 
+    email: customerEmail, 
+    phone: customerPhone, 
+    content, 
+    custom_answers 
+  } = payload;
+
+  const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? "";
+  const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? "";
+  const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY');
+  const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+
+  // 1. 店舗の設定（form_config）を取得
+  const { data: profile } = await supabaseAdmin.from('profiles').select('*').eq('id', shopId).single();
+  if (!profile) throw new Error('店舗情報が見つかりません');
+
+  const config = profile.form_config || {};
+
+  // --- 🚀 🆕 スイッチ(inquiry_enabled)の状態をチェックして項目を作る ---
+  
+  // A. メール用のHTML行
+  let fieldsHtml = `<p style="margin: 0 0 10px 0;"><b>■ お名前:</b> ${name} 様</p>`;
+  if (config.email?.inquiry_enabled && customerEmail) {
+    fieldsHtml += `<p style="margin: 0 0 10px 0;"><b>■ メール:</b> ${customerEmail}</p>`;
+  }
+  if (config.phone?.inquiry_enabled && customerPhone) {
+    fieldsHtml += `<p style="margin: 0 0 10px 0;"><b>■ 電話番号:</b> ${customerPhone}</p>`;
+  }
+
+  // B. LINE用のテキスト
+  let lineFieldsText = `👤 客: ${name} 様`;
+  if (config.email?.inquiry_enabled && customerEmail) lineFieldsText += `\n✉️ メ: ${customerEmail}`;
+  if (config.phone?.inquiry_enabled && customerPhone) lineFieldsText += `\n📞 呼: ${customerPhone}`;
+
+  // 2. カスタム質問の回答をテキスト化（ここもスイッチをチェック）
+  let customAnswersText = "";
+  if (custom_answers && Object.keys(custom_answers).length > 0) {
+    customAnswersText = Object.entries(custom_answers)
+      .filter(([qid]) => {
+        // 基本項目を除外し、かつ「問合せスイッチ」がONの質問だけを残す
+        const q = config.custom_questions?.find((item: any) => item.id === qid);
+        return q && q.inquiry_enabled === true;
+      })
+      .map(([qid, answer]) => {
+        const q = config.custom_questions?.find((item: any) => item.id === qid);
+        return `・${q?.label || '質問'}: ${answer}`;
+      }).join('\n');
+  }
+
+  // --- ✉️ 店舗様への通知（メール） ---
+  const shopSubject = `【要確認】${name} 様より新しいお問い合わせが届きました`;
+  const shopHtml = `
+    <div style="font-family: sans-serif; color: #333; line-height: 1.6; max-width: 550px; margin: 0 auto; border: 1px solid #eee; padding: 25px; border-radius: 12px; border-top: 8px solid #4f46e5;">
+      <h2 style="color: #4f46e5; margin-top: 0;">📩 新しいお問い合わせ</h2>
+      <p><strong>${profile.business_name} 様</strong></p>
+      
+      <div style="background: #f8fafc; padding: 20px; border-radius: 10px; margin: 20px 0; border: 1px solid #e2e8f0;">
+        ${fieldsHtml}
+        <p style="margin: 0 0 10px 0;"><b>■ 内容:</b><br>${content.replace(/\n/g, '<br>')}</p>
+        ${customAnswersText ? `<p style="margin: 15px 0 0 0; border-top: 1px dashed #cbd5e1; padding-top: 10px;"><b>■ カスタム項目の回答:</b><br>${customAnswersText.replace(/\n/g, '<br>')}</p>` : ''}
+      </div>
+
+      <div style="text-align: center;">
+        <a href="https://quest-hub-five.vercel.app/admin/${shopId}/dashboard" style="display: inline-block; background: #4f46e5; color: #fff; padding: 12px 25px; border-radius: 8px; text-decoration: none; font-weight: bold;">管理画面を開く</a>
+      </div>
+    </div>`;
+
+  await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${RESEND_API_KEY}` },
+    body: JSON.stringify({
+      from: 'QUEST HUB 通知センター <infec@snipsnap.biz>',
+      to: [profile.email_contact || profile.email],
+      subject: shopSubject,
+      html: shopHtml
+    })
+  });
+
+  // --- ✉️ お客様への自動返信 ---
+  if (customerEmail) {
+    await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${RESEND_API_KEY}` },
+      body: JSON.stringify({
+        from: `${profile.business_name} <infec@snipsnap.biz>`,
+        to: [customerEmail],
+        subject: `【送信完了】${profile.business_name} へのお問い合わせ`,
+        html: `<div style="font-family: sans-serif; padding: 25px;">
+                <p>${name} 様</p>
+                <p>お問い合わせを承りました。内容を確認次第、ご連絡いたします。</p>
+                <hr />
+                <p style="font-size: 0.9rem; color: #666;">${content.replace(/\n/g, '<br>')}</p>
+              </div>`
+      })
+    });
+  }
+
+  // --- 💬 店舗様へのLINE通知 ---
+  if (profile.line_admin_user_id && profile.line_channel_access_token) {
+    const lineMsg = `【お問い合わせ】\n${lineFieldsText}\n\n内容：\n${content}\n${customAnswersText ? `\nその他：\n${customAnswersText}` : ''}\n\nhttps://quest-hub-five.vercel.app/admin/${shopId}/dashboard`;
+    await safePushToLine(profile.line_admin_user_id, lineMsg, profile.line_channel_access_token, "INQUIRY_OWNER");
+  }
+
+  return new Response(JSON.stringify({ success: true }), { status: 200, headers: corsHeaders });
+}
+
     // ==========================================
     // 🚀 パターンA：店主様への歓迎メール ＆ 三土手さんへの通知送信 (本家ロジック完全維持)
     // ==========================================

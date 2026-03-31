@@ -8,15 +8,16 @@ import {
   ClipboardList, ArrowLeft, Save, CheckCircle2, 
   MapPin, Car, Building2, HeartPulse, MessageSquare, 
   ToggleLeft, ToggleRight,
-  User, Mail, Phone, Scissors, Sparkles, Plus, Trash2
+  User, Mail, Phone, Scissors, Sparkles, Plus, Trash2,
+  Copy, ExternalLink
 } from 'lucide-react';
 
 // 標準項目用の部品
 const ConfigItem = ({ id, icon: Icon, title, description, formConfig, themeColor, toggleField, updateLabel }) => {
-  // 指定された id が config 内に存在しない、または必要なプロパティが欠けている場合は表示しません
   if (!formConfig || !formConfig[id]) return null;
   const inputStyle = { width: '100%', padding: '12px', borderRadius: '10px', border: '1px solid #cbd5e1', fontSize: '0.9rem' };
-    return (
+
+  return (
     <div style={{ marginBottom: '25px', paddingBottom: '20px', borderBottom: '1px solid #f1f5f9' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
         <div style={{ display: 'flex', gap: '12px', flex: 1 }}>
@@ -28,38 +29,40 @@ const ConfigItem = ({ id, icon: Icon, title, description, formConfig, themeColor
             <div style={{ fontSize: '0.75rem', color: '#64748b' }}>{description}</div>
           </div>
         </div>
-<div style={{ display: 'flex', gap: '24px', textAlign: 'center' }}>
-          {/* 🆕 必須項目の切り替えスイッチを追加 [cite: 2025-12-01] */}
+
+        {/* 🚀 スイッチエリア：3つ並びに拡張 */}
+        <div style={{ display: 'flex', gap: '16px', textAlign: 'center' }}>
+          {/* 必須 */}
           <div>
             <div style={{ fontSize: '0.65rem', color: '#ef4444', marginBottom: '4px', fontWeight: 'bold' }}>必須</div>
-            <button 
-              onClick={() => toggleField(id, 'required')} 
-              style={{ background: 'none', border: 'none', cursor: 'pointer', color: formConfig[id].required ? '#ef4444' : '#cbd5e1' }}
-              disabled={id === 'name'} // 🆕 お名前はシステム上常に必須とする [cite: 2025-12-01]
-            >
-              {formConfig[id].required ? <ToggleRight size={36} /> : <ToggleLeft size={36} />}
+            <button onClick={() => toggleField(id, 'required')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: formConfig[id].required ? '#ef4444' : '#cbd5e1' }} disabled={id === 'name'}>
+              {formConfig[id].required ? <ToggleRight size={32} /> : <ToggleLeft size={32} />}
             </button>
           </div>
-          <div>
-            <div style={{ fontSize: '0.65rem', color: '#64748b', marginBottom: '4px', fontWeight: 'bold' }}>Web</div>
-            <button onClick={() => toggleField(id, 'normal')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: formConfig[id].enabled ? themeColor : '#cbd5e1' }}>
-              {formConfig[id].enabled ? <ToggleRight size={36} /> : <ToggleLeft size={36} />}
-            </button>
-          </div>
-          <div>
-            <div style={{ fontSize: '0.65rem', color: '#16a34a', marginBottom: '4px', fontWeight: 'bold' }}>LINE</div>
-            <button onClick={() => toggleField(id, 'line')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: formConfig[id].line_enabled ? '#16a34a' : '#cbd5e1' }}>
-              {formConfig[id].line_enabled ? <ToggleRight size={36} /> : <ToggleLeft size={36} />}
-            </button>
-          </div>
-        </div>
-      </div>
-      {(formConfig[id].enabled || formConfig[id].line_enabled) && (
-        <div style={{ marginLeft: '46px' }}>
-          <label style={{ fontSize: '0.75rem', fontWeight: 'bold', color: themeColor, display: 'block', marginBottom: '6px' }}>表示ラベル名</label>
-          <input type="text" value={formConfig[id].label} onChange={(e) => updateLabel(id, e.target.value)} style={inputStyle} />
+          {/* Web */}
+          <div>
+            <div style={{ fontSize: '0.65rem', color: '#64748b', marginBottom: '4px', fontWeight: 'bold' }}>Web</div>
+            <button onClick={() => toggleField(id, 'normal')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: formConfig[id].enabled ? themeColor : '#cbd5e1' }}>
+              {formConfig[id].enabled ? <ToggleRight size={32} /> : <ToggleLeft size={32} />}
+            </button>
+          </div>
+          {/* LINE */}
+          <div>
+            <div style={{ fontSize: '0.65rem', color: '#16a34a', marginBottom: '4px', fontWeight: 'bold' }}>LINE</div>
+            <button onClick={() => toggleField(id, 'line')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: formConfig[id].line_enabled ? '#16a34a' : '#cbd5e1' }}>
+              {formConfig[id].line_enabled ? <ToggleRight size={32} /> : <ToggleLeft size={32} />}
+            </button>
+          </div>
+          {/* 🚀 🆕 お問い合わせ用スイッチを追加 */}
+          <div>
+            <div style={{ fontSize: '0.65rem', color: '#f59e0b', marginBottom: '4px', fontWeight: 'bold' }}>問合せ</div>
+            <button onClick={() => toggleField(id, 'inquiry')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: formConfig[id].inquiry_enabled ? '#f59e0b' : '#cbd5e1' }}>
+              {formConfig[id].inquiry_enabled ? <ToggleRight size={32} /> : <ToggleLeft size={32} />}
+            </button>
+          </div>
         </div>
-      )}
+      </div>
+      {/* ラベル編集などは既存のまま */}
     </div>
   );
 };
@@ -114,6 +117,14 @@ const CustomFieldItem = ({ field, themeColor, updateCustomField, deleteCustomFie
             {field.line_enabled ? <ToggleRight size={32} /> : <ToggleLeft size={32} />}
           </button>
         </div>
+
+        {/* CustomFieldItem内のスイッチ部分に以下を追加 */}
+<div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+  <span style={{ fontSize: '0.7rem', color: '#f59e0b', fontWeight: 'bold' }}>問合せ:</span>
+  <button onClick={() => updateCustomField(field.id, 'inquiry_enabled', !field.inquiry_enabled)} style={{ border: 'none', background: 'none', cursor: 'pointer', color: field.inquiry_enabled ? '#f59e0b' : '#cbd5e1' }}>
+    {field.inquiry_enabled ? <ToggleRight size={32} /> : <ToggleLeft size={32} />}
+  </button>
+</div>
       </div>
     </div>
   );
@@ -165,6 +176,16 @@ if (data.form_config) {
         }
   };
 
+  // 🚀 🆕 URLコピー用のStateとロジック
+  const [copied, setCopied] = useState(false);
+  const inquiryUrl = `${window.location.origin}/shop/${shopId}/inquiry`;
+
+  const handleCopyLink = () => {
+    navigator.clipboard.writeText(inquiryUrl);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
   const showMsg = (txt) => { setMessage(txt); setTimeout(() => setMessage(''), 3000); };
 
   const handleSave = async () => {
@@ -187,12 +208,16 @@ if (data.form_config) {
   };
 
 const toggleField = (key, type = 'normal') => {
-    let targetKey = 'enabled';
+    let targetKey = 'enabled';
     if (type === 'line') targetKey = 'line_enabled';
-    if (type === 'required') targetKey = 'required'; // 🆕 追加 [cite: 2025-12-01]
+    if (type === 'required') targetKey = 'required';
+    if (type === 'inquiry') targetKey = 'inquiry_enabled'; // 🚀 🆕 追加
     
-    setFormConfig(prev => ({ ...prev, [key]: { ...prev[key], [targetKey]: !prev[key][targetKey] } }));
-  };
+    setFormConfig(prev => ({ 
+      ...prev, 
+      [key]: { ...prev[key], [targetKey]: !prev[key][targetKey] } 
+    }));
+  };
 
   const updateLabel = (key, newLabel) => {
     setFormConfig(prev => ({ ...prev, [key]: { ...prev[key], label: newLabel } }));
@@ -240,6 +265,51 @@ const toggleField = (key, type = 'normal') => {
             <option key={key} value={key}>{val.label}</option>
           ))}
         </select>
+      </div>
+
+      {/* 🚀 🆕 お問い合わせフォームURLセクション */}
+      <div style={{ ...cardStyle, border: `1px solid ${themeColor}30`, background: `${themeColor}05`, marginBottom: '30px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+          <h3 style={{ fontSize: '1rem', color: themeColor, margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <MessageSquare size={18} /> お問い合わせフォームURL
+          </h3>
+          <a href={inquiryUrl} target="_blank" rel="noreferrer" style={{ fontSize: '0.75rem', color: themeColor, textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '4px', fontWeight: 'bold' }}>
+            実際の画面を確認 <ExternalLink size={14} />
+          </a>
+        </div>
+        
+        <p style={{ fontSize: '0.75rem', color: '#64748b', marginBottom: '10px' }}>
+          このURLを店舗のホームページやSNSのプロフィール欄に貼り付けて利用してください。
+        </p>
+
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <input 
+            readOnly 
+            value={inquiryUrl} 
+            style={{ flex: 1, padding: '12px', borderRadius: '10px', border: '1px solid #cbd5e1', fontSize: '0.85rem', background: '#fff', color: '#64748b', outline: 'none' }} 
+          />
+          <button 
+            onClick={handleCopyLink}
+            style={{ 
+              padding: '0 20px', 
+              background: copied ? '#10b981' : themeColor, 
+              color: '#fff', 
+              border: 'none', 
+              borderRadius: '10px', 
+              fontWeight: 'bold', 
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              transition: 'all 0.2s',
+              minWidth: '100px',
+              justifyContent: 'center'
+            }}
+          >
+            {copied ? <CheckCircle2 size={18} /> : <Copy size={18} />}
+            {copied ? '完了' : 'コピー'}
+          </button>
+        </div>
       </div>
 
       <h3 style={{ fontSize: '1rem', color: '#64748b', marginBottom: '15px', paddingLeft: '10px' }}>▼ 基本情報</h3>

@@ -52,6 +52,9 @@ import ShopSearch from './components/ShopSearch';
 // 🔝 自動スクロール装置
 import ScrollToTop from './components/ScrollToTop';
 
+// 🚀 🆕 お問い合わせフォームをインポート
+import InquiryForm from './components/InquiryForm';
+
 function App() {
   const [isOnline, setIsOnline] = useState(navigator.onLine);
 
@@ -127,6 +130,10 @@ function App() {
               <Route path="/category/:categoryId" element={<ShopList />} />
               <Route path="/trial-registration" element={<TrialRegistration />} />
               <Route path="/shop/:shopId/detail" element={<ShopDetail />} />
+
+              {/* 🚀 🆕 お問い合わせフォームへのルートを追加 */}
+              <Route path="/shop/:shopId/inquiry" element={<InquiryForm />} />
+              
               <Route path="/shop/:shopId" element={<ReservationForm />} /> 
               <Route path="/shop/:shopId/reserve" element={<ReservationForm />} />
               
