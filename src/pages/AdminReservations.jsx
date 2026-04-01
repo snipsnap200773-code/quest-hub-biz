@@ -281,7 +281,7 @@ const isPC = windowWidth > 1024;
 // 1. 予約データの取得
 const { data: resData } = await supabase
   .from('reservations')
-  .select('*, profiles(business_name), staffs(name), customers(*)')
+  .select('*, profiles(business_name, schedule_sync_id), staffs(name), customers(*)') // ✅ 追加！
   .in('shop_id', targetShopIds);
 
 // 2. 🆕 プライベート予定の取得
@@ -386,15 +386,22 @@ setEditFields({
 
 // 🆕 修正後：名寄せスカウター搭載版
 const openDetail = async (res) => {
-  if (res.shop_id && res.shop_id !== shopId) {
-    alert(`こちらは他店舗...`);
+  // 💡 修正ポイント：自店舗のデータか、または「同じ合言葉」を持つ店舗のデータなら許可する
+  const isMyShop = res.shop_id === shopId;
+  const isSyncGroup = shop?.schedule_sync_id && res.profiles?.schedule_sync_id === shop.schedule_sync_id;
+
+  if (!isMyShop && !isSyncGroup) {
+    alert(`こちらはグループ外の他店舗予約のため、詳細は閲覧できません。`);
     return;
   }
+
   setSelectedRes(res);
 
   let cust = null;
 
-  // 🆕 修正ポイント：まず、予約データに紐付いている顧客IDがあるか確認
+  // 💡 修正ポイント：他店舗の予約詳細を開く場合、検索対象の shop_id もその予約のものに合わせる
+  const targetShopIdForCustomer = res.shop_id; 
+
   if (res.customer_id) {
     const { data: matched } = await supabase
       .from('customers')
@@ -404,7 +411,6 @@ const openDetail = async (res) => {
     cust = matched;
   }
 
-  // もしIDでヒットしなかった場合のみ、電話・メールでスカウターを回す
   if (!cust) {
     const orConditions = [];
     if (res.customer_phone && res.customer_phone !== '---') orConditions.push(`phone.eq.${res.customer_phone}`);
@@ -414,7 +420,7 @@ const openDetail = async (res) => {
       const { data: matched } = await supabase
         .from('customers')
         .select('*')
-        .eq('shop_id', shopId)
+        .eq('shop_id', targetShopIdForCustomer) // 👈 自店ID固定から予約元の店舗IDに変更
         .or(orConditions.join(','))
         .maybeSingle();
       cust = matched;
@@ -468,7 +474,7 @@ const openDetail = async (res) => {
 
     const history = reservations
       .filter(r => 
-        r.shop_id === shopId && 
+        // 🚀 shop_id の条件を削除することで、グループ全店舗の履歴が表示されます
         r.res_type === 'normal' && 
         (r.customer_name === res.customer_name || (cust?.id && r.customer_id === cust.id))
       )
@@ -1753,27 +1759,56 @@ return (
                   <h4 style={{ margin: '0 0 10px 0', fontSize: '0.9rem', color: '#64748b' }}>🕒 来店履歴 ＆ 予定</h4>
                   <div style={{ height: isPC ? '420px' : '250px', overflowY: 'auto', border: '1px solid #f1f5f9', borderRadius: '15px', background: '#f8fafc', padding: '5px' }}>
                     {customerHistory.map((h, idx) => {
-                      const hDate = new Date(h.start_time);
-                      const isToday = hDate.toLocaleDateString('sv-SE') === new Date().toLocaleDateString('sv-SE');
-                      return (
-                        <div key={h.id} style={{ padding: '15px', borderBottom: '1px solid #eee', background: '#fff', borderRadius: isToday ? '12px' : '0', border: isToday ? `2px solid ${themeColor}` : 'none' }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '5px' }}>
-                            <span style={{ fontWeight: 'bold' }}>{hDate.toLocaleDateString('ja-JP')}</span>
-                            {(() => {
-  // 実績(total_price)があればそれを使い、なければ予定額を計算する
-  const displayPrice = h.total_price > 0 ? h.total_price : parseReservationDetails(h).totalPrice;
+  const hDate = new Date(h.start_time);
+  const isToday = hDate.toLocaleDateString('sv-SE') === new Date().toLocaleDateString('sv-SE');
+  
   return (
-    <span style={{ color: '#e11d48', fontWeight: 'bold' }}>
-      ¥{displayPrice.toLocaleString()}
-      {h.total_price === 0 && <small style={{fontSize:'0.6rem', marginLeft:'2px'}}>(予)</small>}
-    </span>
+    <div 
+      key={h.id} 
+      style={{ 
+        padding: '15px', 
+        borderBottom: '1px solid #eee', 
+        background: '#fff', 
+        borderRadius: isToday ? '12px' : '0', 
+        border: isToday ? `2px solid ${themeColor}` : 'none' 
+      }}
+    >
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '5px', alignItems: 'center' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span style={{ fontWeight: 'bold' }}>{hDate.toLocaleDateString('ja-JP')}</span>
+          
+          {/* 💡 改良ポイント：他店の履歴なら店舗名バッジを表示 */}
+          {h.shop_id !== shopId && (
+            <span style={{ 
+              fontSize: '0.65rem', 
+              background: '#f1f5f9', 
+              color: '#64748b', 
+              padding: '2px 6px', 
+              borderRadius: '4px', 
+              border: '1px solid #e2e8f0',
+              fontWeight: 'bold',
+              whiteSpace: 'nowrap'
+            }}>
+              {h.profiles?.business_name || '他店'}
+            </span>
+          )}
+        </div>
+
+        {(() => {
+          // 実績(total_price)があればそれを使い、なければ予定額を計算する
+          const displayPrice = h.total_price > 0 ? h.total_price : parseReservationDetails(h).totalPrice;
+          return (
+            <span style={{ color: '#e11d48', fontWeight: 'bold' }}>
+              ¥{displayPrice.toLocaleString()}
+              {h.total_price === 0 && <small style={{fontSize:'0.6rem', marginLeft:'2px'}}>(予)</small>}
+            </span>
+          );
+        })()}
+      </div>
+      <div style={{ color: '#475569', fontSize: '0.8rem' }}>{h.menu_name}</div>
+    </div>
   );
-})()}
-                          </div>
-                          <div style={{ color: '#475569', fontSize: '0.8rem' }}>{h.menu_name}</div>
-                        </div>
-                      );
-                    })}
+})}
                   </div>
                 </div>
               </div>

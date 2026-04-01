@@ -137,73 +137,97 @@ function AdminManagement() {
   const fetchInitialData = async () => {
     try {
       setLoading(true);
+
+      // --- 🆕 ステップ1：グループ店舗の特定（合言葉による連携） ---
+      // まず自分のプロフィールを取得して、schedule_sync_id（合言葉）を確認します
+      const { data: myProfile } = await supabase.from('profiles').select('*').eq('id', cleanShopId).maybeSingle();
+      if (myProfile && myProfile.business_name) setShop(myProfile);
+
+      let targetShopIds = [cleanShopId]; // 初期値は自分のみ
+
+      // 合言葉が設定されている場合、同じ合言葉を持つ全店舗のIDリストを作成します
+      if (myProfile?.schedule_sync_id) {
+        const { data: siblings } = await supabase
+          .from('profiles')
+          .select('id')
+          .eq('schedule_sync_id', myProfile.schedule_sync_id);
+        
+        if (siblings && siblings.length > 0) {
+          targetShopIds = siblings.map(s => s.id);
+        }
+      }
+
       const startOfYear = `${viewYear}-01-01`;
       const endOfYear = `${viewYear}-12-31`;
 
-      // --- 1. 店舗プロフィールの取得 ---
-      const { data: profile } = await supabase.from('profiles').select('*').eq('id', cleanShopId).maybeSingle();
-      if (profile && profile.business_name) setShop(profile);
-
-      // --- 2. 予約データ ＆ 施設訪問データを並列で取得 ---
+      // --- 2. 予約データ ＆ 施設訪問データを並列で取得（.eq ではなく .in を使用） ---
       const [resRes, visitRes] = await Promise.all([
-        supabase.from('reservations').select('*, staffs(name)').eq('shop_id', cleanShopId).or('is_block.is.null,is_block.eq.false').order('start_time', { ascending: true }),
-        supabase.from('visit_requests').select('*, facility_data:facility_user_id(facility_name)').eq('shop_id', cleanShopId)
+        supabase.from('reservations')
+          .select('*, staffs(name), profiles(business_name)') // 💡 profilesを結合して店名も取れるように
+          .in('shop_id', targetShopIds) // 👈 グループ全店を対象に
+          .or('is_block.is.null,is_block.eq.false')
+          .order('start_time', { ascending: true }),
+        
+        supabase.from('visit_requests')
+          .select('*, facility_data:facility_user_id(facility_name)')
+          .in('shop_id', targetShopIds) // 👈 グループ全店を対象に
       ]);
 
-      // 🛡️ ガード：エラー等でデータが null の場合でも空配列として扱う
       const reservationsData = resRes.data || [];
       const visitsData = visitRes.data || [];
-
-      // 🚀 🆕 訪問したことがある施設のIDリストを抽出（members取得用）
       const facilityIds = [...new Set(visitsData.map(v => v.facility_user_id))].filter(Boolean);
 
-      // --- 3. 残りのマスター、売上、名簿、施設入居者をまとめて取得 ---
+      // --- 3. 全店舗分の売上・顧客名簿・マスターを取得 ---
       const [catRes, servRes, optRes, adjRes, prodRes, sDataRes, custAllRes, membersRes, staffsRes] = await Promise.all([
+        // カテゴリやメニュー、スタッフ、商品は「現在操作している自分の店」のものを基準にする（UI崩れ防止）
         supabase.from('service_categories').select('*').eq('shop_id', cleanShopId).order('sort_order'),
         supabase.from('services').select('*').eq('shop_id', cleanShopId).order('sort_order'),
         supabase.from('service_options').select('*'),
         supabase.from('admin_adjustments').select('*').eq('shop_id', cleanShopId),
         supabase.from('products').select('*').eq('shop_id', cleanShopId).order('sort_order'),
-        supabase.from('sales').select('*').eq('shop_id', cleanShopId).gte('sale_date', startOfYear).lte('sale_date', endOfYear),
-        supabase.from('customers').select('*').eq('shop_id', cleanShopId).order('last_arrival_at', { ascending: false }),
+        
+        // 💰 売上データ：グループ全店舗分を合算（これで分析がチーム合計になる）
+        supabase.from('sales')
+          .select('*')
+          .in('shop_id', targetShopIds) 
+          .gte('sale_date', startOfYear)
+          .lte('sale_date', endOfYear),
+        
+        // 👤 顧客名簿：グループ全店舗の顧客を統合して表示（名寄せの母体）
+        supabase.from('customers')
+          .select('*')
+          .in('shop_id', targetShopIds) 
+          .order('last_arrival_at', { ascending: false }),
+        
         facilityIds.length > 0 
           ? supabase.from('members').select('*').in('facility_user_id', facilityIds)
           : Promise.resolve({ data: [] }),
+        
+        // スタッフは自店舗のみ（他店のスタッフに担当変更できないようにするため）
         supabase.from('staffs').select('*').eq('shop_id', cleanShopId)
       ]);
 
-      // 🔍 🚀 【復活！】デバッグコード
-      console.log("--- クエストデータ取得デバッグ ---");
-      console.log("選択中の店舗ID (shopId):", cleanShopId);
-      console.log("取得した個人予約数 (resData):", reservationsData.length);
-      console.log("取得した施設訪問数 (visitData):", visitsData.length);
-      console.log("施設訪問データの生の中身:", visitsData);
-      if (visitsData.length > 0) {
-        console.log("1件目の予定日:", visitsData[0].scheduled_date);
-        // 配列・オブジェクト両対応で見出し施設名を特定
-        const fData = Array.isArray(visitsData[0].facility_data) ? visitsData[0].facility_data[0] : visitsData[0].facility_data;
-        console.log("1件目の施設名:", fData?.facility_name);
-      }
-      console.log("取得した施設入居者数 (allMembers):", membersRes.data?.length || 0);
-      console.log("取得した一般売上数 (sales):", sDataRes.data?.length || 0);
-      console.log("取得した一般顧客数 (customers):", custAllRes.data?.length || 0);
-      console.log("------------------------------");
-
-      // --- 4. 全てのデータをStateに反映 ---
+      // --- 4. データの整形とセット ---
       const individualTasks = reservationsData.map(r => ({ ...r, task_type: 'individual' }));
       const facilityTasks = visitsData.map(v => {
         const fData = Array.isArray(v.facility_data) ? v.facility_data[0] : v.facility_data;
-        return { ...v, task_type: 'facility', customer_name: fData?.facility_name || '名称未設定施設', start_time: `${v.scheduled_date}T09:00:00` };
+        return { 
+          ...v, 
+          task_type: 'facility', 
+          customer_name: fData?.facility_name || '名称未設定施設', 
+          start_time: `${v.scheduled_date}T09:00:00` 
+        };
       });
 
+      // すべてを統合してStateを更新
       setAllReservations([...individualTasks, ...facilityTasks]);
       setCategories(catRes.data?.filter(c => !c.is_adjustment_cat && !c.is_product_cat) || []);
       setServices(servRes.data || []);
       setServiceOptions(optRes.data || []);
       setAdminAdjustments(adjRes.data || []);
       setProducts(prodRes.data || []);
-      setSalesRecords(sDataRes.data || []);
-      setAllCustomers(custAllRes.data || []);
+      setSalesRecords(sDataRes.data || []); // 👈 ここに全店舗の売上が入ります
+      setAllCustomers(custAllRes.data || []); // 👈 ここに全店舗の顧客が入ります
       setAllMembers(membersRes.data || []);
       setStaffs(staffsRes.data || []);
 
@@ -391,37 +415,61 @@ const applyMenuChangeToLedger = () => {
     ));
     setIsMenuPopupOpen(false);
   };
-const openCheckout = (res) => {
-    const info = parseReservationDetails(res);
-    setSelectedRes(res);
+// 🚀 完成版：レジを開く際、その予約元の店舗マスターを読み込む
+  const openCheckout = async (res) => {
+    // 💡 1. 予約元の店舗IDを特定
+    const originShopId = res.shop_id || cleanShopId;
 
-    // 🆕 【重要】今のマスターデータに存在する項目だけを抽出（お掃除）
-    // 1. 施術メニューの精査
-    const validServices = info.items.filter(savedSvc => 
-      services.some(masterSvc => masterSvc.id === savedSvc.id || masterSvc.name === savedSvc.name)
-    );
+    try {
+      // 💡 2. その店舗専用のマスターデータ（調整・商品・メニュー）を即座に取得
+      const [catRes, servRes, optRes, adjRes, prodRes] = await Promise.all([
+        supabase.from('service_categories').select('*').eq('shop_id', originShopId).order('sort_order'),
+        supabase.from('services').select('*').eq('shop_id', originShopId).order('sort_order'),
+        supabase.from('service_options').select('*'),
+        supabase.from('admin_adjustments').select('*').eq('shop_id', originShopId),
+        supabase.from('products').select('*').eq('shop_id', originShopId).order('sort_order')
+      ]);
 
-    // 2. プロ調整項目の精査
-    const validAdjustments = info.savedAdjustments.filter(savedAdj => 
-      adminAdjustments.some(masterAdj => masterAdj.id === savedAdj.id || masterAdj.name === savedAdj.name)
-    );
+      const masterServices = servRes.data || [];
+      const masterAdjustments = adjRes.data || [];
 
-    setCheckoutServices(validServices);
-    setCheckoutAdjustments(validAdjustments);
-    setCheckoutProducts(info.savedProducts);
+      // 💡 3. ステートを更新してレジの表示を切り替える
+      setCategories(catRes.data?.filter(c => !c.is_adjustment_cat && !c.is_product_cat) || []);
+      setServices(masterServices);
+      setServiceOptions(optRes.data || []);
+      setAdminAdjustments(masterAdjustments);
+      setProducts(prodRes.data || []);
 
-    // 枝分かれ（オプション）のコピー
-    const opt = typeof res.options === 'string' ? JSON.parse(res.options) : (res.options || {});
-    const initialOpts = opt.people 
-      ? opt.people.flatMap(p => Object.entries(p.options || {})) 
-      : Object.entries(opt.options || {});
-    setCheckoutOptions(Object.fromEntries(initialOpts));
+      // 💡 4. 解析と精査（ステート反映を待たず、今取得した masterServices などを直接使う）
+      const info = parseReservationDetails(res);
+      setSelectedRes(res);
 
-    // 金額を再計算してセット
-    setFinalPrice(res.total_price || info.totalPrice);
-    setOpenAdjCategory(null); 
-    setIsCheckoutOpen(true); 
-    setIsCustomerInfoOpen(false);
+      const validServices = info.items.filter(savedSvc => 
+        masterServices.some(m => m.id === savedSvc.id || m.name === savedSvc.name)
+      );
+
+      const validAdjustments = info.savedAdjustments.filter(savedAdj => 
+        masterAdjustments.some(m => m.id === savedAdj.id || m.name === savedAdj.name)
+      );
+
+      setCheckoutServices(validServices);
+      setCheckoutAdjustments(validAdjustments);
+      setCheckoutProducts(info.savedProducts);
+
+      const opt = typeof res.options === 'string' ? JSON.parse(res.options) : (res.options || {});
+      const initialOpts = opt.people 
+        ? opt.people.flatMap(p => Object.entries(p.options || {})) 
+        : Object.entries(opt.options || {});
+      setCheckoutOptions(Object.fromEntries(initialOpts));
+
+      setFinalPrice(res.total_price || info.totalPrice);
+      setOpenAdjCategory(null); 
+      setIsCheckoutOpen(true); 
+      setIsCustomerInfoOpen(false);
+
+    } catch (err) {
+      console.error("他店マスタの取得に失敗しました:", err.message);
+    }
   };
 
   const toggleCheckoutOption = (serviceId, groupName, opt) => {
@@ -434,6 +482,9 @@ const openCheckout = (res) => {
 const completePayment = async () => {
     try {
       setIsSavingMemo(true);
+
+      // 💡 修正ポイント：操作中の自分(cleanShopId)ではなく、その予約本来の持ち主(originShopId)を特定
+      const originShopId = selectedRes.shop_id || cleanShopId;
 
       // 1. 基本情報の整理（名前はeditFieldsの入力値を最優先する）
       const totalSlots = checkoutServices.reduce((sum, s) => sum + (s.slots ?? 0), 0);
@@ -451,32 +502,19 @@ const completePayment = async () => {
       // --- ステップA：顧客名簿（マスタ）の自動登録・更新（名寄せ） ---
       let targetCustomerId = selectedCustomer?.id;
       
-      // まだIDが紐付いていない場合、名前で名簿を検索
-      if (!targetCustomerId) {
-        const { data: existingCust } = await supabase
-          .from('customers')
-          .select('id')
-          .eq('shop_id', cleanShopId)
-          .eq('name', normalizedName)
-          .maybeSingle();
-        targetCustomerId = existingCust?.id;
-      }
-
-    // 1. まず「名前」をキーにして今の名簿データを取得（ID、住所、メモなど全部）
+      // 💡 修正ポイント：本来の店舗(originShopId)の顧客名簿から検索
       const { data: currentMaster } = await supabase
         .from('customers')
         .select('*')
-        .eq('shop_id', cleanShopId)
+        .eq('shop_id', originShopId)
         .eq('name', normalizedName)
         .maybeSingle();
 
-      // 2. 顧客IDを特定（マスタにあるならそれを使う、なければ今の選択中のID）
       const finalTargetId = currentMaster?.id || selectedCustomer?.id;
 
-      // 3. 送信用データ（Payload）の作成
-      // 「入力があればそれを使う、なければマスタの値を使う、それもなければ今回の予約時の値を使う」
+      // 送信用データ（Payload）の作成
       const customerPayload = {
-        shop_id: cleanShopId,
+        shop_id: originShopId, // ✅ 修正：本来の店舗マスタに保存
         name: normalizedName,
         furigana: editFields.furigana || currentMaster?.furigana || '',
         phone: editFields.phone || currentMaster?.phone || selectedRes.customer_phone || '',
@@ -489,7 +527,7 @@ const completePayment = async () => {
         company_name: editFields.company_name || currentMaster?.company_name || '',
         symptoms: editFields.symptoms || currentMaster?.symptoms || '',
         request_details: editFields.request_details || currentMaster?.request_details || '',
-        memo: editFields.memo || currentMaster?.memo || '', // 👈 メモもこれで保護されます
+        memo: editFields.memo || currentMaster?.memo || '', 
         line_user_id: editFields.line_user_id || currentMaster?.line_user_id || selectedRes.line_user_id || null,
         updated_at: new Date().toISOString()
       };
@@ -505,19 +543,18 @@ const completePayment = async () => {
         .select()
         .single();
       
-      const finalCustomerId = savedCust?.id || targetCustomerId;
+      const finalCustomerId = savedCust?.id || finalTargetId;
 
       // --- 🆕 ステップB：【重要】過去の予約も一括で紐付け！ ---
-      // これにより、過去にIDが空っぽで「記録なし」になっていた予約もすべて名簿に紐付きます
+      // 💡 修正ポイント：本来の店舗(originShopId)の予約履歴のみを紐付け対象にする
       await supabase
         .from('reservations')
         .update({ customer_id: finalCustomerId })
-        .eq('shop_id', cleanShopId)
+        .eq('shop_id', originShopId)
         .eq('customer_name', normalizedName)
         .is('customer_id', null);
 
       // --- ステップC：今回の予約データを確定内容で上書き保存 ---
-      // 💡 お会計時の金額とメニューをsnapshot保存するので、後でマスタを変えても0円になりません
       await supabase.from('reservations').update({ 
         total_price: finalPrice, 
         status: 'completed', 
@@ -542,14 +579,13 @@ const completePayment = async () => {
       
       const { data: existingSale } = await supabase.from('sales').select('id').eq('reservation_id', selectedRes.id).maybeSingle();
       const salePayload = { 
-        shop_id: cleanShopId, 
+        shop_id: originShopId, // ✅ 修正：本来の店舗の売上として記録
         reservation_id: selectedRes.id, 
         customer_id: finalCustomerId, 
         total_amount: finalPrice, 
         service_amount: serviceAmt, 
         product_amount: productAmt, 
         sale_date: selectedDate, 
-        // 🆕 修正：枝メニュー(options)も売上データに保存する
         details: { 
           services: checkoutServices, 
           options: checkoutOptions, 
@@ -571,14 +607,14 @@ const completePayment = async () => {
 
       alert("お会計・名簿更新・全履歴の紐付けが完了しました！✨"); 
       setIsCheckoutOpen(false); 
-      fetchInitialData();
+      fetchInitialData(); // 🔄 これでグループ合算の最新状態に更新されます
     } catch (err) { 
       alert("確定失敗: " + err.message); 
     } finally {
       setIsSavingMemo(false);
     }
   };
-
+  
   // 🆕 ここから追加：お会計リセット機能
   const handleResetCheckout = () => {
     if (!window.confirm("お会計内容を現在のマスター設定の状態にリセットしますか？\n（追加した店販や調整もリセットされます）")) return;

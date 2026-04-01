@@ -129,20 +129,25 @@ const fetchMasterData = async () => {
 
 const fetchTodayTasks = async () => {
   setLoading(true);
-  
-  // 💡 固定の今日ではなく、targetDate（選択された日）を使う
-  const dateStr = targetDate; 
-
+  const dateStr = targetDate;
   try {
-    // 2. 【個人予約】の取得
+    // 1️⃣ まず自分のプロフィールから「合言葉」を確認し、グループ店舗IDリストを作る
+    const { data: myProfile } = await supabase.from('profiles').select('schedule_sync_id').eq('id', shopId).single();
+    
+    let targetShopIds = [shopId];
+    if (myProfile?.schedule_sync_id) {
+      const { data: siblings } = await supabase.from('profiles').select('id').eq('schedule_sync_id', myProfile.schedule_sync_id);
+      if (siblings) targetShopIds = siblings.map(s => s.id);
+    }
+
+    // 2️⃣ 予約データの取得。 .eq ではなく .in(IDリスト) を使う
     const { data: resData, error: resError } = await supabase
       .from('reservations')
-      .select('*, customers(name, admin_name)') 
-      .eq('shop_id', shopId)
+      .select('*, customers(name, admin_name), profiles(business_name)') // 💡 どこの店舗の予約か分かるように profiles も取得
+      .in('shop_id', targetShopIds) // 👈 グループ全店舗を対象に
       .gte('start_time', `${dateStr} 00:00:00`)
       .lte('start_time', `${dateStr} 23:59:59`)
-      // 🚀 🆕 ブロック用フラグが true ではない（お客様の予約のみ）を取得
-      .or('is_block.is.null,is_block.eq.false') 
+      .or('is_block.is.null,is_block.eq.false')
       .eq('res_type', 'normal');
 
     if (resError) throw resError;
@@ -270,12 +275,42 @@ const syncReservationToSupabase = async (newSvcs, newOpts) => {
 };
 
 // 🆕 レジを開く時 [cite: 2026-03-08]
-  const openQuickCheckout = (task) => {
+const openQuickCheckout = async (task) => {
+    // 💡 1. 予約元の店舗IDを特定（他店ならその店のID、自店なら自分のID）
+    const originShopId = task.shop_id || shopId;
+
+    // 💡 2. その店舗専用のマスターデータを即座に取得
+    try {
+      const [allCatsRes, adjRes, prodRes, servRes, optRes] = await Promise.all([
+        supabase.from('service_categories').select('*').eq('shop_id', originShopId).order('sort_order'),
+        supabase.from('admin_adjustments').select('*').eq('shop_id', originShopId).is('service_id', null).order('sort_order'),
+        supabase.from('products').select('*').eq('shop_id', originShopId).order('sort_order'),
+        supabase.from('services').select('*').eq('shop_id', originShopId).order('sort_order'),
+        supabase.from('service_options').select('*')
+      ]);
+
+      const allCats = allCatsRes.data || [];
+
+      // 💡 3. 取得した他店のマスタ情報を State にセット（レジの表示が切り替わる）
+      setCategories(allCats.filter(c => !c.is_adjustment_cat && !c.is_product_cat));
+      setAdjCategories(allCats.filter(c => c.is_adjustment_cat === true));
+      setProductCategories(allCats.filter(c => c.is_product_cat === true));
+      setAdjustments(adjRes.data || []);
+      setProducts(prodRes.data || []);
+      setServices(servRes.data || []);
+      setServiceOptions(optRes.data || []);
+
+    } catch (err) {
+      console.error("マスタデータの取得に失敗しました:", err.message);
+      // 失敗してもレジ自体は開けるように継続します
+    }
+
+    // --- 💡 4. ここからは既存の初期化処理 ---
     setSelectedTask(task);
     setSelectedAdjustments([]);
     setSelectedProducts([]);
 
-    // 🆕 修正：現在の情報を editFields にセット（自動名寄せの準備）
+    // 🆕 現在の情報を editFields にセット（自動名寄せの準備）
     const visitInfo = task.options?.visit_info || {};
     setEditFields({
       name: task.customers?.name || task.customer_name || '',
@@ -284,23 +319,30 @@ const syncReservationToSupabase = async (newSvcs, newOpts) => {
       email: task.customers?.email || task.customer_email || '',
       address: task.customers?.address || visitInfo.address || '',
       memo: task.customers?.memo || '',
+      line_user_id: task.customers?.line_user_id || task.line_user_id || null, // 忘れず追加
       custom_answers: visitInfo.custom_answers || task.customers?.custom_answers || {}
     });
     
-    // 🆕 予約データのJSONから、現在選ばれているメニューを抽出してセット [cite: 2026-03-08]
+    // 🆕 予約データのJSONから、現在選ばれているメニューを抽出してセット
     const opt = typeof task.options === 'string' ? JSON.parse(task.options) : (task.options || {});
     const initialSvcs = opt.services || (opt.people ? opt.people.flatMap(p => p.services || []) : []);
     setSelectedServices(initialSvcs);
 
-    // 🆕 追加：既存の枝分かれオプションを読み込む [cite: 2026-03-08]
+    // 🆕 既存の枝分かれオプションを読み込む
     const initialOpts = opt.options || (opt.people ? opt.people[0]?.options : {});
     setSelectedOptions(initialOpts || {});
 
+    // 初回金額を計算
     const initialPrice = calculateInitialPrice(task);
     setFinalPrice(initialPrice); 
+    
+    // 💡 電卓（手動入力）モードを解除しておく
+    setIsManualPrice(false);
+    
+    // レジパネルを表示
     setIsCheckoutOpen(true);
   };
-
+  
   /* 🚀 🆕 【ここから追加】商品を個数つきで増減させるための関数 🚀 */
   
   // 商品を1個増やす（または新規追加）
@@ -357,6 +399,9 @@ const syncReservationToSupabase = async (newSvcs, newOpts) => {
     try {
       setIsSavingMemo(true);
 
+      // 💡 修正ポイント：操作中の自分(shopId)ではなく、そのタスク本来の持ち主(originShopId)を特定する
+      const originShopId = selectedTask.shop_id || shopId;
+
       // 1. お名前とメニュー名の整理
       const normalizedName = (editFields.name || selectedTask.customer_name).replace(/　/g, ' ').trim();
       const newMenuName = selectedServices.map(s => s.name).join(', ');
@@ -364,19 +409,20 @@ const syncReservationToSupabase = async (newSvcs, newOpts) => {
       // --- 🆕 ステップA：顧客マスタ（マスタ）の自動登録・更新 ---
       let targetCustomerId = selectedTask.customer_id;
       if (!targetCustomerId) {
-        const { data: existingCust } = await supabase.from('customers').select('id').eq('shop_id', shopId).eq('name', normalizedName).maybeSingle();
+        // ✅ 修正：本来の店舗の顧客マスタから検索
+        const { data: existingCust } = await supabase.from('customers').select('id').eq('shop_id', originShopId).eq('name', normalizedName).maybeSingle();
         targetCustomerId = existingCust?.id;
       }
 
       const customerPayload = {
-        shop_id: shopId,
+        shop_id: originShopId, // ✅ 修正：本来の店舗に顧客を登録/更新する
         name: normalizedName,
         furigana: editFields.furigana,
         phone: editFields.phone || selectedTask.customer_phone,
         email: editFields.email || selectedTask.customer_email,
         address: editFields.address,
         memo: editFields.memo,
-        line_user_id: editFields.line_user_id || selectedTask.line_user_id, // LINE IDを確実に保存
+        line_user_id: editFields.line_user_id || selectedTask.line_user_id,
         updated_at: new Date().toISOString()
       };
 
@@ -385,11 +431,10 @@ const syncReservationToSupabase = async (newSvcs, newOpts) => {
       const finalCustomerId = savedCust?.id || targetCustomerId;
 
       // --- 🆕 ステップB：【最重要】過去の予約も一括で紐付け！ ---
-      // これを入れないと、過去の履歴が「記録なし」に見えてしまいます
       await supabase
         .from('reservations')
         .update({ customer_id: finalCustomerId })
-        .eq('shop_id', shopId)
+        .eq('shop_id', originShopId) // ✅ 修正：本来の店舗の予約履歴を一括紐付け
         .eq('customer_name', normalizedName)
         .is('customer_id', null);
 
@@ -418,11 +463,10 @@ const syncReservationToSupabase = async (newSvcs, newOpts) => {
       // --- ステップD：売上データ（sales）の記録 ---
       const { data: existingSale } = await supabase.from('sales').select('id').eq('reservation_id', selectedTask.id).maybeSingle();
       const salePayload = {
-        shop_id: shopId,
+        shop_id: originShopId, // ✅ 修正：本来の店舗の売上として記録する
         reservation_id: selectedTask.id,
         customer_id: finalCustomerId,
         total_amount: finalPrice,
-        // 🆕 決済した今日の日付ではなく、タスクの日付（targetDate）を売上日にする
         sale_date: targetDate 
       };
 
@@ -430,7 +474,9 @@ const syncReservationToSupabase = async (newSvcs, newOpts) => {
         await supabase.from('sales').update(salePayload).eq('id', existingSale.id);
       } else {
         await supabase.from('sales').insert([salePayload]);
+        // 初回確定時のみ利用回数を+1
         if (finalCustomerId) {
+          // ✅ 修正：顧客データの取得も一貫してIDベースで行う
           const { data: cData } = await supabase.from('customers').select('total_visits').eq('id', finalCustomerId).single();
           await supabase.from('customers').update({ total_visits: (cData?.total_visits || 0) + 1 }).eq('id', finalCustomerId);
         }
