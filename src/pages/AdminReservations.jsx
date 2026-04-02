@@ -249,15 +249,12 @@ const isPC = windowWidth > 1024;
 // 🆕 location.search を追加することで、予約完了後にURLが変わった瞬間に再取得が走るようにします
   useEffect(() => { fetchData(); }, [shopId, startDate, location.search]);
 
-  // ✅ ツイン・カレンダー対応版 fetchData
   const fetchData = async () => {
     setLoading(true);
-    // 1. 自分の店舗プロフィールを取得
     const { data: profile } = await supabase.from('profiles').select('*').eq('id', shopId).single();
     if (!profile) { setLoading(false); return; }
     setShop(profile);
 
-    // ✅ スタッフ一覧を取得（何人いるか判定するため）
     const { data: staffsData } = await supabase
       .from('staffs')
       .select('*')
@@ -265,64 +262,24 @@ const isPC = windowWidth > 1024;
       .order('sort_order', { ascending: true });
     setStaffs(staffsData || []);
 
-    // 2. スケジュール共有設定（schedule_sync_id）を確認
-    let targetShopIds = [shopId];
-    if (profile.schedule_sync_id) {
-      const { data: siblingShops } = await supabase
-        .from('profiles')
-        .select('id')
-        .eq('schedule_sync_id', profile.schedule_sync_id);
-      if (siblingShops) {
-        targetShopIds = siblingShops.map(s => s.id);
-      }
-    }
+    // 💡 修正：自分の shopId だけをシンプルに取得
+    const { data: resData } = await supabase
+      .from('reservations')
+      .select('*, staffs(name), customers(*)') 
+      .eq('shop_id', shopId); // 👈 .in ではなく .eq に変更
 
-// 3. 全関連店舗の予約データを合算して取得（顧客マスタの最新名も取得）
-// 1. 予約データの取得
-const { data: resData } = await supabase
-  .from('reservations')
-  .select('*, profiles(business_name, schedule_sync_id), staffs(name), customers(*)') // ✅ 追加！
-  .in('shop_id', targetShopIds);
-
-// 2. 🆕 プライベート予定の取得
-    const { data: privData } = await supabase
-      .from('private_tasks')
-      .select('*')
-      .eq('shop_id', shopId);
-
-    // 🆕 【ここを追加！】提携施設と定期ルールを取得
-    const { data: connData } = await supabase
-      .from('shop_facility_connections')
-      .select('*, facility_users(facility_name)')
-      .eq('shop_id', shopId)
-      .eq('status', 'active');
+    const { data: privData } = await supabase.from('private_tasks').select('*').eq('shop_id', shopId);
+    const { data: connData } = await supabase.from('shop_facility_connections').select('*, facility_users(facility_name)').eq('shop_id', shopId).eq('status', 'active');
     setFacilityConnections(connData || []);
 
-    // 3. 🆕 施設訪問依頼の取得
-    const { data: visitData } = await supabase
-      .from('visit_requests')
-      .select('*, facility_users(facility_name), visit_request_residents(count)')
-      .eq('shop_id', shopId)
-      // ✅ .neq('status', 'completed') を削除することで、完了分もカレンダーに表示されます
-      .neq('status', 'canceled');
-
-    // 🆕 【重要：ここがエラーの場所でした】
-    // 変数名を mData に統一して定義し、正しく State にセットします
-    const { data: mData } = await supabase
-      .from('keep_dates')
-      .select('*, facility_users(facility_name)')
-      .eq('shop_id', shopId);
-
-    // 🆕 定期訪問の除外リストも取得
-    const { data: exclData } = await supabase
-      .from('regular_keep_exclusions')
-      .select('excluded_date')
-      .eq('shop_id', shopId);
+    const { data: visitData } = await supabase.from('visit_requests').select('*, facility_users(facility_name), visit_request_residents(count)').eq('shop_id', shopId).neq('status', 'canceled');
+    const { data: mData } = await supabase.from('keep_dates').select('*, facility_users(facility_name)').eq('shop_id', shopId);
+    const { data: exclData } = await supabase.from('regular_keep_exclusions').select('excluded_date').eq('shop_id', shopId);
 
     setReservations(resData || []);
     setPrivateTasks(privData || []);
     setVisitRequests(visitData || []);
-    setManualKeeps(mData || []); // 💡 manualKeepData ではなく mData を使う
+    setManualKeeps(mData || []);
     setExclusions(exclData?.map(e => e.excluded_date) || []);
     setLoading(false);
   };
@@ -386,59 +343,38 @@ setEditFields({
 
 // 🆕 修正後：名寄せスカウター搭載版
 const openDetail = async (res) => {
-  // 💡 修正ポイント：自店舗のデータか、または「同じ合言葉」を持つ店舗のデータなら許可する
-  const isMyShop = res.shop_id === shopId;
-  const isSyncGroup = shop?.schedule_sync_id && res.profiles?.schedule_sync_id === shop.schedule_sync_id;
+    // 💡 自分の店であることが確定しているので、即座に開始
+    setSelectedRes(res);
+    let cust = null;
 
-  if (!isMyShop && !isSyncGroup) {
-    alert(`こちらはグループ外の他店舗予約のため、詳細は閲覧できません。`);
-    return;
-  }
-
-  setSelectedRes(res);
-
-  let cust = null;
-
-  // 💡 修正ポイント：他店舗の予約詳細を開く場合、検索対象の shop_id もその予約のものに合わせる
-  const targetShopIdForCustomer = res.shop_id; 
-
-  if (res.customer_id) {
-    const { data: matched } = await supabase
-      .from('customers')
-      .select('*')
-      .eq('id', res.customer_id)
-      .maybeSingle();
-    cust = matched;
-  }
-
-  if (!cust) {
-    const orConditions = [];
-    if (res.customer_phone && res.customer_phone !== '---') orConditions.push(`phone.eq.${res.customer_phone}`);
-    if (res.customer_email) orConditions.push(`email.eq.${res.customer_email}`);
-
-    if (orConditions.length > 0) {
-      const { data: matched } = await supabase
-        .from('customers')
-        .select('*')
-        .eq('shop_id', targetShopIdForCustomer) // 👈 自店ID固定から予約元の店舗IDに変更
-        .or(orConditions.join(','))
-        .maybeSingle();
+    if (res.customer_id) {
+      const { data: matched } = await supabase.from('customers').select('*').eq('id', res.customer_id).maybeSingle();
       cust = matched;
     }
-  }
 
-  // 以降の統合チェックロジックへ...
-  if (cust) {
-    if (cust.id === res.customer_id) {
-      finalizeOpenDetail(res, cust);
+    if (!cust) {
+      const orConditions = [];
+      if (res.customer_phone && res.customer_phone !== '---') orConditions.push(`phone.eq.${res.customer_phone}`);
+      if (res.customer_email) orConditions.push(`email.eq.${res.customer_email}`);
+
+      if (orConditions.length > 0) {
+        const { data: matched } = await supabase
+          .from('customers')
+          .select('*')
+          .eq('shop_id', shopId) // 👈 シンプルに shopId で固定
+          .or(orConditions.join(','))
+          .maybeSingle();
+        cust = matched;
+      }
+    }
+
+    if (cust && cust.id !== res.customer_id) {
+      setMergeCandidate(cust);
+      setShowMergeConfirm(true);
       return;
     }
-    setMergeCandidate(cust);
-    setShowMergeConfirm(true);
-    return;
-  }
-  finalizeOpenDetail(res, cust);
-};
+    finalizeOpenDetail(res, cust);
+  };
   // 🆕 共通処理：詳細モーダルを表示するための確定処理
   const finalizeOpenDetail = (res, cust) => {
     // 💡 予約時に入力された詳細データ（住所やカスタム質問回答など）を取得
@@ -681,29 +617,26 @@ const openDetail = async (res) => {
     if (isBlock) msg = 'このブロックを解除して予約を「可能」に戻しますか？';
     
     if (window.confirm(msg)) {
-      // ✅ 🆕 修正：テーブルを使い分ける
-      const targetTable = isPrivate ? 'private_tasks' : 'reservations';
+      const targetTable = (selectedRes?.res_type === 'private_task') ? 'private_tasks' : 'reservations';
+      
       const { error: deleteError } = await supabase.from(targetTable).delete().eq('id', id);
-
       if (deleteError) { alert('削除に失敗しました: ' + deleteError.message); return; }
 
-      // 予約（normal）の場合のみ、顧客マスタの来店回数を減らすロジック（既存）
-      if (!isPrivate && selectedRes.res_type === 'normal') {
+      if (selectedRes.res_type === 'normal') {
         const { customer_name } = selectedRes;
-        const { count } = await supabase.from('reservations').select('*', { count: 'exact', head: true }).eq('shop_id', shopId).eq('customer_name', customer_name);
+        const { count } = await supabase.from('reservations')
+          .select('*', { count: 'exact', head: true })
+          .eq('shop_id', shopId) // 👈 自分の shopId を使う
+          .eq('customer_name', customer_name);
+
         if (count === 0) {
           await supabase.from('customers').delete().eq('shop_id', shopId).eq('name', customer_name);
-        } else {
-          const { data: cust } = await supabase.from('customers').select('id, total_visits').eq('shop_id', shopId).eq('name', customer_name).maybeSingle();
-          if (cust) {
-            await supabase.from('customers').update({ total_visits: Math.max(0, (cust.total_visits || 1) - 1) }).eq('id', cust.id);
-          }
         }
       }
       
       setShowDetailModal(false); 
-      fetchData(); // 再読み込み
-      showMsg(isPrivate ? "予定を削除しました" : "予約を削除しました");
+      fetchData(); 
+      showMsg("削除しました");
     }
   };
   
@@ -1777,21 +1710,6 @@ return (
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <span style={{ fontWeight: 'bold' }}>{hDate.toLocaleDateString('ja-JP')}</span>
           
-          {/* 💡 改良ポイント：他店の履歴なら店舗名バッジを表示 */}
-          {h.shop_id !== shopId && (
-            <span style={{ 
-              fontSize: '0.65rem', 
-              background: '#f1f5f9', 
-              color: '#64748b', 
-              padding: '2px 6px', 
-              borderRadius: '4px', 
-              border: '1px solid #e2e8f0',
-              fontWeight: 'bold',
-              whiteSpace: 'nowrap'
-            }}>
-              {h.profiles?.business_name || '他店'}
-            </span>
-          )}
         </div>
 
         {(() => {

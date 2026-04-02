@@ -41,6 +41,7 @@ const MenuSettings = () => {
   const [editingCategoryId, setEditingCategoryId] = useState(null);
   const [editingDisableCatId, setEditingDisableCatId] = useState(null);
   const [isFacilityOnlyCat, setIsFacilityOnlyCat] = useState(false);
+  const [bizType, setBizType] = useState('all');
 
   // メニュー用State
   const [newServiceName, setNewServiceName] = useState('');
@@ -233,9 +234,13 @@ const showMsg = (txt) => { setMessage(txt); setTimeout(() => setMessage(''), 300
 const handleCategorySubmit = async (e) => {
     e.preventDefault();
     const payload = { 
-      name: newCategoryName, url_key: newUrlKey, custom_shop_name: newCustomShopName,
-      custom_description: newCustomDescription, custom_official_url: newCustomOfficialUrl,
-      is_facility_only: isFacilityOnlyCat // 🆕 ペイロードに追加
+      name: newCategoryName, 
+      url_key: newUrlKey, 
+      custom_shop_name: newCustomShopName,
+      custom_description: newCustomDescription, 
+      custom_official_url: newCustomOfficialUrl,
+      is_facility_only: isFacilityOnlyCat,
+      biz_type: bizType // 🆕 これを追加！
     };
 
     if (editingCategoryId) {
@@ -602,7 +607,8 @@ const handleProdCatSubmit = async (e) => {
                     setNewCategoryName(c.name); 
                     setNewUrlKey(c.url_key || ''); 
                     setNewCustomShopName(c.custom_shop_name || '');
-                    setIsFacilityOnlyCat(!!c.is_facility_only); // 💡 これを足すことで、編集時にチェックが入ります
+                    setIsFacilityOnlyCat(!!c.is_facility_only);
+                    setBizType(c.biz_type || 'all');
                   }} style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '4px', color: '#3b82f6' }}>
                     <Edit2 size={16} />
                   </button>

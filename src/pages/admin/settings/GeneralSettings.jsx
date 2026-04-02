@@ -4,7 +4,7 @@ import { supabase } from "../../../supabaseClient";
 import bcrypt from 'bcryptjs';
 import { 
   Settings, Shield, Palette, Layout, Save, 
-  Link as LinkIcon, ArrowLeft, CheckCircle2 
+  ArrowLeft, CheckCircle2 
 } from 'lucide-react';
 
 const GeneralSettings = () => {
@@ -24,7 +24,6 @@ const GeneralSettings = () => {
 
   // --- 1. State 管理 (外観、同期、表示拡張、セキュリティを完全維持) ---
   const [themeColor, setThemeColor] = useState('#2563eb');
-  const [scheduleSyncId, setScheduleSyncId] = useState('');
   const [extraSlotsBefore, setExtraSlotsBefore] = useState(0);
   const [extraSlotsAfter, setExtraSlotsAfter] = useState(0);
 
@@ -37,8 +36,7 @@ const GeneralSettings = () => {
     const { data } = await supabase.from('profiles').select('*').eq('id', shopId).single();
     if (data) {
       setShopData(data);
-setThemeColor(data.theme_color || '#2563eb');
-      setScheduleSyncId(data.schedule_sync_id || '');
+      setThemeColor(data.theme_color || '#2563eb');
       // 念のため || 0 を重ねて確実に数値として初期化します
       setExtraSlotsBefore(data.extra_slots_before || 0);
       setExtraSlotsAfter(data.extra_slots_after || 0);
@@ -51,7 +49,6 @@ setThemeColor(data.theme_color || '#2563eb');
   const handleSave = async () => {
     const { error } = await supabase.from('profiles').update({
       theme_color: themeColor,
-      schedule_sync_id: scheduleSyncId,
       extra_slots_before: extraSlotsBefore,
       extra_slots_after: extraSlotsAfter
     }).eq('id', shopId);
@@ -132,17 +129,6 @@ const cardStyle = { marginBottom: '20px', background: '#fff', padding: '24px', b
             </div>
           </div>
         </div>
-      </section>
-
-      {/* 🔗 スケジュール共有 */}
-      <section style={cardStyle}>
-        <h3 style={{ marginTop: 0, fontSize: '1rem', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
-          <LinkIcon size={20} color="#6366f1" /> スケジュール共有設定
-        </h3>
-        <p style={{ fontSize: '0.75rem', color: '#64748b', marginBottom: '16px', lineHeight: '1.5' }}>
-          複数のアカウントで同じ合言葉を入力すると、予約表が一つに統合されます。
-        </p>
-        <input placeholder="共有用の合言葉を入力" value={scheduleSyncId} onChange={(e) => setScheduleSyncId(e.target.value)} style={inputStyle} />
       </section>
 
       {/* 📌 管理画面の表示拡張 */}

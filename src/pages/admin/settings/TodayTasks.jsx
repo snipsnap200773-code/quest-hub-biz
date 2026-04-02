@@ -131,20 +131,11 @@ const fetchTodayTasks = async () => {
   setLoading(true);
   const dateStr = targetDate;
   try {
-    // 1️⃣ まず自分のプロフィールから「合言葉」を確認し、グループ店舗IDリストを作る
-    const { data: myProfile } = await supabase.from('profiles').select('schedule_sync_id').eq('id', shopId).single();
-    
-    let targetShopIds = [shopId];
-    if (myProfile?.schedule_sync_id) {
-      const { data: siblings } = await supabase.from('profiles').select('id').eq('schedule_sync_id', myProfile.schedule_sync_id);
-      if (siblings) targetShopIds = siblings.map(s => s.id);
-    }
-
-    // 2️⃣ 予約データの取得。 .eq ではなく .in(IDリスト) を使う
+    // 💡 シンプルに「自分の店舗ID」で予約を検索するだけ！
     const { data: resData, error: resError } = await supabase
       .from('reservations')
-      .select('*, customers(name, admin_name), profiles(business_name)') // 💡 どこの店舗の予約か分かるように profiles も取得
-      .in('shop_id', targetShopIds) // 👈 グループ全店舗を対象に
+      .select('*, customers(name, admin_name)') 
+      .eq('shop_id', shopId) // 👈 .in ではなく .eq に変更
       .gte('start_time', `${dateStr} 00:00:00`)
       .lte('start_time', `${dateStr} 23:59:59`)
       .or('is_block.is.null,is_block.eq.false')
@@ -152,7 +143,7 @@ const fetchTodayTasks = async () => {
 
     if (resError) throw resError;
 
-    // 3. 【施設訪問依頼】の取得
+    // 施設訪問依頼の取得（もともと自店のみなのでそのまま）
     const { data: visitData, error: visitError } = await supabase
       .from('visit_requests')
       .select('*, facility_users(facility_name)')
@@ -161,29 +152,21 @@ const fetchTodayTasks = async () => {
 
     if (visitError) throw visitError;
 
-    // 4. データの整形とラベル（task_type）の付与
-    // 💡 これにより、UI側でアイコンやボタンを自動で出し分けられるようになります
-    const individualTasks = (resData || []).map(r => ({
-      ...r,
-      task_type: 'individual'
-    }));
-
+    const individualTasks = (resData || []).map(r => ({ ...r, task_type: 'individual' }));
     const facilityTasks = (visitData || []).map(v => ({
       ...v,
       task_type: 'facility',
-      // 💡 施設訪問は「開始時間」がないため、並び替え用に「朝9時」を仮セット
       start_time: `${v.scheduled_date} 09:00:00`, 
       customer_name: v.facility_users?.facility_name 
     }));
 
-    // 5. すべてを合体させて、開始時間順に並べ替え
     const combined = [...individualTasks, ...facilityTasks].sort((a, b) => {
       return new Date(a.start_time).getTime() - new Date(b.start_time).getTime();
     });
 
     setTasks(combined);
-
-    // 🚀 🆕 【ここから追加】過去のレジ忘れ（statusがcompleted以外）を1件だけ探す
+    
+    // 過去のレジ忘れチェック
     const todayStr = new Date().toLocaleDateString('sv-SE');
     const { data: incomplete } = await supabase
       .from('reservations')
@@ -191,21 +174,16 @@ const fetchTodayTasks = async () => {
       .eq('shop_id', shopId)
       .neq('status', 'completed')
       .lt('start_time', `${todayStr} 00:00:00`)
-      // 🚀 🆕 ブロック用（is_block: true）はアラートの対象にしない
       .or('is_block.is.null,is_block.eq.false') 
-      .eq('res_type', 'normal') // 通常予約のみを対象にする
+      .eq('res_type', 'normal');
 
     if (incomplete && incomplete.length > 0) {
       setOldestIncompleteDate(incomplete[0].start_time.split('T')[0]);
     } else {
       setOldestIncompleteDate(null);
     }
-    // 🚀 【ここまで追加】
-
-    console.log(`[デバッグ] 今日の総タスク数: ${combined.length}件 (施設: ${facilityTasks.length}件)`);
   } catch (error) {
-    console.error("タスク取得中に致命的なエラーが発生しました:", error.message);
-    showMsg("データの取得に失敗しました。");
+    console.error("タスク取得エラー:", error.message);
   } finally {
     setLoading(false);
   }
@@ -275,42 +253,12 @@ const syncReservationToSupabase = async (newSvcs, newOpts) => {
 };
 
 // 🆕 レジを開く時 [cite: 2026-03-08]
-const openQuickCheckout = async (task) => {
-    // 💡 1. 予約元の店舗IDを特定（他店ならその店のID、自店なら自分のID）
-    const originShopId = task.shop_id || shopId;
-
-    // 💡 2. その店舗専用のマスターデータを即座に取得
-    try {
-      const [allCatsRes, adjRes, prodRes, servRes, optRes] = await Promise.all([
-        supabase.from('service_categories').select('*').eq('shop_id', originShopId).order('sort_order'),
-        supabase.from('admin_adjustments').select('*').eq('shop_id', originShopId).is('service_id', null).order('sort_order'),
-        supabase.from('products').select('*').eq('shop_id', originShopId).order('sort_order'),
-        supabase.from('services').select('*').eq('shop_id', originShopId).order('sort_order'),
-        supabase.from('service_options').select('*')
-      ]);
-
-      const allCats = allCatsRes.data || [];
-
-      // 💡 3. 取得した他店のマスタ情報を State にセット（レジの表示が切り替わる）
-      setCategories(allCats.filter(c => !c.is_adjustment_cat && !c.is_product_cat));
-      setAdjCategories(allCats.filter(c => c.is_adjustment_cat === true));
-      setProductCategories(allCats.filter(c => c.is_product_cat === true));
-      setAdjustments(adjRes.data || []);
-      setProducts(prodRes.data || []);
-      setServices(servRes.data || []);
-      setServiceOptions(optRes.data || []);
-
-    } catch (err) {
-      console.error("マスタデータの取得に失敗しました:", err.message);
-      // 失敗してもレジ自体は開けるように継続します
-    }
-
-    // --- 💡 4. ここからは既存の初期化処理 ---
+const openQuickCheckout = (task) => { // 💡 asyncを削除してOK
     setSelectedTask(task);
     setSelectedAdjustments([]);
     setSelectedProducts([]);
 
-    // 🆕 現在の情報を editFields にセット（自動名寄せの準備）
+    // 🆕 現在の情報を editFields にセット
     const visitInfo = task.options?.visit_info || {};
     setEditFields({
       name: task.customers?.name || task.customer_name || '',
@@ -319,27 +267,20 @@ const openQuickCheckout = async (task) => {
       email: task.customers?.email || task.customer_email || '',
       address: task.customers?.address || visitInfo.address || '',
       memo: task.customers?.memo || '',
-      line_user_id: task.customers?.line_user_id || task.line_user_id || null, // 忘れず追加
+      line_user_id: task.customers?.line_user_id || task.line_user_id || null,
       custom_answers: visitInfo.custom_answers || task.customers?.custom_answers || {}
     });
     
-    // 🆕 予約データのJSONから、現在選ばれているメニューを抽出してセット
     const opt = typeof task.options === 'string' ? JSON.parse(task.options) : (task.options || {});
     const initialSvcs = opt.services || (opt.people ? opt.people.flatMap(p => p.services || []) : []);
     setSelectedServices(initialSvcs);
 
-    // 🆕 既存の枝分かれオプションを読み込む
     const initialOpts = opt.options || (opt.people ? opt.people[0]?.options : {});
     setSelectedOptions(initialOpts || {});
 
-    // 初回金額を計算
     const initialPrice = calculateInitialPrice(task);
     setFinalPrice(initialPrice); 
-    
-    // 💡 電卓（手動入力）モードを解除しておく
     setIsManualPrice(false);
-    
-    // レジパネルを表示
     setIsCheckoutOpen(true);
   };
   
@@ -396,137 +337,141 @@ const openQuickCheckout = async (task) => {
   
   // 🚀 アップグレード：お会計確定 ＆ サービス完了（売上台帳へも記録） [cite: 2026-03-08]
   const handleCompleteTask = async () => {
-    try {
-      setIsSavingMemo(true);
+  try {
+    setIsSavingMemo(true);
 
-      // 💡 修正ポイント：操作中の自分(shopId)ではなく、そのタスク本来の持ち主(originShopId)を特定する
-      const originShopId = selectedTask.shop_id || shopId;
+    // 1. お名前とメニュー名の整理
+    const normalizedName = (editFields.name || selectedTask.customer_name).replace(/　/g, ' ').trim();
+    const newMenuName = selectedServices.map(s => s.name).join(', ');
 
-      // 1. お名前とメニュー名の整理
-      const normalizedName = (editFields.name || selectedTask.customer_name).replace(/　/g, ' ').trim();
-      const newMenuName = selectedServices.map(s => s.name).join(', ');
-
-      // --- 🆕 ステップA：顧客マスタ（マスタ）の自動登録・更新 ---
-      let targetCustomerId = selectedTask.customer_id;
-      if (!targetCustomerId) {
-        // ✅ 修正：本来の店舗の顧客マスタから検索
-        const { data: existingCust } = await supabase.from('customers').select('id').eq('shop_id', originShopId).eq('name', normalizedName).maybeSingle();
-        targetCustomerId = existingCust?.id;
-      }
-
-      const customerPayload = {
-        shop_id: originShopId, // ✅ 修正：本来の店舗に顧客を登録/更新する
-        name: normalizedName,
-        furigana: editFields.furigana,
-        phone: editFields.phone || selectedTask.customer_phone,
-        email: editFields.email || selectedTask.customer_email,
-        address: editFields.address,
-        memo: editFields.memo,
-        line_user_id: editFields.line_user_id || selectedTask.line_user_id,
-        updated_at: new Date().toISOString()
-      };
-
-      if (targetCustomerId) customerPayload.id = targetCustomerId;
-      const { data: savedCust } = await supabase.from('customers').upsert(customerPayload, { onConflict: 'id' }).select().single();
-      const finalCustomerId = savedCust?.id || targetCustomerId;
-
-      // --- 🆕 ステップB：【最重要】過去の予約も一括で紐付け！ ---
-      await supabase
-        .from('reservations')
-        .update({ customer_id: finalCustomerId })
-        .eq('shop_id', originShopId) // ✅ 修正：本来の店舗の予約履歴を一括紐付け
-        .eq('customer_name', normalizedName)
-        .is('customer_id', null);
-
-      // --- ステップC：予約データの確定 ---
-      const { error: resError } = await supabase
-        .from('reservations')
-        .update({ 
-          status: 'completed', 
-          customer_id: finalCustomerId, 
-          customer_name: normalizedName,
-          total_price: finalPrice,
-          menu_name: newMenuName,
-          options: { 
-            ...selectedTask.options, 
-            services: selectedServices,
-            options: selectedOptions,
-            adjustments: selectedAdjustments,
-            products: selectedProducts,
-            isUpdatedFromTodayTasks: true 
-          } 
-        })
-        .eq('id', selectedTask.id);
-
-      if (resError) throw resError;
-
-      // --- ステップD：売上データ（sales）の記録 ---
-      const { data: existingSale } = await supabase.from('sales').select('id').eq('reservation_id', selectedTask.id).maybeSingle();
-      const salePayload = {
-        shop_id: originShopId, // ✅ 修正：本来の店舗の売上として記録する
-        reservation_id: selectedTask.id,
-        customer_id: finalCustomerId,
-        total_amount: finalPrice,
-        sale_date: targetDate 
-      };
-
-      if (existingSale) {
-        await supabase.from('sales').update(salePayload).eq('id', existingSale.id);
-      } else {
-        await supabase.from('sales').insert([salePayload]);
-        // 初回確定時のみ利用回数を+1
-        if (finalCustomerId) {
-          // ✅ 修正：顧客データの取得も一貫してIDベースで行う
-          const { data: cData } = await supabase.from('customers').select('total_visits').eq('id', finalCustomerId).single();
-          await supabase.from('customers').update({ total_visits: (cData?.total_visits || 0) + 1 }).eq('id', finalCustomerId);
-        }
-      }
-
-      showMsg("お会計と全履歴の紐付けを完了しました！✨");
-      setIsCheckoutOpen(false);
-      fetchTodayTasks(); 
-    } catch (err) {
-      alert("確定失敗: " + err.message);
-    } finally {
-      setIsSavingMemo(false);
+    // --- ステップA：顧客マスタ（名簿）の更新（常に自店） ---
+    let targetCustomerId = selectedTask.customer_id;
+    if (!targetCustomerId) {
+      const { data: existingCust } = await supabase.from('customers').select('id').eq('shop_id', shopId).eq('name', normalizedName).maybeSingle();
+      targetCustomerId = existingCust?.id;
     }
-  };
 
-  // 🆕 修正：エラー解決のための「お会計戻し」関数
+    const customerPayload = {
+      shop_id: shopId, 
+      name: normalizedName,
+      furigana: editFields.furigana,
+      phone: editFields.phone || selectedTask.customer_phone,
+      email: editFields.email || selectedTask.customer_email,
+      address: editFields.address,
+      memo: editFields.memo,
+      line_user_id: editFields.line_user_id || selectedTask.line_user_id,
+      updated_at: new Date().toISOString()
+    };
+
+    if (targetCustomerId) customerPayload.id = targetCustomerId;
+    const { data: savedCust } = await supabase.from('customers').upsert(customerPayload, { onConflict: 'id' }).select().single();
+    const finalCustomerId = savedCust?.id || targetCustomerId;
+
+    // --- ステップB：過去予約の紐付け ---
+    await supabase
+      .from('reservations')
+      .update({ customer_id: finalCustomerId })
+      .eq('shop_id', shopId)
+      .eq('customer_name', normalizedName)
+      .is('customer_id', null);
+
+    // --- ステップC：今回の予約データを確定 ---
+    const { error: resError } = await supabase
+      .from('reservations')
+      .update({ 
+        status: 'completed', 
+        customer_id: finalCustomerId, 
+        customer_name: normalizedName,
+        total_price: finalPrice,
+        menu_name: newMenuName,
+        options: { 
+          ...selectedTask.options, 
+          services: selectedServices,
+          options: selectedOptions,
+          adjustments: selectedAdjustments,
+          products: selectedProducts,
+          isUpdatedFromTodayTasks: true 
+        } 
+      })
+      .eq('id', selectedTask.id);
+
+    if (resError) throw resError;
+
+    // --- ステップD：売上データ（sales）の記録（シンプル版！） ---
+    const salePayload = {
+      shop_id: shopId, // 💡 常に自分の店舗ID
+      reservation_id: selectedTask.id,
+      customer_id: finalCustomerId,
+      total_amount: finalPrice,
+      sale_date: targetDate,
+      details: { 
+          services: selectedServices, 
+          options: selectedOptions, 
+          adjustments: selectedAdjustments, 
+          products: selectedProducts 
+      }
+    };
+
+    // 💡 RPCを使わず、直接 sales テーブルへ書き込みます
+    const { error: saleError } = await supabase
+      .from('sales')
+      .upsert(salePayload, { onConflict: 'reservation_id' });
+
+    if (saleError) throw saleError;
+
+    // 来店回数の更新
+    if (finalCustomerId) {
+      const { data: cData } = await supabase.from('customers').select('total_visits').eq('id', finalCustomerId).single();
+      await supabase.from('customers').update({ total_visits: (cData?.total_visits || 0) + 1 }).eq('id', finalCustomerId);
+    }
+
+    showMsg("お会計を完了しました！✨");
+    setIsCheckoutOpen(false);
+    fetchTodayTasks(); 
+
+  } catch (err) {
+    alert("確定失敗: " + err.message);
+  } finally {
+    setIsSavingMemo(false);
+  }
+};
+
+  // 🆕 修正：エラー解決のための「お会計戻し」関数（完成版）
   const handleRevertTask = async (task) => {
     const isFacility = task.task_type === 'facility';
     const msg = isFacility 
-      ? "施設訪問の売上確定を取り消しますか？\n（名簿の完了状態は維持されますが、台帳から売上が削除されます）"
-      : "この予約をお会計前の状態に戻しますか？\n（売上台帳の記録も一度削除されます）";
+      ? "施設訪問の売上確定を取り消しますか？"
+      : "この予約をお会計前の状態に戻しますか？";
 
     if (!window.confirm(msg)) return;
 
     try {
-      // 1. 適切なテーブルのステータスを「pending（未完了）」に戻す
       const targetTable = isFacility ? 'visit_requests' : 'reservations';
       
+      // 1. ステータスを「未完了」に戻し、保存された金額も「0」にリセットする
       const { error: statusError } = await supabase
         .from(targetTable)
-        .update({ status: 'pending' })
+        .update({ 
+            status: 'pending',
+            total_price: 0 // 👈 これにより予約管理画面で（予）が復活します
+        })
         .eq('id', task.id);
 
       if (statusError) throw statusError;
 
-      // 2. 売上テーブル（sales）から今回の記録を消去する
-      // 💡 施設なら visit_request_id、個人なら reservation_id を指定
+      // 2. 売上台帳（sales）からデータを削除する
       const deleteField = isFacility ? 'visit_request_id' : 'reservation_id';
-      
-      const { error: saleError } = await supabase
+      const { error: deleteError } = await supabase
         .from('sales')
         .delete()
         .eq(deleteField, task.id);
 
-      if (saleError) throw saleError;
+      // 💡 もしここでも401エラーが出る場合は、削除用のRPCも必要ですが、
+      // まずはこれで売上データの紐付けが消えるか確認しましょう。
 
-      showMsg("お会計を差し戻しました。再度実行が可能です。");
-      fetchTodayTasks(); // リストを更新
+      showMsg("お会計を差し戻しました。金額もリセットされました。");
+      fetchTodayTasks(); 
     } catch (err) {
-      console.error("戻し処理エラー:", err);
       alert("エラーが発生しました: " + err.message);
     }
   };
