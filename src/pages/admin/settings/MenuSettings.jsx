@@ -531,50 +531,47 @@ const handleProdCatSubmit = async (e) => {
         メニュー設定
       </h2>
 
-      {/* --- 🚀 🆕 ここから追加：予約フォームURL案内板 --- */}
-      <section style={{ ...cardStyle, background: '#f0f9ff', border: '1px solid #bae6fd', padding: '20px' }}>
-        <h3 style={{ marginTop: 0, fontSize: '0.9rem', color: '#0369a1', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '15px' }}>
+      {/* --- 🚀 🆕 予約フォームURL案内板（三土手さん仕様） --- */}
+      <section style={{ ...cardStyle, background: '#f0fdf4', border: '1px solid #bbf7d0', padding: '20px' }}>
+        <h3 style={{ marginTop: 0, fontSize: '0.9rem', color: '#166534', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '15px' }}>
           <Link2 size={18} /> 予約フォームURLのご案内
         </h3>
         
         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          {/* ① 通常の予約フォーム */}
-          <div style={{ background: '#fff', padding: '12px', borderRadius: '12px', border: '1px solid #e0f2fe' }}>
+          {/* ① 通常の予約フォーム（共通） */}
+          <div style={{ background: '#fff', padding: '12px', borderRadius: '12px', border: '1px solid #dcfce7' }}>
             <label style={{ fontSize: '0.7rem', color: '#64748b', fontWeight: 'bold', display: 'block', marginBottom: '4px' }}>全メニュー表示用（共通）</label>
             <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-              <code style={{ flex: 1, fontSize: '0.8rem', color: '#0369a1', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {`https://questhub.jp/shop/${shopId}/reserve`}
+              <code style={{ flex: 1, fontSize: '0.8rem', color: '#166534', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {`https://quest-hub-five.vercel.app/shop/${shopId}/reserve`}
               </code>
               <button 
-                onClick={() => copyToClipboard(`https://questhub.jp/shop/${shopId}/reserve`)}
-                style={{ padding: '6px 12px', background: '#0ea5e9', color: '#fff', border: 'none', borderRadius: '8px', fontSize: '0.75rem', fontWeight: 'bold', cursor: 'pointer' }}
+                onClick={() => copyToClipboard(`https://quest-hub-five.vercel.app/shop/${shopId}/reserve`)}
+                style={{ padding: '6px 12px', background: '#22c55e', color: '#fff', border: 'none', borderRadius: '8px', fontSize: '0.75rem', fontWeight: 'bold', cursor: 'pointer' }}
               >コピー</button>
             </div>
           </div>
 
-          {/* ② 識別キー（bizパラメータ）付URLの自動生成リスト */}
+          {/* ② 識別キー（typeパラメータ）付URLの自動生成リスト */}
           {Array.from(new Set(categories.map(c => c.url_key).filter(Boolean))).map(key => (
-            <div key={key} style={{ background: '#fff', padding: '12px', borderRadius: '12px', border: '1px solid #e0f2fe' }}>
+            <div key={key} style={{ background: '#fff', padding: '12px', borderRadius: '12px', border: '1px solid #dcfce7' }}>
               <label style={{ fontSize: '0.7rem', color: '#64748b', fontWeight: 'bold', display: 'block', marginBottom: '4px' }}>
                 事業専用：{categories.find(c => c.url_key === key)?.name || key}
               </label>
               <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-                <code style={{ flex: 1, fontSize: '0.8rem', color: '#0369a1', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {`https://questhub.jp/shop/${shopId}/reserve?biz=${key}`}
+                <code style={{ flex: 1, fontSize: '0.8rem', color: '#166534', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {`https://quest-hub-five.vercel.app/shop/${shopId}/reserve?type=${key}`}
                 </code>
                 <button 
-                  onClick={() => copyToClipboard(`https://questhub.jp/shop/${shopId}/reserve?biz=${key}`)}
-                  style={{ padding: '6px 12px', background: '#0ea5e9', color: '#fff', border: 'none', borderRadius: '8px', fontSize: '0.75rem', fontWeight: 'bold', cursor: 'pointer' }}
+                  onClick={() => copyToClipboard(`https://quest-hub-five.vercel.app/shop/${shopId}/reserve?type=${key}`)}
+                  style={{ padding: '6px 12px', background: '#22c55e', color: '#fff', border: 'none', borderRadius: '8px', fontSize: '0.75rem', fontWeight: 'bold', cursor: 'pointer' }}
                 >コピー</button>
               </div>
             </div>
           ))}
         </div>
-        <p style={{ fontSize: '0.65rem', color: '#0369a1', marginTop: '10px' }}>
-          ※識別キー（url用）が設定されているカテゴリを自動で集計しています。
-        </p>
       </section>
-      {/* --- 🚀 🆕 ここまで追加 --- */}
+      {/* --- 🚀 🆕 ここまで --- */}
 
       {/* ⚙️ 予約エンジンの基本 */}
       <section style={{ ...cardStyle, border: `2px solid ${themeColor}` }}>
