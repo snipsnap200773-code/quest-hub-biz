@@ -41,7 +41,6 @@ const MenuSettings = () => {
   const [editingCategoryId, setEditingCategoryId] = useState(null);
   const [editingDisableCatId, setEditingDisableCatId] = useState(null);
   const [isFacilityOnlyCat, setIsFacilityOnlyCat] = useState(false);
-  const [bizType, setBizType] = useState('all');
 
   // メニュー用State
   const [newServiceName, setNewServiceName] = useState('');
@@ -159,6 +158,11 @@ const fetchMenuDetails = async () => {
     if (prodRes.data) setProducts(prodRes.data);
 };
 const showMsg = (txt) => { setMessage(txt); setTimeout(() => setMessage(''), 3000); };
+// 🚀 🆕 URLをクリップボードにコピーする関数
+  const copyToClipboard = (text) => {
+    navigator.clipboard.writeText(text);
+    showMsg('URLをコピーしました！ 📋');
+  };
 
 /* ==========================================
       🆕 修正：フリーズしない「交換式」の並び替え関数 [cite: 2026-03-08]
@@ -235,12 +239,11 @@ const handleCategorySubmit = async (e) => {
     e.preventDefault();
     const payload = { 
       name: newCategoryName, 
-      url_key: newUrlKey, 
+      url_key: newUrlKey, // 👈 これが識別キー（例: yukado）として保存されます
       custom_shop_name: newCustomShopName,
       custom_description: newCustomDescription, 
       custom_official_url: newCustomOfficialUrl,
-      is_facility_only: isFacilityOnlyCat,
-      biz_type: bizType // 🆕 これを追加！
+      is_facility_only: isFacilityOnlyCat
     };
 
     if (editingCategoryId) {
@@ -528,6 +531,51 @@ const handleProdCatSubmit = async (e) => {
         メニュー設定
       </h2>
 
+      {/* --- 🚀 🆕 ここから追加：予約フォームURL案内板 --- */}
+      <section style={{ ...cardStyle, background: '#f0f9ff', border: '1px solid #bae6fd', padding: '20px' }}>
+        <h3 style={{ marginTop: 0, fontSize: '0.9rem', color: '#0369a1', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '15px' }}>
+          <Link2 size={18} /> 予約フォームURLのご案内
+        </h3>
+        
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          {/* ① 通常の予約フォーム */}
+          <div style={{ background: '#fff', padding: '12px', borderRadius: '12px', border: '1px solid #e0f2fe' }}>
+            <label style={{ fontSize: '0.7rem', color: '#64748b', fontWeight: 'bold', display: 'block', marginBottom: '4px' }}>全メニュー表示用（共通）</label>
+            <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+              <code style={{ flex: 1, fontSize: '0.8rem', color: '#0369a1', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {`https://questhub.jp/shop/${shopId}/reserve`}
+              </code>
+              <button 
+                onClick={() => copyToClipboard(`https://questhub.jp/shop/${shopId}/reserve`)}
+                style={{ padding: '6px 12px', background: '#0ea5e9', color: '#fff', border: 'none', borderRadius: '8px', fontSize: '0.75rem', fontWeight: 'bold', cursor: 'pointer' }}
+              >コピー</button>
+            </div>
+          </div>
+
+          {/* ② 識別キー（bizパラメータ）付URLの自動生成リスト */}
+          {Array.from(new Set(categories.map(c => c.url_key).filter(Boolean))).map(key => (
+            <div key={key} style={{ background: '#fff', padding: '12px', borderRadius: '12px', border: '1px solid #e0f2fe' }}>
+              <label style={{ fontSize: '0.7rem', color: '#64748b', fontWeight: 'bold', display: 'block', marginBottom: '4px' }}>
+                事業専用：{categories.find(c => c.url_key === key)?.name || key}
+              </label>
+              <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                <code style={{ flex: 1, fontSize: '0.8rem', color: '#0369a1', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {`https://questhub.jp/shop/${shopId}/reserve?biz=${key}`}
+                </code>
+                <button 
+                  onClick={() => copyToClipboard(`https://questhub.jp/shop/${shopId}/reserve?biz=${key}`)}
+                  style={{ padding: '6px 12px', background: '#0ea5e9', color: '#fff', border: 'none', borderRadius: '8px', fontSize: '0.75rem', fontWeight: 'bold', cursor: 'pointer' }}
+                >コピー</button>
+              </div>
+            </div>
+          ))}
+        </div>
+        <p style={{ fontSize: '0.65rem', color: '#0369a1', marginTop: '10px' }}>
+          ※識別キー（url用）が設定されているカテゴリを自動で集計しています。
+        </p>
+      </section>
+      {/* --- 🚀 🆕 ここまで追加 --- */}
+
       {/* ⚙️ 予約エンジンの基本 */}
       <section style={{ ...cardStyle, border: `2px solid ${themeColor}` }}>
         <h3 style={{ marginTop: 0, fontSize: '1rem', color: themeColor, display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '20px' }}>
@@ -582,20 +630,31 @@ const handleProdCatSubmit = async (e) => {
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
           {categories.map((c, idx) => (
-            <div key={c.id} style={{ background: '#f8fafc', padding: '16px', borderRadius: '16px', border: '1px solid #e5e7eb' }}>
+            <div key={c.id} style={{ background: '#f8fafc', padding: '16px', borderRadius: '16px', border: '1px solid #e5e7eb', marginBottom: '12px' }}>
+              
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 
-                {/* --- 🆕 ここにバッジ表示を追加 --- */}
+                {/* --- 🚀 汎用ラベル対応のバッジ表示（これだけで十分判別できます） --- */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <span style={{ fontWeight: 'bold', color: '#1e293b' }}>{c.name}</span>
+                  
+                  {/* display_group_id が 1 や 2 の場合、店舗主が設定した名前でバッジを出す */}
+                  {c.url_key && (
+  <span style={{ 
+    fontSize: '0.65rem', padding: '2px 8px', 
+    background: '#f1f5f9', color: '#64748b', 
+    borderRadius: '4px', fontWeight: 'bold',
+    border: '1px solid #cbd5e1'
+  }}>
+    🔑 {c.url_key}
+  </span>
+)}
+
                   {c.is_facility_only && (
-                    <span style={{ 
-                      fontSize: '0.6rem', padding: '2px 8px', background: '#0ea5e9', 
-                      color: '#fff', borderRadius: '4px', fontWeight: 'bold' 
-                    }}>施設専用</span>
+                    <span style={{ fontSize: '0.6rem', padding: '2px 8px', background: '#0ea5e9', color: '#fff', borderRadius: '4px', fontWeight: 'bold' }}>施設専用</span>
                   )}
                 </div>
-                {/* ---------------------------- */}
+                {/* ------------------------------------------ */}
 
                 <div style={{ display: 'flex', gap: '6px' }}>
                   <button onClick={() => moveItem('category', categories, c.id, 'up')} disabled={idx === 0} style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '4px' }}><ArrowUp size={16} /></button>
@@ -608,7 +667,7 @@ const handleProdCatSubmit = async (e) => {
                     setNewUrlKey(c.url_key || ''); 
                     setNewCustomShopName(c.custom_shop_name || '');
                     setIsFacilityOnlyCat(!!c.is_facility_only);
-                    setBizType(c.biz_type || 'all');
+                    setDisplayGroupId(c.display_group_id || 'all');
                   }} style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '4px', color: '#3b82f6' }}>
                     <Edit2 size={16} />
                   </button>
@@ -1328,5 +1387,16 @@ const handleProdCatSubmit = async (e) => {
     </div>
   );
 };
-
+const bizBtnStyle = (active, color) => ({
+  flex: 1,
+  padding: '10px',
+  borderRadius: '10px',
+  fontSize: '0.8rem',
+  fontWeight: 'bold',
+  cursor: 'pointer',
+  border: `2px solid ${active ? color : '#e2e8f0'}`,
+  background: active ? color : '#fff',
+  color: active ? '#fff' : '#64748b',
+  transition: '0.2s'
+});
 export default MenuSettings;
