@@ -266,8 +266,12 @@ const handleCategorySubmit = async (e) => {
       await supabase.from('service_categories').insert([{ ...payload, shop_id: shopId, sort_order: categories.length }]);
     }
     
-    // 🆕 リセット処理にフラグを追加
-    setEditingCategoryId(null); setNewCategoryName(''); setNewUrlKey(''); setNewCustomShopName(''); 
+    // 🆕 リセット処理
+    setEditingCategoryId(null); 
+    setNewCategoryName(''); 
+    setNewUrlKey(''); 
+    setNewCustomShopName(''); 
+    setNewCustomDescription(''); // 🚀 🆕 これを追記
     setIsFacilityOnlyCat(false); 
     fetchMenuDetails(); showMsg('カテゴリを更新しました');
   };
@@ -607,6 +611,15 @@ const handleProdCatSubmit = async (e) => {
             <input placeholder="専用屋号 (任意)" value={newCustomShopName} onChange={(e) => setNewCustomShopName(e.target.value)} style={{ ...inputStyle, flex: 1 }} />
 </div>
 
+          {/* 🚀 🆕 ここから追加：専用説明文の入力欄 */}
+          <textarea 
+            placeholder="専用サブタイトル・説明文 (任意)" 
+            value={newCustomDescription} 
+            onChange={(e) => setNewCustomDescription(e.target.value)} 
+            style={{ ...inputStyle, minHeight: '60px', resize: 'vertical' }} 
+          />
+          {/* 🆕 ここまで */}
+
 {/* 🆕 カテゴリ単位の施設専用スイッチを追加 */}
 <div style={{ padding: '12px', background: isFacilityOnlyCat ? '#f0f9ff' : '#f8fafc', borderRadius: '12px', border: isFacilityOnlyCat ? '2px solid #0ea5e9' : '1px solid #e2e8f0', display: 'flex', alignItems: 'center', gap: '10px' }}>
   <input 
@@ -663,8 +676,8 @@ const handleProdCatSubmit = async (e) => {
                     setNewCategoryName(c.name); 
                     setNewUrlKey(c.url_key || ''); 
                     setNewCustomShopName(c.custom_shop_name || '');
+                    setNewCustomDescription(c.custom_description || '');
                     setIsFacilityOnlyCat(!!c.is_facility_only);
-                    setDisplayGroupId(c.display_group_id || 'all');
                   }} style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '4px', color: '#3b82f6' }}>
                     <Edit2 size={16} />
                   </button>

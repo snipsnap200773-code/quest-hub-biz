@@ -249,12 +249,15 @@ const isPC = windowWidth > 1024;
 // 🆕 location.search を追加することで、予約完了後にURLが変わった瞬間に再取得が走るようにします
   useEffect(() => { fetchData(); }, [shopId, startDate, location.search]);
 
+  // ✅ ツイン・カレンダー対応版 fetchData
   const fetchData = async () => {
     setLoading(true);
+    // 1. 自分の店舗プロフィールを取得
     const { data: profile } = await supabase.from('profiles').select('*').eq('id', shopId).single();
     if (!profile) { setLoading(false); return; }
     setShop(profile);
 
+    // ✅ スタッフ一覧を取得（何人いるか判定するため）
     const { data: staffsData } = await supabase
       .from('staffs')
       .select('*')
@@ -262,24 +265,64 @@ const isPC = windowWidth > 1024;
       .order('sort_order', { ascending: true });
     setStaffs(staffsData || []);
 
-    // 💡 修正：自分の shopId だけをシンプルに取得
-    const { data: resData } = await supabase
-      .from('reservations')
-      .select('*, staffs(name), customers(*)') 
-      .eq('shop_id', shopId); // 👈 .in ではなく .eq に変更
+    // 2. スケジュール共有設定（schedule_sync_id）を確認
+    let targetShopIds = [shopId];
+    if (profile.schedule_sync_id) {
+      const { data: siblingShops } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('schedule_sync_id', profile.schedule_sync_id);
+      if (siblingShops) {
+        targetShopIds = siblingShops.map(s => s.id);
+      }
+    }
 
-    const { data: privData } = await supabase.from('private_tasks').select('*').eq('shop_id', shopId);
-    const { data: connData } = await supabase.from('shop_facility_connections').select('*, facility_users(facility_name)').eq('shop_id', shopId).eq('status', 'active');
+// 3. 全関連店舗の予約データを合算して取得（顧客マスタの最新名も取得）
+// 1. 予約データの取得
+const { data: resData } = await supabase
+  .from('reservations')
+  .select('*, profiles(business_name), staffs(name), customers(*)')
+  .in('shop_id', targetShopIds);
+
+// 2. 🆕 プライベート予定の取得
+    const { data: privData } = await supabase
+      .from('private_tasks')
+      .select('*')
+      .eq('shop_id', shopId);
+
+    // 🆕 【ここを追加！】提携施設と定期ルールを取得
+    const { data: connData } = await supabase
+      .from('shop_facility_connections')
+      .select('*, facility_users(facility_name)')
+      .eq('shop_id', shopId)
+      .eq('status', 'active');
     setFacilityConnections(connData || []);
 
-    const { data: visitData } = await supabase.from('visit_requests').select('*, facility_users(facility_name), visit_request_residents(count)').eq('shop_id', shopId).neq('status', 'canceled');
-    const { data: mData } = await supabase.from('keep_dates').select('*, facility_users(facility_name)').eq('shop_id', shopId);
-    const { data: exclData } = await supabase.from('regular_keep_exclusions').select('excluded_date').eq('shop_id', shopId);
+    // 3. 🆕 施設訪問依頼の取得
+    const { data: visitData } = await supabase
+      .from('visit_requests')
+      .select('*, facility_users(facility_name), visit_request_residents(count)')
+      .eq('shop_id', shopId)
+      // ✅ .neq('status', 'completed') を削除することで、完了分もカレンダーに表示されます
+      .neq('status', 'canceled');
+
+    // 🆕 【重要：ここがエラーの場所でした】
+    // 変数名を mData に統一して定義し、正しく State にセットします
+    const { data: mData } = await supabase
+      .from('keep_dates')
+      .select('*, facility_users(facility_name)')
+      .eq('shop_id', shopId);
+
+    // 🆕 定期訪問の除外リストも取得
+    const { data: exclData } = await supabase
+      .from('regular_keep_exclusions')
+      .select('excluded_date')
+      .eq('shop_id', shopId);
 
     setReservations(resData || []);
     setPrivateTasks(privData || []);
     setVisitRequests(visitData || []);
-    setManualKeeps(mData || []);
+    setManualKeeps(mData || []); // 💡 manualKeepData ではなく mData を使う
     setExclusions(exclData?.map(e => e.excluded_date) || []);
     setLoading(false);
   };
@@ -343,38 +386,53 @@ setEditFields({
 
 // 🆕 修正後：名寄せスカウター搭載版
 const openDetail = async (res) => {
-    // 💡 自分の店であることが確定しているので、即座に開始
-    setSelectedRes(res);
-    let cust = null;
+  if (res.shop_id && res.shop_id !== shopId) {
+    alert(`こちらは他店舗...`);
+    return;
+  }
+  setSelectedRes(res);
 
-    if (res.customer_id) {
-      const { data: matched } = await supabase.from('customers').select('*').eq('id', res.customer_id).maybeSingle();
+  let cust = null;
+
+  // 🆕 修正ポイント：まず、予約データに紐付いている顧客IDがあるか確認
+  if (res.customer_id) {
+    const { data: matched } = await supabase
+      .from('customers')
+      .select('*')
+      .eq('id', res.customer_id)
+      .maybeSingle();
+    cust = matched;
+  }
+
+  // もしIDでヒットしなかった場合のみ、電話・メールでスカウターを回す
+  if (!cust) {
+    const orConditions = [];
+    if (res.customer_phone && res.customer_phone !== '---') orConditions.push(`phone.eq.${res.customer_phone}`);
+    if (res.customer_email) orConditions.push(`email.eq.${res.customer_email}`);
+
+    if (orConditions.length > 0) {
+      const { data: matched } = await supabase
+        .from('customers')
+        .select('*')
+        .eq('shop_id', shopId)
+        .or(orConditions.join(','))
+        .maybeSingle();
       cust = matched;
     }
+  }
 
-    if (!cust) {
-      const orConditions = [];
-      if (res.customer_phone && res.customer_phone !== '---') orConditions.push(`phone.eq.${res.customer_phone}`);
-      if (res.customer_email) orConditions.push(`email.eq.${res.customer_email}`);
-
-      if (orConditions.length > 0) {
-        const { data: matched } = await supabase
-          .from('customers')
-          .select('*')
-          .eq('shop_id', shopId) // 👈 シンプルに shopId で固定
-          .or(orConditions.join(','))
-          .maybeSingle();
-        cust = matched;
-      }
-    }
-
-    if (cust && cust.id !== res.customer_id) {
-      setMergeCandidate(cust);
-      setShowMergeConfirm(true);
+  // 以降の統合チェックロジックへ...
+  if (cust) {
+    if (cust.id === res.customer_id) {
+      finalizeOpenDetail(res, cust);
       return;
     }
-    finalizeOpenDetail(res, cust);
-  };
+    setMergeCandidate(cust);
+    setShowMergeConfirm(true);
+    return;
+  }
+  finalizeOpenDetail(res, cust);
+};
   // 🆕 共通処理：詳細モーダルを表示するための確定処理
   const finalizeOpenDetail = (res, cust) => {
     // 💡 予約時に入力された詳細データ（住所やカスタム質問回答など）を取得
@@ -410,7 +468,7 @@ const openDetail = async (res) => {
 
     const history = reservations
       .filter(r => 
-        // 🚀 shop_id の条件を削除することで、グループ全店舗の履歴が表示されます
+        r.shop_id === shopId && 
         r.res_type === 'normal' && 
         (r.customer_name === res.customer_name || (cust?.id && r.customer_id === cust.id))
       )
@@ -617,26 +675,29 @@ const openDetail = async (res) => {
     if (isBlock) msg = 'このブロックを解除して予約を「可能」に戻しますか？';
     
     if (window.confirm(msg)) {
-      const targetTable = (selectedRes?.res_type === 'private_task') ? 'private_tasks' : 'reservations';
-      
+      // ✅ 🆕 修正：テーブルを使い分ける
+      const targetTable = isPrivate ? 'private_tasks' : 'reservations';
       const { error: deleteError } = await supabase.from(targetTable).delete().eq('id', id);
+
       if (deleteError) { alert('削除に失敗しました: ' + deleteError.message); return; }
 
-      if (selectedRes.res_type === 'normal') {
+      // 予約（normal）の場合のみ、顧客マスタの来店回数を減らすロジック（既存）
+      if (!isPrivate && selectedRes.res_type === 'normal') {
         const { customer_name } = selectedRes;
-        const { count } = await supabase.from('reservations')
-          .select('*', { count: 'exact', head: true })
-          .eq('shop_id', shopId) // 👈 自分の shopId を使う
-          .eq('customer_name', customer_name);
-
+        const { count } = await supabase.from('reservations').select('*', { count: 'exact', head: true }).eq('shop_id', shopId).eq('customer_name', customer_name);
         if (count === 0) {
           await supabase.from('customers').delete().eq('shop_id', shopId).eq('name', customer_name);
+        } else {
+          const { data: cust } = await supabase.from('customers').select('id, total_visits').eq('shop_id', shopId).eq('name', customer_name).maybeSingle();
+          if (cust) {
+            await supabase.from('customers').update({ total_visits: Math.max(0, (cust.total_visits || 1) - 1) }).eq('id', cust.id);
+          }
         }
       }
       
       setShowDetailModal(false); 
-      fetchData(); 
-      showMsg("削除しました");
+      fetchData(); // 再読み込み
+      showMsg(isPrivate ? "予定を削除しました" : "予約を削除しました");
     }
   };
   
@@ -1692,41 +1753,27 @@ return (
                   <h4 style={{ margin: '0 0 10px 0', fontSize: '0.9rem', color: '#64748b' }}>🕒 来店履歴 ＆ 予定</h4>
                   <div style={{ height: isPC ? '420px' : '250px', overflowY: 'auto', border: '1px solid #f1f5f9', borderRadius: '15px', background: '#f8fafc', padding: '5px' }}>
                     {customerHistory.map((h, idx) => {
-  const hDate = new Date(h.start_time);
-  const isToday = hDate.toLocaleDateString('sv-SE') === new Date().toLocaleDateString('sv-SE');
-  
+                      const hDate = new Date(h.start_time);
+                      const isToday = hDate.toLocaleDateString('sv-SE') === new Date().toLocaleDateString('sv-SE');
+                      return (
+                        <div key={h.id} style={{ padding: '15px', borderBottom: '1px solid #eee', background: '#fff', borderRadius: isToday ? '12px' : '0', border: isToday ? `2px solid ${themeColor}` : 'none' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '5px' }}>
+                            <span style={{ fontWeight: 'bold' }}>{hDate.toLocaleDateString('ja-JP')}</span>
+                            {(() => {
+  // 実績(total_price)があればそれを使い、なければ予定額を計算する
+  const displayPrice = h.total_price > 0 ? h.total_price : parseReservationDetails(h).totalPrice;
   return (
-    <div 
-      key={h.id} 
-      style={{ 
-        padding: '15px', 
-        borderBottom: '1px solid #eee', 
-        background: '#fff', 
-        borderRadius: isToday ? '12px' : '0', 
-        border: isToday ? `2px solid ${themeColor}` : 'none' 
-      }}
-    >
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '5px', alignItems: 'center' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <span style={{ fontWeight: 'bold' }}>{hDate.toLocaleDateString('ja-JP')}</span>
-          
-        </div>
-
-        {(() => {
-          // 実績(total_price)があればそれを使い、なければ予定額を計算する
-          const displayPrice = h.total_price > 0 ? h.total_price : parseReservationDetails(h).totalPrice;
-          return (
-            <span style={{ color: '#e11d48', fontWeight: 'bold' }}>
-              ¥{displayPrice.toLocaleString()}
-              {h.total_price === 0 && <small style={{fontSize:'0.6rem', marginLeft:'2px'}}>(予)</small>}
-            </span>
-          );
-        })()}
-      </div>
-      <div style={{ color: '#475569', fontSize: '0.8rem' }}>{h.menu_name}</div>
-    </div>
+    <span style={{ color: '#e11d48', fontWeight: 'bold' }}>
+      ¥{displayPrice.toLocaleString()}
+      {h.total_price === 0 && <small style={{fontSize:'0.6rem', marginLeft:'2px'}}>(予)</small>}
+    </span>
   );
-})}
+})()}
+                          </div>
+                          <div style={{ color: '#475569', fontSize: '0.8rem' }}>{h.menu_name}</div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               </div>
