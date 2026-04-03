@@ -136,6 +136,7 @@ const FormCustomizer = () => {
   const [message, setMessage] = useState('');
   const [themeColor, setThemeColor] = useState('#2563eb');
   const [customFields, setCustomFields] = useState([]);
+  const [brandCategories, setBrandCategories] = useState([]);
 
   const [formConfig, setFormConfig] = useState({
     name: { enabled: true, line_enabled: true, label: "お名前", required: true },
@@ -169,11 +170,20 @@ const FormCustomizer = () => {
       setThemeColor(data.theme_color || '#2563eb');
 if (data.form_config) {
         const { custom_questions, ...restConfig } = data.form_config;
-        // restConfig が空や null の場合に備え、既存の prev をベースに上書きします
         setFormConfig(prev => ({ ...prev, ...(restConfig || {}) }));
         setCustomFields(custom_questions || []);
       }
-        }
+
+      // 🚀 🆕 追加：識別キー(url_key)が設定されているカテゴリを取得
+      const { data: catData } = await supabase
+        .from('service_categories')
+        .select('name, url_key, custom_shop_name')
+        .eq('shop_id', shopId)
+        .neq('url_key', '') // 👈 空文字を除外
+        .not('url_key', 'is', null); // 👈 nullを除外
+      
+      if (catData) setBrandCategories(catData);
+    }
   };
 
   // 🚀 🆕 URLコピー用のStateとロジック
@@ -267,49 +277,51 @@ const toggleField = (key, type = 'normal') => {
         </select>
       </div>
 
-      {/* 🚀 🆕 お問い合わせフォームURLセクション */}
+      {/* 🚀 🆕 お問い合わせフォームURLセクション（拡張版） */}
       <div style={{ ...cardStyle, border: `1px solid ${themeColor}30`, background: `${themeColor}05`, marginBottom: '30px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
           <h3 style={{ fontSize: '1rem', color: themeColor, margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <MessageSquare size={18} /> お問い合わせフォームURL
+            <MessageSquare size={18} /> お問い合わせURLの発行・コピー
           </h3>
-          <a href={inquiryUrl} target="_blank" rel="noreferrer" style={{ fontSize: '0.75rem', color: themeColor, textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '4px', fontWeight: 'bold' }}>
-            実際の画面を確認 <ExternalLink size={14} />
-          </a>
         </div>
         
-        <p style={{ fontSize: '0.75rem', color: '#64748b', marginBottom: '10px' }}>
-          このURLを店舗のホームページやSNSのプロフィール欄に貼り付けて利用してください。
+        <p style={{ fontSize: '0.75rem', color: '#64748b', marginBottom: '15px', lineHeight: '1.5' }}>
+          SNSのプロフィール等に貼り付けて利用してください。<br/>
+          屋号別のURLを使うと、メールに自動で屋号名が記載されます。
         </p>
 
-        <div style={{ display: 'flex', gap: '8px' }}>
-          <input 
-            readOnly 
-            value={inquiryUrl} 
-            style={{ flex: 1, padding: '12px', borderRadius: '10px', border: '1px solid #cbd5e1', fontSize: '0.85rem', background: '#fff', color: '#64748b', outline: 'none' }} 
-          />
-          <button 
-            onClick={handleCopyLink}
-            style={{ 
-              padding: '0 20px', 
-              background: copied ? '#10b981' : themeColor, 
-              color: '#fff', 
-              border: 'none', 
-              borderRadius: '10px', 
-              fontWeight: 'bold', 
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              transition: 'all 0.2s',
-              minWidth: '100px',
-              justifyContent: 'center'
-            }}
-          >
-            {copied ? <CheckCircle2 size={18} /> : <Copy size={18} />}
-            {copied ? '完了' : 'コピー'}
-          </button>
+        {/* 1. 店舗全体のURL */}
+        <div style={{ marginBottom: '20px' }}>
+          <label style={{ fontSize: '0.7rem', fontWeight: 'bold', color: themeColor, display: 'block', marginBottom: '5px' }}>基本（店舗全体）</label>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <input readOnly value={inquiryUrl} style={{ flex: 1, padding: '10px', borderRadius: '10px', border: '1px solid #cbd5e1', fontSize: '0.8rem', background: '#fff' }} />
+            <button onClick={() => { navigator.clipboard.writeText(inquiryUrl); showMsg('コピーしました！'); }} style={copyBtnStyle(themeColor)}>コピー</button>
+          </div>
         </div>
+
+        {/* 2. 屋号別のURLリスト（ある場合のみ表示） */}
+        {brandCategories.length > 0 && (
+          <div style={{ borderTop: '1px dashed #cbd5e1', paddingTop: '15px' }}>
+            <label style={{ fontSize: '0.7rem', fontWeight: 'bold', color: '#475569', display: 'block', marginBottom: '10px' }}>屋号別（専用フォーム）</label>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              {brandCategories.map((cat, index) => {
+                const brandUrl = `${inquiryUrl}?type=${cat.url_key}`;
+                return (
+                  <div key={`${cat.url_key}-${index}`} style={{ display: 'flex', alignItems: 'center', gap: '8px', background: '#fff', padding: '8px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
+                    <div style={{ flex: 1, paddingLeft: '5px' }}>
+                      <div style={{ fontSize: '0.75rem', fontWeight: 'bold', color: '#1e293b' }}>{cat.custom_shop_name || cat.name}</div>
+                      <div style={{ fontSize: '0.65rem', color: '#94a3b8', wordBreak: 'break-all' }}>{brandUrl}</div>
+                    </div>
+                    <button 
+                      onClick={() => { navigator.clipboard.writeText(brandUrl); showMsg(`${cat.custom_shop_name || cat.name}のURLをコピーしました！`); }} 
+                      style={{ ...copyBtnStyle(themeColor), padding: '6px 12px', fontSize: '0.7rem' }}
+                    >コピー</button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
 
       <h3 style={{ fontSize: '1rem', color: '#64748b', marginBottom: '15px', paddingLeft: '10px' }}>▼ 基本情報</h3>
@@ -352,4 +364,15 @@ const toggleField = (key, type = 'normal') => {
   );
 };
 
+const copyBtnStyle = (color) => ({
+  padding: '10px 20px',
+  background: color,
+  color: '#fff',
+  border: 'none',
+  borderRadius: '8px',
+  fontWeight: 'bold',
+  cursor: 'pointer',
+  fontSize: '0.85rem',
+  transition: 'opacity 0.2s'
+});
 export default FormCustomizer;

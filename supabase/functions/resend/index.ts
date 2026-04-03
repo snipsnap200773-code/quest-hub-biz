@@ -433,12 +433,13 @@ if (type === 'facility_booking') {
 // 🆕 【ここまで追加】
 
 // ==========================================
-// 🚀 🆕 【修正版】パターンJ：お問い合わせ通知（スイッチ連動）
+// 🚀 🆕 【バトン対応版】パターンJ：お問い合わせ通知
 // ==========================================
 if (type === 'inquiry') {
   const { 
     shopId, 
     name, 
+    shopName: reqShopName, // 🚀 🆕 追加：フロントから届いた屋号
     email: customerEmail, 
     phone: customerPhone, 
     content, 
@@ -450,34 +451,28 @@ if (type === 'inquiry') {
   const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY');
   const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-  // 1. 店舗の設定（form_config）を取得
+  // 1. 店舗の設定（profile）を取得
   const { data: profile } = await supabaseAdmin.from('profiles').select('*').eq('id', shopId).single();
   if (!profile) throw new Error('店舗情報が見つかりません');
+
+  // 🚀 🆕 重要：題名や送信者に使う名前を決定（届いた屋号があれば最優先、なければ店舗名）
+  const displayShopName = reqShopName || profile.business_name;
 
   const config = profile.form_config || {};
 
   // --- 🚀 🆕 スイッチ(inquiry_enabled)の状態をチェックして項目を作る ---
-  
-  // A. メール用のHTML行
   let fieldsHtml = `<p style="margin: 0 0 10px 0;"><b>■ お名前:</b> ${name} 様</p>`;
-  if (config.email?.inquiry_enabled && customerEmail) {
-    fieldsHtml += `<p style="margin: 0 0 10px 0;"><b>■ メール:</b> ${customerEmail}</p>`;
-  }
-  if (config.phone?.inquiry_enabled && customerPhone) {
-    fieldsHtml += `<p style="margin: 0 0 10px 0;"><b>■ 電話番号:</b> ${customerPhone}</p>`;
-  }
+  if (config.email?.inquiry_enabled && customerEmail) fieldsHtml += `<p style="margin: 0 0 10px 0;"><b>■ メール:</b> ${customerEmail}</p>`;
+  if (config.phone?.inquiry_enabled && customerPhone) fieldsHtml += `<p style="margin: 0 0 10px 0;"><b>■ 電話番号:</b> ${customerPhone}</p>`;
 
-  // B. LINE用のテキスト
   let lineFieldsText = `👤 客: ${name} 様`;
   if (config.email?.inquiry_enabled && customerEmail) lineFieldsText += `\n✉️ メ: ${customerEmail}`;
   if (config.phone?.inquiry_enabled && customerPhone) lineFieldsText += `\n📞 呼: ${customerPhone}`;
 
-  // 2. カスタム質問の回答をテキスト化（ここもスイッチをチェック）
   let customAnswersText = "";
   if (custom_answers && Object.keys(custom_answers).length > 0) {
     customAnswersText = Object.entries(custom_answers)
       .filter(([qid]) => {
-        // 基本項目を除外し、かつ「問合せスイッチ」がONの質問だけを残す
         const q = config.custom_questions?.find((item: any) => item.id === qid);
         return q && q.inquiry_enabled === true;
       })
@@ -488,11 +483,12 @@ if (type === 'inquiry') {
   }
 
   // --- ✉️ 店舗様への通知（メール） ---
-  const shopSubject = `【要確認】${name} 様より新しいお問い合わせが届きました`;
+  // 🚀 🆕 件名に決定した屋号（フットケアラボ等）を入れる
+  const shopSubject = `【${displayShopName}】新着お問い合わせ（${name} 様）`;
   const shopHtml = `
     <div style="font-family: sans-serif; color: #333; line-height: 1.6; max-width: 550px; margin: 0 auto; border: 1px solid #eee; padding: 25px; border-radius: 12px; border-top: 8px solid #4f46e5;">
       <h2 style="color: #4f46e5; margin-top: 0;">📩 新しいお問い合わせ</h2>
-      <p><strong>${profile.business_name} 様</strong></p>
+      <p><strong>${displayShopName} 様</strong></p>
       
       <div style="background: #f8fafc; padding: 20px; border-radius: 10px; margin: 20px 0; border: 1px solid #e2e8f0;">
         ${fieldsHtml}
@@ -509,7 +505,7 @@ if (type === 'inquiry') {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${RESEND_API_KEY}` },
     body: JSON.stringify({
-      from: 'QUEST HUB 通知センター <infec@snipsnap.biz>',
+      from: `${displayShopName} 通知 <infec@snipsnap.biz>`, // 🚀 送信者名を屋号に
       to: [profile.email_contact || profile.email],
       subject: shopSubject,
       html: shopHtml
@@ -522,9 +518,10 @@ if (type === 'inquiry') {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${RESEND_API_KEY}` },
       body: JSON.stringify({
-        from: `${profile.business_name} <infec@snipsnap.biz>`,
+        // 🚀 🆕 送信者名と題名を屋号に書き換え
+        from: `${displayShopName} <infec@snipsnap.biz>`,
         to: [customerEmail],
-        subject: `【送信完了】${profile.business_name} へのお問い合わせ`,
+        subject: `【送信完了】${displayShopName} へのお問い合わせ`,
         html: `<div style="font-family: sans-serif; padding: 25px;">
                 <p>${name} 様</p>
                 <p>お問い合わせを承りました。内容を確認次第、ご連絡いたします。</p>
@@ -537,7 +534,7 @@ if (type === 'inquiry') {
 
   // --- 💬 店舗様へのLINE通知 ---
   if (profile.line_admin_user_id && profile.line_channel_access_token) {
-    const lineMsg = `【お問い合わせ】\n${lineFieldsText}\n\n内容：\n${content}\n${customAnswersText ? `\nその他：\n${customAnswersText}` : ''}\n\nhttps://quest-hub-five.vercel.app/admin/${shopId}/dashboard`;
+    const lineMsg = `【${displayShopName}】\n${lineFieldsText}\n\n内容：\n${content}\n${customAnswersText ? `\nその他：\n${customAnswersText}` : ''}\n\nhttps://quest-hub-five.vercel.app/admin/${shopId}/dashboard`;
     await safePushToLine(profile.line_admin_user_id, lineMsg, profile.line_channel_access_token, "INQUIRY_OWNER");
   }
 
