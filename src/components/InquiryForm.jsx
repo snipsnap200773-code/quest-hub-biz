@@ -10,6 +10,7 @@ const InquiryForm = ({ shopId: propsShopId, themeColor: propsThemeColor }) => {
   const [formData, setFormData] = useState({});
   const [standardFields, setStandardFields] = useState({});
   const [customQuestions, setCustomQuestions] = useState([]);
+  const [displayShopName, setDisplayShopName] = useState('');
   const [themeColor, setThemeColor] = useState(propsThemeColor || '#2563eb');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
@@ -21,12 +22,32 @@ const InquiryForm = ({ shopId: propsShopId, themeColor: propsThemeColor }) => {
       setLoading(true);
       const { data, error } = await supabase
         .from('profiles')
-        .select('theme_color, form_config')
+        .select('theme_color, form_config, business_name') // 🆕 business_nameも取得
         .eq('id', shopId)
         .single();
 
       if (!error && data) {
         setThemeColor(data.theme_color || '#2563eb');
+
+        // 🚀 🆕 屋号の判定リレー開始
+        const params = new URLSearchParams(window.location.search);
+        const bizType = params.get('type');
+        let finalName = data.business_name; // 初期値はメイン店舗名
+
+        if (bizType) {
+          // URLにtypeがあれば、対応するカテゴリの「専用屋号」を探しに行く
+          const { data: catData } = await supabase
+            .from('service_categories')
+            .select('custom_shop_name')
+            .eq('shop_id', shopId)
+            .eq('url_key', bizType)
+            .maybeSingle();
+          
+          if (catData?.custom_shop_name) {
+            finalName = catData.custom_shop_name;
+          }
+        }
+        setDisplayShopName(finalName); // 特定した名前を保存
         if (data.form_config) {
           const { custom_questions, ...rest } = data.form_config;
           setStandardFields(rest || {});
@@ -65,7 +86,13 @@ const InquiryForm = ({ shopId: propsShopId, themeColor: propsThemeColor }) => {
       if (dbError) throw dbError;
 
       const { error: funcError } = await supabase.functions.invoke('resend', {
-        body: { type: 'inquiry', shopId, ...formData }
+        body: { 
+          type: 'inquiry', 
+          shopId, 
+          // 🚀 🆕 ここを追加！ Edge Function（Resend）側でこの名前が使われます
+          shopName: displayShopName, 
+          ...formData 
+        }
       });
       if (funcError) throw funcError;
 

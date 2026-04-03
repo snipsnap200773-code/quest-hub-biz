@@ -1069,11 +1069,18 @@ return (
 {/* --- 1段目：タイトルと設定 --- */}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', marginBottom: '10px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <div style={{ width: '32px', height: '32px', background: themeColor, borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 'bold', fontSize: '0.9rem' }}>S</div>
-              <h1 style={{ fontSize: '1.1rem', fontWeight: '900', margin: 0, color: '#1e293b' }}>SnipSnap Admin</h1>
+              {/* 💡 左側のアイコン内の文字も、店舗名の1文字目に自動で変わるようにしました */}
+              <div style={{ width: '32px', height: '32px', background: themeColor, borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 'bold', fontSize: '0.9rem' }}>
+                {(shop?.business_name || 'S')[0]}
+              </div>
+              
+              {/* 🚀 🆕 ここを店舗名に変更 */}
+              <h1 style={{ fontSize: '1.1rem', fontWeight: '900', margin: 0, color: '#1e293b' }}>
+                {shop?.business_name || 'SnipSnap Admin'}
+              </h1>
             </div>
             <button 
-              onClick={() => navigate(`/admin/${shopId}/dashboard`)} 
+              onClick={() => navigate(`/admin/${shopId}/dashboard`)}
               style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', cursor: 'pointer', fontSize: '1.1rem', padding: '6px', display: 'flex', alignItems: 'center', color: '#64748b' }}
             >
               ⚙️
