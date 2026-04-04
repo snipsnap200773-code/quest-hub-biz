@@ -7,6 +7,9 @@ import {
   Layers, Link2, AlertCircle, CheckCircle2, ShoppingBag // 🆕 ShoppingBagを追加
 } from 'lucide-react';
 
+// 🆕 共通ヘルプパーツを読み込み
+import HelpTooltip from '../../../components/ui/HelpTooltip';
+
 const MenuSettings = () => {
   const { shopId } = useParams();
   const navigate = useNavigate();
@@ -584,7 +587,10 @@ const handleProdCatSubmit = async (e) => {
           <Settings2 size={20} /> 予約エンジンの基本設定
         </h3>
         <div style={{ marginBottom: '20px' }}>
-          <label style={{ fontWeight: 'bold', display: 'block', marginBottom: '10px', fontSize: '0.85rem', color: '#334155' }}>1コマの単位（推奨：30分）</label>
+          <label style={{ fontWeight: 'bold', display: 'flex', alignItems: 'center', marginBottom: '10px', fontSize: '0.85rem', color: '#334155' }}>
+  1コマの単位（推奨：30分）
+  <HelpTooltip themeColor={themeColor} text="予約時間の最小単位です。すべてのメニューはこの「コマ数」を掛け合わせて時間を計算します。" />
+</label>
           <div style={{ display: 'flex', gap: '8px' }}>
             {[10, 15, 20, 30].map(min => (
               <button key={min} onClick={() => setSlotIntervalMin(min)} style={btnActiveS(slotIntervalMin, min)}>{min}分</button>
@@ -593,7 +599,10 @@ const handleProdCatSubmit = async (e) => {
         </div>
         <label style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer', marginBottom: '20px' }}>
           <input type="checkbox" checked={allowMultiple} onChange={(e) => setAllowMultiple(e.target.checked)} style={{ width: '22px', height: '22px' }} />
-          <span style={{ fontSize: '0.95rem', fontWeight: 'bold', color: '#334155' }}>複数のカテゴリ選択を許可する</span>
+          <div style={{ display: 'flex', alignItems: 'center' }}>
+  <span style={{ fontSize: '0.95rem', fontWeight: 'bold', color: '#334155' }}>複数のカテゴリ選択を許可する</span>
+  <HelpTooltip themeColor={themeColor} text="お客様が「カット」と「カラー」など、異なるカテゴリのメニューを一度に複数選べるようにします。" />
+</div>
         </label>
         <button onClick={handleSave} style={{ width: '100%', padding: '16px', background: themeColor, color: 'white', border: 'none', borderRadius: '12px', fontWeight: 'bold', fontSize: '1rem', boxShadow: `0 4px 12px ${themeColor}33`, cursor: 'pointer' }}>
           <Save size={20} style={{ verticalAlign: 'middle', marginRight: '8px' }} /> 基本設定を保存
@@ -607,11 +616,20 @@ const handleProdCatSubmit = async (e) => {
         </h3>
         <form onSubmit={handleCategorySubmit} style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '24px' }}>
           <input placeholder="カテゴリ名 (例: カット, カラー)" value={newCategoryName || ''} onChange={(e) => setNewCategoryName(e.target.value)} style={inputStyle} required />
-          <div style={{ display: 'flex', gap: '10px' }}>
-            <input placeholder="識別キー (url用)" value={newUrlKey} onChange={(e) => setNewUrlKey(e.target.value)} style={{ ...inputStyle, flex: 1 }} />
-            <input placeholder="専用屋号 (任意)" value={newCustomShopName} onChange={(e) => setNewCustomShopName(e.target.value)} style={{ ...inputStyle, flex: 1 }} />
+<div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '5px' }}>
+  <div style={{ flex: 1, display: 'flex', alignItems: 'center' }}>
+    <span style={{ fontSize: '0.7rem', color: '#64748b' }}>識別キー</span>
+    <HelpTooltip themeColor={themeColor} text="英数字を入力すると、このカテゴリ専用の予約URLを作成できます（例：hair）。" />
+  </div>
+  <div style={{ flex: 1, display: 'flex', alignItems: 'center' }}>
+    <span style={{ fontSize: '0.7rem', color: '#64748b' }}>専用屋号</span>
+    <HelpTooltip themeColor={themeColor} text="このカテゴリの予約画面だけ、別の店名を表示したい場合に入力します。" />
+  </div>
 </div>
-
+<div style={{ display: 'flex', gap: '10px' }}>
+  <input placeholder="例: yukado" value={newUrlKey} onChange={(e) => setNewUrlKey(e.target.value)} style={{ ...inputStyle, flex: 1 }} />
+  <input placeholder="例: 訪問カット 結美" value={newCustomShopName} onChange={(e) => setNewCustomShopName(e.target.value)} style={{ ...inputStyle, flex: 1 }} />
+</div>
           {/* 🚀 🆕 ここから追加：専用説明文の入力欄 */}
           <textarea 
             placeholder="専用サブタイトル・説明文 (任意)" 
@@ -629,9 +647,12 @@ const handleProdCatSubmit = async (e) => {
     onChange={(e) => setIsFacilityOnlyCat(e.target.checked)} 
     style={{ width: '18px', height: '18px', cursor: 'pointer' }}
   />
+  <div style={{ display: 'flex', alignItems: 'center' }}>
   <span style={{ fontSize: '0.85rem', fontWeight: 'bold', color: isFacilityOnlyCat ? '#0369a1' : '#64748b' }}>
     このカテゴリを【施設予約専用】にする
   </span>
+  <HelpTooltip themeColor={themeColor} text="介護施設専用のメニューです" />
+</div>
 </div>
 
 <button type="submit" style={{ width: '100%', padding: '14px', background: '#1e293b', color: 'white', border: 'none', borderRadius: '12px', fontWeight: 'bold', cursor: 'pointer' }}>
@@ -839,9 +860,12 @@ const handleProdCatSubmit = async (e) => {
                 style={{ width: '18px', height: '18px' }} 
               />
               <div>
-                <span style={{ fontSize: '0.85rem', fontWeight: 'bold', color: isFullDay ? '#c2410c' : '#334155' }}>
-                  このメニューで1日（許可時間内）を貸切にする
-                </span>
+                <div style={{ display: 'flex', alignItems: 'center' }}>
+  <span style={{ fontSize: '0.85rem', fontWeight: 'bold', color: isFullDay ? '#c2410c' : '#334155' }}>
+    このメニューで1日（許可時間内）を貸切にする
+  </span>
+  <HelpTooltip themeColor={themeColor} text="1件でも予約が入ればその日の全スロットを自動で埋め、他のお客様が予約できないようにします。" />
+</div>
                 <p style={{ margin: '4px 0 0', fontSize: '0.7rem', color: '#64748b' }}>
                   ※予約が入った際、設定された受付時間内の全スロットを自動で埋めます。
                 </p>
@@ -885,9 +909,12 @@ const handleProdCatSubmit = async (e) => {
                 style={{ width: '18px', height: '18px' }} 
               />
               <div>
-                <span style={{ fontSize: '0.85rem', fontWeight: 'bold', color: isSalesExcluded ? '#ef4444' : '#334155' }}>
-                  【売上対象外】カレンダーのみ表示し、レジには出さない
-                </span>
+                <div style={{ display: 'flex', alignItems: 'center' }}>
+  <span style={{ fontSize: '0.85rem', fontWeight: 'bold', color: isSalesExcluded ? '#ef4444' : '#334155' }}>
+    【売上対象外】カレンダーのみ表示し、レジには出さない
+  </span>
+  <HelpTooltip themeColor={themeColor} text="無料の相談会や現地調査など、カレンダーに予定は入れたいがお会計は発生しないメニューに使用します。" />
+</div>
                 <p style={{ margin: '4px 0 0', fontSize: '0.7rem', color: '#64748b' }}>
                   ※見積りや現地調査など、お会計が発生しないメニューにチェックしてください。
                 </p>
@@ -911,9 +938,12 @@ const handleProdCatSubmit = async (e) => {
                 style={{ width: '18px', height: '18px' }}
               />
               <div>
-                <span style={{ fontSize: '0.85rem', fontWeight: 'bold', color: showOnPrint ? '#92400e' : '#334155' }}>
-                  【掲示用】施設に貼る名簿に「希望メニュー」として載せる
-                </span>
+                <div style={{ display: 'flex', alignItems: 'center' }}>
+  <span style={{ fontSize: '0.85rem', fontWeight: 'bold', color: showOnPrint ? '#92400e' : '#334155' }}>
+    【掲示用】施設に貼る名簿に「希望メニュー」として載せる
+  </span>
+  <HelpTooltip themeColor={themeColor} text="施設側で印刷して壁に貼る「アナログな予約名簿」に、選択肢としてこのメニューを載せます。" />
+</div>
                 <p style={{ margin: '4px 0 0', fontSize: '0.7rem', color: '#64748b' }}>
                   ※ONにすると、施設側で印刷する「あつまれ綺麗にしたい人」名簿に選択肢として表示されます。
                 </p>
@@ -922,10 +952,10 @@ const handleProdCatSubmit = async (e) => {
           </div>
 
           <div style={{ marginBottom: '20px' }}>
-            <label style={{ fontSize: '0.85rem', fontWeight: 'bold', display: 'block', marginBottom: '10px', color: '#64748b' }}>
-              
-              必要コマ数: <span style={{ color: themeColor, fontSize: '1.1rem' }}>{newServiceSlots}コマ（{newServiceSlots * slotIntervalMin}分）</span>
-            </label>
+            <label style={{ fontSize: '0.85rem', fontWeight: 'bold', display: 'flex', alignItems: 'center', marginBottom: '10px', color: '#64748b' }}>
+  <span>必要コマ数: <span style={{ color: themeColor, fontSize: '1.1rem' }}>{newServiceSlots}コマ（{newServiceSlots * slotIntervalMin}分）</span></span>
+  <HelpTooltip themeColor={themeColor} text="このメニューを完了するのに必要な時間をコマ数で指定してください。" />
+</label>
             <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
               {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(n => (
                 <button key={n} type="button" onClick={() => setNewServiceSlots(n)} style={{ width: '45px', height: '45px', borderRadius: '12px', border: '2px solid', borderColor: newServiceSlots === n ? themeColor : '#e2e8f0', background: newServiceSlots === n ? themeColor : 'white', color: newServiceSlots === n ? 'white' : '#1e293b', fontWeight: 'bold', cursor: 'pointer', transition: '0.2s' }}>{n}</button>

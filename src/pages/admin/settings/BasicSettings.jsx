@@ -12,6 +12,11 @@ import {
   User, Phone, Mail, Globe, Info, AlertCircle 
 } from 'lucide-react';
 
+// 🆕 作成したHelpTooltipを読み込む（同じ階層に作った場合）
+import HelpTooltip from '../../../components/ui/HelpTooltip';
+
+
+
 const BasicSettings = () => {
   const { shopId } = useParams();
   const navigate = useNavigate();
@@ -214,7 +219,10 @@ const handleSave = async () => {
         </h3>
         
         {/* --- 🖼️ 店舗画像セクション --- */}
-        <label style={{ ...labelStyle, display: 'block' }}>店舗画像（推奨 1:1）</label>
+        <label style={{ ...labelStyle, display: 'flex', alignItems: 'center' }}>
+  店舗画像（推奨 1:1）
+  <HelpTooltip themeColor={themeColor} text="予約サイトのトップに大きく表示される看板写真です。正方形（1:1）の画像が最も綺麗に表示されます。" />
+</label>
         <div style={{ marginBottom: '24px', padding: '24px', background: '#f8fafc', borderRadius: '20px', border: '2px dashed #cbd5e1', textAlign: 'center' }}>
           {imageUrl ? (
             <img 
@@ -270,7 +278,10 @@ const handleSave = async () => {
 {/* --- 業種選択セクション（二段構え） --- */}
         <div style={{ marginBottom: '20px', padding: '15px', background: '#f8fafc', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
           <div style={{ marginBottom: '10px' }}>
-            <label style={labelStyle}>大カテゴリ（業種）</label>
+            <label style={{ ...labelStyle, display: 'flex', alignItems: 'center' }}>
+  大カテゴリ（業種）
+  <HelpTooltip themeColor={themeColor} text="お店のメインの業種を選択してください。これにより、予約フォームの初期項目やポータルサイトでの表示が最適化されます。" />
+</label>
             <select 
               value={businessType} 
               onChange={(e) => {
@@ -331,7 +342,10 @@ const handleSave = async () => {
           </p>
 
           <div style={{ marginBottom: '15px' }}>
-            <label style={labelStyle}>出発・帰還の拠点住所</label>
+            <label style={{ ...labelStyle, display: 'flex', alignItems: 'center' }}>
+  出発・帰還の拠点住所
+  <HelpTooltip themeColor={themeColor} text="出張・訪問サービスを行う際の「出発地点」です。自宅や事務所の住所を入力してください。店舗と同じ場所なら同じ住所でOKです。" />
+</label>
             <input 
               value={baseAddress} 
               onChange={(e) => setBaseAddress(e.target.value)} 
@@ -341,7 +355,10 @@ const handleSave = async () => {
           </div>
 
           <div>
-            <label style={labelStyle}>移動スピード目安</label>
+            <label style={{ ...labelStyle, display: 'flex', alignItems: 'center' }}>
+  移動スピード目安
+  <HelpTooltip themeColor={themeColor} text="1km移動するのにかかる「分」を入力します（例：車なら3分、自転車なら5分）。これにより、移動時間を含めた予約枠の自動調整が行われます。" />
+</label>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
               <span style={{ fontSize: '0.85rem' }}>1km あたり</span>
               <input 
@@ -370,7 +387,10 @@ const handleSave = async () => {
         </div>
         
         {/* サブタイトル (プレビュー付き) */}
-        <label style={labelStyle}>サブタイトル (予約画面に表示されます)</label>
+        <label style={{ ...labelStyle, display: 'flex', alignItems: 'center' }}>
+  サブタイトル (予約画面に表示されます)
+  <HelpTooltip themeColor={themeColor} text="店名の下に表示される短いキャッチコピーです。「/」を入力した場所で、実際の画面では改行されます。" />
+</label>
         <input value={description} onChange={(e) => setDescription(e.target.value)} style={{ ...inputStyle, marginBottom: '8px' }} placeholder="スラッシュ(/)で改行できます" />
 <div style={{ marginBottom: '24px', padding: '16px', background: '#f8fafc', borderRadius: '12px', border: `1px solid ${themeColor}22` }}>
           <div style={{ fontSize: '0.85rem', fontWeight: 'bold', color: themeColor, lineHeight: '1.6' }}>

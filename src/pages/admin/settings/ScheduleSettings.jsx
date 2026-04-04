@@ -5,6 +5,9 @@ import {
   Clock, Calendar, Save, Zap, ArrowLeft, Sparkles, Plus, Trash2 // ✅ Plus と Trash2 を追加
 } from 'lucide-react';
 
+// 🆕 共通ヘルプパーツを読み込み
+import HelpTooltip from '../../../components/ui/HelpTooltip';
+
 const ScheduleSettings = () => {
   const { shopId } = useParams();
   const navigate = useNavigate();
@@ -178,19 +181,25 @@ const fetchScheduleData = async () => {
 
         {/* ✅ 追加：全曜日にコピーするボタン */}
         <button 
-          onClick={() => {
-            if(window.confirm('月曜日の設定を全曜日にコピーしますか？')){
-              const mon = businessHours['mon'];
-              const newH = {};
-              ['mon','tue','wed','thu','fri','sat','sun'].forEach(d => newH[d] = {...mon});
-              setBusinessHours(newH);
-              showMsg('全曜日にコピーしました！');
-            }
-          }}
-          style={{ background: '#f8fafc', border: '1px solid #cbd5e1', padding: '10px 15px', borderRadius: '30px', fontSize: '0.8rem', fontWeight: 'bold', color: '#475569', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' }}
-        >
-          <Sparkles size={16} /> 全曜日にコピー
-        </button>
+  onClick={() => {
+    if(window.confirm('月曜日の設定を全曜日にコピーしますか？')){
+      const mon = businessHours['mon'];
+      const newH = {};
+      ['mon','tue','wed','thu','fri','sat','sun'].forEach(d => newH[d] = {...mon});
+      setBusinessHours(newH);
+      showMsg('全曜日にコピーしました！');
+    }
+  }}
+  style={{ background: '#f8fafc', border: '1px solid #cbd5e1', padding: '10px 15px', borderRadius: '30px', fontSize: '0.8rem', fontWeight: 'bold', color: '#475569', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' }}
+>
+  <Sparkles size={16} /> 
+  <span>全曜日にコピー</span>
+  <HelpTooltip 
+  themeColor={themeColor} 
+  showDown={true}  // 👈 ここに showDown を追加
+  text="「月曜日」に設定した内容を全曜日に一括反映させます。" 
+/>
+</button>
         <button 
           // 🚀 🆕 案内人機能を一旦停止（リンク解除 ＆ 無効化）
           disabled={true} 
@@ -253,9 +262,10 @@ const fetchScheduleData = async () => {
         
         {/* --- 🆕 同時予約の受け入れ上限 --- */}
         <div style={{ marginBottom: '25px' }}>
-          <label style={{ fontWeight: 'bold', display: 'block', marginBottom: '10px', fontSize: '0.85rem', color: '#334155' }}>
-            同時予約の受け入れ上限（キャパシティ）
-          </label>
+          <label style={{ fontWeight: 'bold', display: 'flex', alignItems: 'center', marginBottom: '10px', fontSize: '0.85rem', color: '#334155' }}>
+  同時予約の受け入れ上限（キャパシティ）
+  <HelpTooltip themeColor={themeColor} showDown={true} text="同じ時間帯に、最大で何組（何名）まで予約を受け付けるかを設定します。一人で運営している場合は「1名」を選択してください。" />
+</label>
           <select 
             value={maxCapacity} 
             onChange={(e) => handleCapacityChange(e.target.value)} // ✅ 🆕 専用ハンドラーに変更
@@ -276,7 +286,10 @@ const fetchScheduleData = async () => {
         <div style={{ marginBottom: '25px', padding: '15px', background: '#f8fafc', borderRadius: '16px', border: '1px solid #e2e8f0' }}>
           <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }}>
             <div>
-              <b style={{ fontSize: '0.9rem', color: '#334155', display: 'block' }}>複数名（最大3名）の同時予約</b>
+              <div style={{ display: 'flex', alignItems: 'center' }}>
+  <b style={{ fontSize: '0.9rem', color: '#334155' }}>複数名（最大3名）の同時予約</b>
+  <HelpTooltip themeColor={themeColor} text="お客様が予約フォームで「追加でもう一人予約する」ボタンを使えるようにします。ご家族や友人同士の予約を許可する場合にONにします。" />
+</div>
               <span style={{ fontSize: '0.7rem', color: '#64748b' }}>予約フォームの「追加でもう一人」ボタンの表示設定</span>
             </div>
             <div 
@@ -298,7 +311,10 @@ const fetchScheduleData = async () => {
         </div>
 
         <div style={{ marginBottom: '20px' }}>
-          <label style={{ fontWeight: 'bold', display: 'block', marginBottom: '10px', fontSize: '0.85rem', color: '#334155' }}>インターバル（準備時間）</label>
+          <label style={{ fontWeight: 'bold', display: 'flex', alignItems: 'center', marginBottom: '10px', fontSize: '0.85rem', color: '#334155' }}>
+  インターバル（準備時間）
+  <HelpTooltip themeColor={themeColor} text="予約と予約の間に必要な、片付けや準備の時間です。この時間は予約フォーム上で「空き時間」として表示されなくなります。" />
+</label>
           <select value={bufferPreparationMin} onChange={(e) => setBufferPreparationMin(parseInt(e.target.value))} style={selectStyle}>
             <option value={0}>なし</option>
             {[10, 15, 20, 30].map(m => <option key={m} value={m}>{m}分</option>)}
@@ -306,7 +322,10 @@ const fetchScheduleData = async () => {
         </div>
 
         <div style={{ marginBottom: '20px' }}>
-          <label style={{ fontWeight: 'bold', display: 'block', marginBottom: '10px', fontSize: '0.85rem', color: '#334155' }}>直近の予約制限（何時間前まで受付可能か）</label>
+          <label style={{ fontWeight: 'bold', display: 'flex', alignItems: 'center', marginBottom: '10px', fontSize: '0.85rem', color: '#334155' }}>
+  直近の予約制限（何時間前まで受付可能か）
+  <HelpTooltip themeColor={themeColor} text="「今から1時間後の予約」といった直前すぎる予約を防ぎます。例えば「24時間」に設定すると、当日の予約受付をストップできます。" />
+</label>
           <select value={minLeadTimeHours} onChange={(e) => setMinLeadTimeHours(parseInt(e.target.value))} style={selectStyle}>
             <option value={0}>当日OK</option>
             <option value={24}>当日NG</option>
@@ -335,7 +354,10 @@ const fetchScheduleData = async () => {
             onChange={(e) => setAutoFillLogic(e.target.checked)} 
             style={{ width: '20px', height: '20px' }} 
           />
-          <b style={{ fontSize: '0.9rem', color: '#334155' }}>自動詰め機能を有効にする</b>
+          <div style={{ display: 'flex', alignItems: 'center' }}>
+  <b style={{ fontSize: '0.9rem', color: '#334155' }}>自動詰め機能を有効にする</b>
+  <HelpTooltip themeColor={themeColor} text="予約枠の前後に不自然な空き時間ができないよう、効率よく予約を埋めるロジックを適用します。死に時間を無くし、稼働率を最大化したい場合に有効です。" />
+</div>
         </label>
 
         <label 
@@ -356,9 +378,12 @@ const fetchScheduleData = async () => {
             onChange={(e) => setIsStrictFillMode(e.target.checked)} 
             style={{ width: '20px', height: '20px' }} 
           />
-          <b style={{ fontSize: '0.9rem', color: '#1e293b' }}>
-            <span style={{ color: '#ef4444' }}>⚡️</span> 前詰め予約を強制する
-          </b>
+          <div style={{ display: 'flex', alignItems: 'center' }}>
+  <b style={{ fontSize: '0.9rem', color: '#1e293b' }}>
+    <span style={{ color: '#ef4444' }}>⚡️</span> 前詰め予約を強制する
+  </b>
+  <HelpTooltip themeColor={themeColor} text="予約時間の飛び石（歯抜け）を防ぎます。お客様は、既にある予約の「直前」か「直後」の時間しか選べなくなるため、効率よく予約を埋められます。" />
+</div>
         </label>
         <p style={{ fontSize: '0.65rem', color: '#64748b', marginTop: '6px', marginLeft: '32px', lineHeight: '1.4' }}>
           ※常に「最も早い空き時間」からしか予約を取れないように制限します。<br />
@@ -384,9 +409,12 @@ const fetchScheduleData = async () => {
             onChange={(e) => setUseTravelTimeLogic(e.target.checked)} 
             style={{ width: '20px', height: '20px' }} 
           />
-          <b style={{ fontSize: '0.9rem', color: '#1e293b' }}>
-            🚗 訪問時の移動時間を自動計算する
-          </b>
+          <div style={{ display: 'flex', alignItems: 'center' }}>
+  <b style={{ fontSize: '0.9rem', color: '#1e293b' }}>
+    🚗 訪問時の移動時間を自動計算する
+  </b>
+  <HelpTooltip themeColor={themeColor} text="お客様の住所から移動時間を計算し、その分を予約枠から自動で差し引きます。基本設定の「移動スピード目安」に基づいて計算されます。" />
+</div>
         </label>
         <p style={{ fontSize: '0.65rem', color: '#64748b', marginTop: '4px', marginLeft: '32px' }}>
           ※ONの場合、業種が「訪問・出張」であれば自動的に移動バッファを確保します。
@@ -404,8 +432,10 @@ const fetchScheduleData = async () => {
       {/* ✅ 🆕 ここから「長期休暇セクション」を挿入 */}
       <section style={{ ...cardStyle, border: `2px solid ${themeColor}` }}>
         <h3 style={{ marginTop: 0, fontSize: '1.1rem', color: themeColor, display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '20px' }}>
-          <Sparkles size={22} /> 長期休暇（夏休み・正月休みなど）
-        </h3>
+  <Sparkles size={22} /> 
+  <span>長期休暇（夏休み・正月休みなど）</span>
+  <HelpTooltip themeColor={themeColor} showDown={true} text="夏休みや年末年始など、特定の期間をまるごと「予約不可」としてブロックします。設定した期間は予約フォームのカレンダーで選択できなくなります。" />
+</h3>
         
         <div style={{ background: '#f8fafc', padding: '20px', borderRadius: '16px', marginBottom: '20px' }}>
           <label style={{ fontSize: '0.8rem', fontWeight: 'bold', color: '#64748b', display: 'block', marginBottom: '8px' }}>休暇名（例：夏休み）</label>

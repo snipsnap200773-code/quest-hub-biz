@@ -120,8 +120,11 @@ const [showSlotListModal, setShowSlotListModal] = useState(false);
 const [privateTasks, setPrivateTasks] = useState([]);
 const [showPrivateModal, setShowPrivateModal] = useState(false);
 const [privateTaskFields, setPrivateTaskFields] = useState({ title: '', note: '' });
+  // --- ✨ 修正後：現在時刻保持用のStateを追加 ---
   const [selectedSlotReservations, setSelectedSlotReservations] = useState([]);
   const [customerHistory, setCustomerHistory] = useState([]);
+  // 🚀 🆕 追加：現在時刻を管理するState
+  const [now, setNow] = useState(new Date());
   const [windowWidth, setWindowWidth] = useState(window.innerWidth);
   const [searchTerm, setSearchTerm] = useState('');
   const [viewMonth, setViewMonth] = useState(new Date(startDate)); 
@@ -223,10 +226,10 @@ const [editFields, setEditFields] = useState({
   const [selectedIndex, setSelectedIndex] = useState(-1);
   const scrollContainerRef = useRef(null);
 
+  // --- ✨ 修正後：1分ごとに時間を更新するタイマーをセット ---
   useEffect(() => {
-    const handleResize = () => setWindowWidth(window.innerWidth);
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
+    const timer = setInterval(() => setNow(new Date()), 60000); // 1分ごとに更新
+    return () => clearInterval(timer);
   }, []);
 
 const isPC = windowWidth > 1024;
@@ -1054,6 +1057,24 @@ const insertData = {
     return parts[0];
   };
 
+  // 🚀 🆕 ここに追加：現在地の赤い線の位置（高さ・列）を計算するロジック
+  // 🚀 🆕 「今の時間枠」かどうかを判定する関数
+  const applyCurrentTimeMarker = (dateStr, slotTime) => {
+    const today = new Date();
+    // 1. 今日かどうかチェック
+    if (getJapanDateStr(today) !== dateStr) return false;
+
+    // 2. このスロットの時間内（例：11:00 〜 11:30）に現在時刻があるか
+    const [h, m] = slotTime.split(':').map(Number);
+    const slotStartMin = h * 60 + m;
+    const interval = shop?.slot_interval_min || 30;
+    const slotEndMin = slotStartMin + interval;
+
+    const nowMin = today.getHours() * 60 + today.getMinutes();
+
+    return nowMin >= slotStartMin && nowMin < slotEndMin;
+  };
+
 return (
     <div style={{ display: 'flex', width: '100vw', height: '100dvh', background: '#fff', overflow: 'hidden', position: 'fixed', inset: 0 }}>
       {/* 🆕 追記：通知メッセージを表示するボックス [cite: 2026-03-08] */}
@@ -1228,6 +1249,7 @@ return (
       style={{ flex: 1, width: '100%', overflowY: 'auto', overflowX: isPC ? 'auto' : 'hidden', cursor: 'grab', touchAction: 'pan-y' }}
       whileTap={{ cursor: 'grabbing' }}
     >
+
       <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed', minWidth: isPC ? '900px' : '100%' }}>
         <thead style={{ position: 'sticky', top: 0, zIndex: 10, background: '#fff' }}>
           <tr>
@@ -1353,7 +1375,14 @@ return (
                       borderBottom: '0.1px solid #cbd5e1', 
                       position: 'relative', 
                       cursor: 'pointer', 
-                      background: isStandardTime ? '#fff' : '#fffff3'
+                      background: isStandardTime ? '#fff' : '#fffff3',
+                      
+                      // 🚀 🆕 ここを追加：今の時間枠の左側だけ赤く太くする
+                      ...(applyCurrentTimeMarker(dStr, time) && {
+                        borderLeft: '4px solid #ef4444',
+                        // 💡 赤い棒が枠線に隠れないように zIndex を指定
+                        zIndex: 10 
+                      })
                     }}
                   >
                     {hasRes && !isSystemBlocked && (

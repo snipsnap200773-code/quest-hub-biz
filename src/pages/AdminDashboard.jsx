@@ -179,7 +179,7 @@ const AdminDashboard = () => {
 
         {/* スタッフ管理 */}
         <NavCard 
-          title="スタッフ管理" desc="担当者の登録・カラー設定・表示順" icon={<Users size={28} />} color="#f43f5e"
+          title="スタッフ管理" desc="担当者の登録" icon={<Users size={28} />} color="#f43f5e"
           to={`/admin/${shopId}/settings/staff`}
           cardStyle={cardStyle} iconBoxStyle={iconBoxStyle} 
         />
