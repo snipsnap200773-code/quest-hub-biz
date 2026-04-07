@@ -69,12 +69,13 @@ const [isModalOpen, setIsModalOpen] = useState(false);
   // 🆕 1. 【部品】ポータルデータを読み込む関数（最優先で実行される）
   const fetchPortalData = async () => {
     try {
-      // ✅ 🆕 修正：プラン2（フルプラン）の店舗だけをポータルに表示する
+      // ✅ 🆕 修正：プラン2（フルプラン）かつ「店舗(shop)」だけを表示する
       const shopRes = await supabase
         .from('profiles')
         .select('*')
         .eq('is_suspended', false)
-        .eq('service_plan', 2) // 👈 ここを追加！
+        .eq('service_plan', 2)
+        .eq('role', 'shop') // 🚀 ここを追記！これで管理者がリストから消えます
         .not('business_name', 'is', null);
 
       if (shopRes.data) {
