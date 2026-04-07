@@ -17,7 +17,6 @@ import {
 
 function SuperAdmin() {
     const [isAuthorized, setIsAuthorized] = useState(false);
-  const [inputPass, setInputPass] = useState('');
 
   const MASTER_PASSWORD = import.meta.env.VITE_SUPER_MASTER_PASSWORD; 
   const DELETE_PASSWORD = import.meta.env.VITE_SUPER_DELETE_PASSWORD;
@@ -74,11 +73,17 @@ function SuperAdmin() {
   const [newNewsCat, setNewNewsCat] = useState('お知らせ');
   const [newNewsTitle, setNewNewsTitle] = useState('');
 
-  useEffect(() => {
-    const handleResize = () => setWindowWidth(window.innerWidth);
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, []);
+  useEffect(() => { 
+  // 🚀 修正：バトン（auth_super）を持っているかチェック
+  if (sessionStorage.getItem('auth_super') === 'true') {
+    setIsAuthorized(true);
+    fetchAllData();
+  } else {
+    // バトンがなければログイン画面へ追い返す
+    const navigate = useNavigate(); // ※関数の外で定義が必要
+    navigate('/');
+  }
+}, []);
 
   const isMobile = windowWidth < 1024;
 
@@ -136,73 +141,63 @@ function SuperAdmin() {
     ledgerPlan: createdShops.filter(s => s.service_plan === 1).length
   }), [createdShops]);
 
-  // ✅ 🆕 修正：店舗作成 + ウェルカムメール送信の統合
+// 🚀 修正後：店舗アカウント発行（全自動版）
   const createNewShop = async () => {
-    if (!newShopName || !newShopKana || !newOwnerName || !newEmail) return alert('必須項目を入力してください（メールアドレスも必須です）');
+    if (!newShopName || !newShopKana || !newOwnerName || !newEmail) {
+      return alert('必須項目を入力してください（メールアドレスも必須です）');
+    }
     
     setIsProcessing(true);
-    const newPass = Math.random().toString(36).slice(-8);
 
-// 1. データベースに登録
-    const { data, error } = await supabase.from('profiles').insert([{ 
-      id: crypto.randomUUID(), 
-      business_name: newShopName, 
-      business_name_kana: newShopKana, 
-      owner_name: newOwnerName, 
-      owner_name_kana: newOwnerNameKana, 
-      business_type: newBusinessType, 
-      sub_business_type: newSubBusinessType,
-      email_contact: newEmail, 
-      phone: newPhone,
-      admin_password: newPass, 
-      notify_line_enabled: true, 
-      // 🆕 ここを変更：最初から管理機能を「ON」、プランを「フル開放(2)」に設定
-      is_management_enabled: true, 
-      service_plan: 2 
-    }]).select();
-
-    if (error) {
-      alert('作成に失敗しました: ' + error.message);
-      setIsProcessing(false);
-      return;
-    }
-
-    const createdShop = data[0];
-
-    // 2. 🆕 通知エンジン（index.ts）へウェルカムメール送信を依頼
     try {
-      await fetch(EDGE_FUNCTION_URL, {
+      // 🚀 Edge Function（通知エンジン）に「Auth作成 + DB登録 + メール」を全部丸投げ
+      const CORRECT_URL = "https://rdpupixaqckhkpgjqcnb.supabase.co/functions/v1/resend";
+
+      const response = await fetch(CORRECT_URL, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          // 🚀 2. 確実に .env から取得できているか確認しつつ送信
+          'Authorization': `Bearer ${supabase.supabaseKey}`, 
+          'apikey': supabase.supabaseKey
+        },
         body: JSON.stringify({
-          type: 'welcome',
-          shopId: createdShop.id,
+          type: 'CREATE_SHOP_FULL',
           shopName: newShopName,
-          owner_email: newEmail,
+          shopNameKana: newShopKana,
           ownerName: newOwnerName,
-          password: newPass,
-          dashboard_url: `${window.location.origin}/admin/${createdShop.id}/dashboard`,
-          reservations_url: `${window.location.origin}/admin/${createdShop.id}/reservations`,
-          reserve_url: `${window.location.origin}/shop/${createdShop.id}/reserve`,
+          ownerNameKana: newOwnerNameKana,
+          email: newEmail,
           phone: newPhone,
-          businessType: newBusinessType
+          businessType: newBusinessType,
+          subBusinessType: newSubBusinessType,
+          originUrl: window.location.origin
         })
       });
-    } catch (err) {
-      console.error("Welcome Email Error:", err);
-      // メール送信に失敗しても店舗作成は成功しているので続行
-    }
 
-    alert(`「${newShopName}」作成完了！\n店主様へログイン情報を送信しました。\nPW: ${newPass}`);
-    
-// フォームリセット
-    setNewShopName(''); setNewShopKana(''); setNewOwnerName(''); setNewOwnerNameKana('');
-    setNewEmail(''); setNewPhone('');    setIsProcessing(false);
-    fetchCreatedShops();
-    setActiveTab('list');
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'サーバー側での発行に失敗しました');
+      }
+
+      alert(`「${newShopName}」の発行が完了しました！\nAuthアカウント作成、DB登録、ウェルカムメール送信が完了しました。`);
+      
+      // フォームリセット
+      setNewShopName(''); setNewShopKana(''); setNewOwnerName(''); setNewOwnerNameKana('');
+      setNewEmail(''); setNewPhone('');
+      
+      fetchCreatedShops(); // リストを更新
+      setActiveTab('list');
+
+    } catch (err) {
+      console.error("Creation Error:", err);
+      alert('エラーが発生しました: ' + err.message);
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
-  // --- 🆕 施設（Hub）を新規発行するロジック ---
+  // 🚀 修正後：施設（Hub）を新規発行するロジック（しっかり残しました！）
   const createNewFacility = async () => {
     if (!newFacilityName || !newFacilityLoginId || !newFacilityPass) return alert('全項目入力してください');
     
@@ -217,13 +212,12 @@ function SuperAdmin() {
     if (!error) {
       alert(`施設「${newFacilityName}」を発行しました！`);
       setNewFacilityName(''); setNewFacilityLoginId(''); setNewFacilityPass('');
-      fetchFacilities(); // リストを更新
+      fetchFacilities(); 
     } else {
       alert('エラー: ' + error.message);
     }
     setIsProcessing(false);
   };
-
   // --- 🆕 施設情報を更新するロジック ---
   const updateFacilityInfo = async (id) => {
     const { error } = await supabase
@@ -348,17 +342,8 @@ const updateShopInfo = async (id) => {
     alert('コピーしました');
   };
 
-  if (!isAuthorized) {
-    return (
-      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', backgroundColor: '#f0f2f5' }}>
-        <form onSubmit={handleLogin} style={{ background: '#fff', padding: '30px', borderRadius: '20px', textAlign: 'center', width: '300px', boxShadow: '0 10px 25px rgba(0,0,0,0.1)' }}>
-          <h2 style={{ color: '#e60012', marginBottom: '20px', fontWeight: '900' }}>ソロプレ Admin</h2>
-          <input type="password" value={inputPass} onChange={(e) => setInputPass(e.target.value)} placeholder="PW" style={smallInput} autoFocus />
-          <button type="submit" style={{ ...primaryBtn, marginTop: '15px' }}>ログイン</button>
-        </form>
-      </div>
-    );
-  }
+  // ロード中、または未認証時は表示しない（useEffectでのリダイレクトを待つ）
+if (loading || !isAuthorized) return null;
 
   // --- レンダリングパーツ ---
   const renderShopList = () => (

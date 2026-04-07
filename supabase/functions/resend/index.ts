@@ -83,9 +83,12 @@ const payload = await req.json();
 } = payload;
 
     const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? "";
-    const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? "";
+    // 🚀 さっき設定した名前に合わせる（SUPABASE_ を取る）
+    const SERVICE_ROLE_KEY = Deno.env.get('SERVICE_ROLE_KEY') ?? ""; 
     const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY');
-    const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+
+    // クライアント作成時も新しい変数名を使う
+    const supabaseAdmin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 
     // ==========================================
     // 🆕 パターンC：一斉リマインド送信 (本家ロジック完全維持 + カスタム対応)
@@ -229,59 +232,6 @@ const otpRes = await fetch('https://api.resend.com/emails', {
 }
 
 // ==========================================
-// 🆕 【ここを新しく追加！】パターンG：提携リクエスト通知
-// ==========================================
-if (type === 'partnership_approved') {
-  const { 
-    shopName, 
-    facilityName, 
-    shopEmail, 
-    facilityEmail,
-    shopId,
-    facilityId
-  } = payload;
-
-  const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY');
-
-  // メール送信用の共通テンプレート関数
-  const sendEmail = async (to: string, roleName: string, partnerName: string, targetUrl: string) => {
-    return await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${RESEND_API_KEY}` },
-      body: JSON.stringify({
-        from: 'QUEST HUB 通知センター <infec@snipsnap.biz>',
-        to: [to],
-        subject: `【提携成立】${partnerName} 様との提携が完了しました！`,
-        html: `
-          <div style="font-family: sans-serif; color: #333; line-height: 1.6; max-width: 550px; margin: 0 auto; border: 1px solid #4f46e5; padding: 25px; border-radius: 12px; border-top: 8px solid #4f46e5;">
-            <h2 style="color: #4f46e5; margin-top: 0; text-align: center;">🎉 提携おめでとうございます！</h2>
-            <p><strong>${roleName} 様</strong></p>
-            <p><strong>${partnerName} 様</strong> との提携が正式に完了しました。</p>
-            <div style="background: #f5f3ff; padding: 20px; border-radius: 10px; margin: 20px 0; text-align: center;">
-              <p style="margin-bottom: 15px; font-size: 0.9rem; color: #4338ca;">これから名簿の共有や、システムを通じた訪問予約が可能になります。</p>
-              <a href="${targetUrl}" style="display: inline-block; background: #4f46e5; color: #fff; padding: 12px 25px; border-radius: 8px; text-decoration: none; font-weight: bold;">管理画面を確認する</a>
-            </div>
-            <p style="font-size: 0.8rem; color: #94a3b8; text-align: center; border-top: 1px solid #eee; padding-top: 15px;">
-              QUEST HUB は円滑な施設訪問と質の高いサービス提供を応援します。
-            </p>
-          </div>`
-      })
-    });
-  };
-
-  // 🆕 B案：設定フラグの判定を削除し、アドレスがあれば必ず送る
-  if (facilityEmail) {
-    await sendEmail(facilityEmail, facilityName, shopName, `https://quest-hub-five.vercel.app/facility-login/${facilityId}`);
-  }
-
-  if (shopEmail) {
-    await sendEmail(shopEmail, shopName, facilityName, `https://quest-hub-five.vercel.app/admin/${shopId}/facilities`);
-  }
-
-  return new Response(JSON.stringify({ success: true }), { status: 200, headers: corsHeaders });
-}
-
-// ==========================================
 // 🆕 【ここを新しく追加！】パターンH：提携完了（承認）通知 
 // ==========================================
 if (type === 'partnership_approved') {
@@ -295,9 +245,9 @@ if (type === 'partnership_approved') {
   } = payload;
 
   const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? "";
-  const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? "";
+  const SERVICE_ROLE_KEY = Deno.env.get('SERVICE_ROLE_KEY') ?? "";
   const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY');
-  const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+  const supabaseAdmin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 
   // 1. 両方の通知設定（フラグ）をDBから取得
   const { data: sData } = await supabaseAdmin.from('profiles').select('email_notifications_enabled').eq('id', shopId).single();
@@ -447,9 +397,9 @@ if (type === 'inquiry') {
   } = payload;
 
   const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? "";
-  const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? "";
+  const SERVICE_ROLE_KEY = Deno.env.get('SERVICE_ROLE_KEY') ?? "";
   const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY');
-  const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+  const supabaseAdmin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 
   // 1. 店舗の設定（profile）を取得
   const { data: profile } = await supabaseAdmin.from('profiles').select('*').eq('id', shopId).single();
@@ -540,6 +490,79 @@ if (type === 'inquiry') {
 
   return new Response(JSON.stringify({ success: true }), { status: 200, headers: corsHeaders });
 }
+
+// ==========================================
+    // 🚀 🆕 パターンK：店舗アカウントの全自動発行（ここを新規追加！）
+    // (Auth作成 ➔ profiles登録 ➔ ウェルカムメール送信)
+    // ==========================================
+    if (type === 'CREATE_SHOP_FULL') {
+      const targetEmail = payload.email; // 届いたメアド
+      console.log(`[CREATE_SHOP_FULL] 開始: ${targetEmail}`);
+
+      // 1. Supabase Authアカウントの作成（管理者権限）
+      const passwordToUse = payload.password || Math.random().toString(36).slice(-10);
+      
+      const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
+        email: targetEmail,
+        password: passwordToUse,
+        email_confirm: true
+      });
+
+      if (authError) throw new Error(`Auth作成失敗: ${authError.message}`);
+      const userId = authData.user.id;
+
+      // --- 📝 B. profiles テーブルの「お引っ越し」 または 「新規登録」 ---
+      const { error: dbError } = await supabaseAdmin
+        .from('profiles')
+        .upsert([{
+          id: userId, // 🚀 ここが新しい Auth UID になる！
+          business_name: payload.shopName,
+          business_name_kana: payload.shopNameKana,
+          owner_name: payload.ownerName,
+          owner_name_kana: payload.ownerNameKana,
+          email_contact: targetEmail,
+          phone: payload.phone,
+          business_type: payload.businessType,
+          sub_business_type: payload.subBusinessType,
+          admin_password: passwordToUse, // 忘れないように保存
+          service_plan: 2,
+          is_management_enabled: true,
+          role: 'shop'
+        }], { 
+          onConflict: 'email_contact' // 📧 メアドが重なったら「更新」せよという命令
+        });
+
+      if (dbError) {
+        // DB登録に失敗したらAuthユーザーを消してリセット
+        await supabaseAdmin.auth.admin.deleteUser(userId);
+        throw new Error(`DB登録失敗: ${dbError.message}`);
+      }
+
+      // 3. ウェルカムメールの送信（Resend使用）
+      await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${RESEND_API_KEY}` },
+        body: JSON.stringify({
+          from: 'QUEST HUB 運営事務局 <infec@snipsnap.biz>',
+          to: [targetEmail],
+          subject: `【QUEST HUB】アカウント発行が完了しました（${payload.shopName}）`,
+          html: `
+            <div style="font-family: sans-serif; color: #1e293b; line-height: 1.6; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; padding: 30px; border-radius: 12px;">
+              <h2 style="color: #4f46e5; margin-top: 0;">QUEST HUB Biz へようこそ！</h2>
+              <p>${payload.ownerName} 様</p>
+              <p>店舗管理システム「QUEST HUB Biz」のアカウント発行が完了しました。</p>
+              <div style="background: #f1f5f9; padding: 20px; border-radius: 10px; margin: 25px 0;">
+                <p style="margin: 0;"><strong>● ログインURL:</strong><br><a href="${payload.originUrl}">${payload.originUrl}</a></p>
+                <p style="margin: 15px 0 0 0;"><strong>● メールアドレス:</strong><br>${targetEmail}</p>
+                <p style="margin: 5px 0 0 0;"><strong>● 初期パスワード:</strong><br><span style="color: #e11d48; font-weight: bold; font-size: 1.1rem;">${passwordToUse}</span></p>
+              </div>
+              <p style="font-size: 0.9rem;">ログイン後、「全般設定」よりパスワードの変更をお願いいたします。</p>
+            </div>`,
+        }),
+      });
+
+      return new Response(JSON.stringify({ success: true }), { status: 200, headers: corsHeaders });
+    }
 
     // ==========================================
     // 🚀 パターンA：店主様への歓迎メール ＆ 三土手さんへの通知送信 (本家ロジック完全維持)

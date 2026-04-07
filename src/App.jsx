@@ -119,34 +119,19 @@ function App() {
   element={<AdminFacilityVisit_PC />} 
 />
 
-{/* --- 📱 ユーザーエリア --- */}
+{/* --- 📱 ログイン・認証エリア --- */}
         <Route path="*" element={
-          <div className="mobile-container" style={{ margin: '0 auto', maxWidth: '480px', minHeight: '100vh', position: 'relative' }}>
-            <Routes>
-              <Route path="/" element={<Home />} />
-              {/* 🆕 追加：初期設定（ID決定）画面へのルート */}
-              <Route path="/setup" element={<InitialSetup />} /> 
-              
-              <Route path="/category/:categoryId" element={<ShopList />} />
-              <Route path="/trial-registration" element={<TrialRegistration />} />
-              <Route path="/shop/:shopId/detail" element={<ShopDetail />} />
-
-              {/* 🚀 🆕 お問い合わせフォームへのルートを追加 */}
-              <Route path="/shop/:shopId/inquiry" element={<InquiryForm />} />
-              
-              <Route path="/shop/:shopId" element={<ReservationForm />} /> 
-              <Route path="/shop/:shopId/reserve" element={<ReservationForm />} />
-              
-              {/* 🆕 ここを Calendar版に差し替え！ (旧: TimeSelection → 新: TimeSelectionCalendar) */}
-              <Route path="/shop/:shopId/reserve/time" element={<TimeSelectionCalendar />} />
-              
-              <Route path="/shop/:shopId/confirm" element={<ConfirmReservation />} />
-              <Route path="/cancel" element={<CancelReservation />} />
-              <Route path="/shop/:shopId/admin" element={<AdminDashboard />} />
-              <Route path="/admin/:shopId/timeline" element={<AdminTimeline />} />
-            </Routes>
-          </div>
-        } />
+  <div className="mobile-container" style={{ margin: '0 auto', maxWidth: '480px', minHeight: '100vh', position: 'relative' }}>
+    <Routes>
+      {/* 起動時は Home ではなくログイン画面を表示 */}
+      <Route path="/" element={<FacilityLogin />} /> 
+      
+      {/* ログイン後の遷移先（一例） */}
+      <Route path="/admin/:shopId/dashboard" element={<AdminDashboard />} />
+      <Route path="/super-admin" element={<SuperAdmin />} />
+    </Routes>
+  </div>
+} />
       </Routes>
     </Router>
   );

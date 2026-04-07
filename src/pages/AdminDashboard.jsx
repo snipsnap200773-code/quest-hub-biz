@@ -12,24 +12,39 @@ import {
 const AdminDashboard = () => {
   const { shopId } = useParams();
   const navigate = useNavigate();
+  const [pendingCount, setPendingCount] = useState(0);
   
   // 🆕 必須：これらが定義されていないとエラーになります
   const [shopData, setShopData] = useState(null);    // お店の基本情報
   const [isLoading, setIsLoading] = useState(true);  // ロード中フラグ
   const [isAuthorized, setIsAuthorized] = useState(false); // 認証フラグ
   const [inputPass, setInputPass] = useState('');    // 入力パスワード
-  const [pendingCount, setPendingCount] = useState(0); // 承認待ち件数
 
   // 🆕 お店の情報と承認待ち件数を取得するメイン処理
   const fetchData = async () => {
     setIsLoading(true);
+
+    // --- 🛡️ 門番：認証チェックエリア ---
+    const isShopAuth = sessionStorage.getItem(`auth_${shopId}`) === 'true';
+    const isSuperAuth = sessionStorage.getItem('auth_super') === 'true';
+
+    // 「お店のバトン」も「総括のバトン」も持っていない場合
+    if (!isShopAuth && !isSuperAuth) {
+      navigate('/'); // ログイン画面へ強制送還
+      return;        // 🛑 ここで処理を終了（下のデータ取得には進ませない）
+    }
+
+    // 認証OKなら、表示を許可してデータを取りに行く
+    setIsAuthorized(true);
+
+    // --- 📦 データ取得エリア ---
     try {
       // 1. お店の基本プロファイルを取得
       const { data: profile } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', shopId)
-        .single();
+        .maybeSingle(); // single() よりエラーになりにくい maybeSingle() を推奨
       
       if (profile) setShopData(profile);
 
@@ -43,10 +58,6 @@ const AdminDashboard = () => {
 
       setPendingCount(count || 0);
 
-      // 3. ログイン認証済みかチェック (sessionStorage)
-      const auth = sessionStorage.getItem(`auth_${shopId}`);
-      if (auth === 'true') setIsAuthorized(true);
-
     } catch (err) {
       console.error("データ取得エラー:", err);
     } finally {
@@ -57,18 +68,6 @@ const AdminDashboard = () => {
   useEffect(() => {
     fetchData();
   }, [shopId]);
-
-  // 🆕 ログイン処理
-  const handleLogin = (e) => {
-    e.preventDefault();
-    if (inputPass === shopData?.admin_password) {
-      sessionStorage.setItem(`auth_${shopId}`, 'true');
-      setIsAuthorized(true);
-    } else {
-      alert('パスワードが違います');
-      setInputPass('');
-    }
-  };
 
   const themeColor = shopData?.theme_color || '#2563eb';
 
@@ -110,28 +109,8 @@ const AdminDashboard = () => {
   // ロード中は何も出さない
   if (isLoading) return null;
 
-  // 認証されていない場合はログインフォームを表示
-  if (!isAuthorized) {
-    return (
-      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', backgroundColor: '#f0f2f5' }}>
-        <form onSubmit={handleLogin} style={{ background: '#fff', padding: '40px 30px', borderRadius: '20px', textAlign: 'center', width: '100%', maxWidth: '350px', boxShadow: '0 10px 25px rgba(0,0,0,0.05)' }}>
-          <h2 style={{ color: '#e60012', marginBottom: '10px', fontWeight: '900', fontSize: '1.4rem' }}>
-            {shopData?.business_name || 'QUEST HUB'}
-          </h2>
-          <p style={{ fontSize: '0.85rem', color: '#64748b', marginBottom: '25px', fontWeight: 'bold' }}>ADMIN LOGIN</p>
-          <input 
-            type="password" 
-            value={inputPass} 
-            onChange={(e) => setInputPass(e.target.value)} 
-            placeholder="管理者パスワード" 
-            style={smallInput} 
-            autoFocus 
-          />
-          <button type="submit" style={{ ...primaryBtn, marginTop: '20px' }}>ログイン</button>
-        </form>
-      </div>
-    );
-  }
+  // ロード中、または未認証時は何も出さない（navigate で飛ばされるため）
+  if (isLoading || !isAuthorized) return null;
 
   // ✅ ログイン成功時のみ表示されるダッシュボード本体
   return (
